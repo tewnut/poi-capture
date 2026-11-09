@@ -4,7 +4,6 @@ import org.json.JSONObject
 import java.time.Instant
 import kotlin.random.Random
 
-const val SCHEMA = "poi-capture/3"   // "road-capture/N" before app 0.8, same format
 
 /** Public catalogue of offline road packs (needs the repository to be public: release assets of private repos need a login). */
 const val DEFAULT_ROADPACK_INDEX = "https://github.com/tewnut/poi-capture/releases/download/roadpacks/index.json"

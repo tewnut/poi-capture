@@ -64,6 +64,7 @@ dependencies {
     implementation("androidx.camera:camera-view:$camerax")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
+    implementation(project(":shared"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     // reads the signboards of places on the phone (Latin script incl. Vietnamese). Model from Google Play services,

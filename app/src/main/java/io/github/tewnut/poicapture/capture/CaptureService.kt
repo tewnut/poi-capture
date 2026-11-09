@@ -86,6 +86,7 @@ import io.github.tewnut.poicapture.core.Remeasure
 import io.github.tewnut.poicapture.core.Side
 import io.github.tewnut.poicapture.core.Fix
 import io.github.tewnut.poicapture.core.BlurCheck
+import io.github.tewnut.poicapture.core.toJson
 import io.github.tewnut.poicapture.core.TrackStats
 import io.github.tewnut.poicapture.core.FixProcessor
 import io.github.tewnut.poicapture.core.Mode
@@ -109,7 +110,7 @@ import kotlin.math.atan
 import kotlin.math.roundToInt
 
 /** A photo, mark or video segment needs a GPS fix at most this old. */
-const val GPS_MAX_AGE_MS = 5_000L
+const val GPS_MAX_AGE_MS = io.github.tewnut.poicapture.core.CaptureRules.GPS_MAX_AGE_MS
 
 /** What the capture screen shows. */
 data class CaptureUi(

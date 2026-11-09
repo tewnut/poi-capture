@@ -122,6 +122,12 @@ photos and contributes them to the target map through that map's contribution to
     (0 / 90 / 180 / 270, the image is written upright for it; see also `exifOrientation`) and `hFovDeg`, the horizontal
     field of view of that frame (`session.camera.hFovDeg` in landscape, `session.camera.hFovPortraitDeg` in portrait).
     `session.plan` follows the orientation in use at the end of the session.
+  - **iPhone sessions** (`session.device.platform = "ios"`): Place capture only, same manifest. No track,
+    raw GNSS or IMU files (`trackFile`, `gnssRawFile`, `imuFile` null). `cameraBearing` comes from the motion sensors
+    (`cameraBearingSource: "compass"`); on LiDAR iPhones `facadeDistanceM` is measured (`facadeSource: "lidar"`,
+    median depth of the middle of the frame, up to about 5 m), else the on-foot default (`"onFoot"`, 5 m). iOS does
+    not say whether a position is GPS or Wi-Fi: photos only use fixes with GPS-grade accuracy (≤ 20 m), at most 5 s
+    old.
   - Per photo **blur**: `blur = {motionPx, maxMotionPx, sharpness, manualShutter, blurry}`. `motionPx` = speed ×
     exposure × focal length (px) ÷ facade distance (street sweep), `maxMotionPx` the budget for that photo's width;
     `sharpness` = variance of the Laplacian (scene dependent: compare within the session); `blurry` = too much motion

@@ -1,0 +1,54 @@
+# Every push and pull request: the shared Kotlin logic, the Android app and the iPhone app must build and pass their
+# tests. The iPhone app is only built here (macOS runner with Xcode): no signing, no upload.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Shared tests (JVM), Android tests, debug APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :shared:jvmTest :app:testDebugUnitTest :app:assembleDebug --console=plain
+
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Shared tests on the iOS simulator (Kotlin/Native)
+        run: |
+          chmod +x gradlew
+          ./gradlew :shared:iosSimulatorArm64Test --console=plain
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+      - name: Build the iPhone app for the simulator
+        run: |
+          xcodebuild -project ios/PoiCapture.xcodeproj -scheme PoiCapture -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build | tail -n 80
+          exit ${PIPESTATUS[0]}

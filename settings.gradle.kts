@@ -7,3 +7,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "poi-capture"
 include(":app")
+include(":shared")
