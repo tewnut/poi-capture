@@ -81,7 +81,7 @@ fun ProfileScreen(onDone: () -> Unit, onReplayOnboarding: () -> Unit) {
 
         var advanced by remember { mutableStateOf(false) }
         androidx.compose.material3.TextButton(onClick = { advanced = !advanced }) {
-            Text(if (advanced) "▾ Ẩn cài đặt nâng cao" else "▸ Cài đặt nâng cao (góc giá đỡ, loại ảnh, máy chủ)")
+            Text(if (advanced) "▾ Ẩn cài đặt nâng cao" else "▸ Cài đặt nâng cao (góc giá đỡ, loại ảnh)")
         }
         if (advanced) ProfileCard("Góc chếch giá đỡ (chỉnh tay)") {
             Hint("App tự đo hướng camera khi bạn tăng tốc / phanh vài lần. Chỉ chỉnh ở đây nếu app báo chưa đo được: " +
@@ -103,24 +103,6 @@ fun ProfileScreen(onDone: () -> Unit, onReplayOnboarding: () -> Unit) {
             }
             Hint("Không cần: hệ thống tự nhận ra ảnh nào là mặt tiền, biển hiệu, bên trong. Chỉ bật khi nhóm yêu cầu.")
             if (ask) PhotoRolesCard()
-        }
-
-        if (advanced) ProfileCard("Máy chủ nhận dữ liệu") {
-            Hint("Do quản lý cung cấp. Có máy chủ thì các phiên tự tải lên khi có Wi-Fi (tiếp tục được nếu mất mạng); " +
-                "không có thì gửi file zip qua Zalo / Drive như trước.")
-            OutlinedTextField(settings.uploadUrl, { settings = settings.copy(uploadUrl = it.trim()); save() },
-                label = { Text("Địa chỉ tải lên (tus)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("https://…/files/") })
-            OutlinedTextField(settings.uploadToken, { settings = settings.copy(uploadToken = it.trim()); save() },
-                label = { Text("Mã truy cập") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
-            OutlinedTextField(settings.apiUrl, { settings = settings.copy(apiUrl = it.trim()); save() },
-                label = { Text("Địa chỉ API (không bắt buộc)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("trạng thái xử lý, tuyến đã quét của nhóm") })
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Cho phép tải bằng 4G", modifier = Modifier.weight(1f), color = Palette.Ink)
-                androidx.compose.material3.Switch(settings.uploadOnMobileData, { settings = settings.copy(uploadOnMobileData = it); save() })
-            }
         }
 
         Button(onClick = {

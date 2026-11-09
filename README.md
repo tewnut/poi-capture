@@ -1,3 +1,5 @@
+<img src="docs/logo.svg" width="96" alt="POI Capture logo">
+
 # POI Capture (Android)
 
 An Android app for field contributors who put shops and other places on the map. Ride along a street with the phone
@@ -35,26 +37,27 @@ Two kinds of session, chosen on "Ghi mới":
    cách camera** 4 / 6 / 8 / 12 m, mode (**ảnh tự động**, **bấm tay**, **video**), then one **Bắt đầu** button.
    No vehicle and no side to choose: photo spacing (each sign on >= 2 photos) and the speed limit are computed from
    the facade distance and the camera's field of view; the side (right / left) is measured while riding.
-2. **Ghi**: full-screen rear camera, locked to landscape. A "Sẵn sàng?" checklist (GPS, camera, road data, mounting)
-   comes first; cancelling it discards the empty session. While recording: GPS accuracy, current road name, big photo
-   count, speed against the limit, camera direction ("đang nhận hướng camera…" until a few speed-ups / brakings, then
-   "Camera → PHẢI ✓ (chếch 8° về trước)"; red if it looks forward / backward), one warning at a time (too fast,
-   camera cannot keep up, weak GPS, phone overheating). **Bản đồ** switches
-   to a live map: track + a dot where each photo was taken + a small square for its estimated shop-front point; tap a
-   dot to see the photo and **Sửa vị trí** (tap the
-   right place, or drag the dot), **Về vị trí GPS** to undo. Capture keeps running meanwhile. Capture runs in a foreground service (camera + location), designed to
-   keep going with the screen off or another app on top, and to resume after a phone call (CameraX reopens the camera;
-   video continues as a new segment). Not yet tested on a device: see "Status" below.
+2. **Ghi**: full-screen rear camera, locked to landscape, kept minimal. A "Sẵn sàng?" checklist (GPS, camera, road data,
+   mounting) comes first; cancelling it discards the empty session. While recording, one line of plain text (GPS
+   accuracy · road name; riding: the camera direction until it is measured, or a red line if it looks forward /
+   backward), one warning at a time (too fast, camera cannot keep up, weak GPS, phone overheating) and "Kết thúc".
+   Riding: speed against the limit, "● Đang ghi", a big "★ Đánh dấu" (also the volume keys / a Bluetooth remote).
+   Places: "Chụp" and "Xong địa điểm" on the right rail, "Đọc được: …" from the sign. No map and no counters while
+   shooting: the map is in "Đã ghi". Capture runs in a foreground service (camera + location), designed to keep going
+   with the screen off or another app on top, and to resume after a phone call (CameraX reopens the camera; video
+   continues as a new segment).
 3. **Đã ghi**: "N phiên chưa gửi · km · MB" summary; each session shows date, duration, distance, count and a badge
-   (Chưa gửi / Đã gửi / Đang ghi / Trống); **Gửi** (share sheet: Zalo, Drive, email…), **Bản đồ** (check and correct
-   photo positions after the ride), and "Lưu file zip" / "Xoá" in the ⋮ menu. Sessions cut off by a crash or dead
+   (Chưa gửi / Đã gửi / Đang ghi / Trống); **Gửi** (share sheet: Zalo, Drive, email…: the contributor picks where it
+   goes), **Bản đồ** (track, a dot per photo, the estimated shop-front point; tap a dot to see the photo, **Sửa vị trí**
+   by tapping the right place or dragging the dot, **Về vị trí GPS** to undo), and "Lưu file zip" / "Xoá" in the ⋮ menu. Sessions cut off by a crash or dead
    battery show "bị gián đoạn" and still send.
 
 Safety: the phone is mounted; the app never needs a tap while riding in auto mode.
 
 ## Getting the data to VMAP
 
-- **Background upload** (when a server is set in Hồ sơ → Máy chủ nhận dữ liệu): every finished session is uploaded
+- **Background upload** (in the code, not in the UI since 0.9: sending is "Gửi" to the app the contributor picks;
+  a team server can be provisioned again later): with an upload URL set, every finished session is uploaded
   automatically over Wi-Fi (or 4G if allowed) with the tus resumable protocol: a lost connection resumes from where the
   server stopped, the zip is built once and verified by SHA-256. "Đã ghi" shows Chờ Wi-Fi / Đang tải x% / Đã tải lên /
   Cần tải lại (edited after upload) / Lỗi, and, with the optional API, what the agent found. Server contract:

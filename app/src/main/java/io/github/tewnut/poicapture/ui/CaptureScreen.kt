@@ -83,7 +83,6 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     val activity = ctx as Activity
     var service by remember { mutableStateOf<CaptureService?>(null) }
     var confirmEnd by remember { mutableStateOf(false) }
-    var showMap by remember { mutableStateOf(false) }
     val previewView = remember { PreviewView(ctx) }
 
     // landscape (wider horizontal field of view for shop fronts), screen kept on, service started while visible
@@ -109,14 +108,14 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     // preview only while the screen is visible; capture itself keeps running in the service
     val owner = LocalLifecycleOwner.current
     // (map mode: no preview either; capture keeps running)
-    DisposableEffect(owner, service, showMap) {
+    DisposableEffect(owner, service) {
         val s = service
         val obs = LifecycleEventObserver { _, e ->
-            if (e == Lifecycle.Event.ON_START && !showMap) s?.attachPreview(previewView.surfaceProvider)
+            if (e == Lifecycle.Event.ON_START) s?.attachPreview(previewView.surfaceProvider)
             if (e == Lifecycle.Event.ON_STOP) s?.attachPreview(null)
         }
         owner.lifecycle.addObserver(obs)
-        if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) s?.attachPreview(if (showMap) null else previewView.surfaceProvider)
+        if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) s?.attachPreview(previewView.surfaceProvider)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
     BackHandler { confirmEnd = true }
@@ -135,6 +134,12 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     var draft by remember { mutableStateOf(PoiDraft()) }          // what was typed in the sheet, kept across "Chụp thêm"
     var saved by remember { mutableStateOf<String?>(null) }       // "Đã lưu địa điểm N" for a few seconds
     LaunchedEffect(saved) { if (saved != null) { kotlinx.coroutines.delay(3000); saved = null } }
+    val marks = svc?.state?.collectAsState()?.value?.marks ?: 0
+    var lastMarks by remember { mutableStateOf(-1) }
+    LaunchedEffect(marks) {
+        if (lastMarks >= 0 && marks > lastMarks) saved = "★ Đã đánh dấu"
+        lastMarks = marks
+    }
 
     var thumb by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(ui.lastPhoto) {
@@ -154,24 +159,6 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             io.github.tewnut.poicapture.capture.Uploads.forget(ctx, id)
             onCancel()
         } else onDone()
-    }
-
-    if (showMap && session != null) {
-        // live map: track + a dot per photo where it was taken; tap a dot to see it and correct its position
-        Box(Modifier.fillMaxSize().background(Color.White)) {
-            SessionMap(session.id, refresh = ui.photos to ui.trackPoints / 5, live = true, modifier = Modifier.fillMaxSize())
-            Row(Modifier.fillMaxWidth().safeDrawingPadding().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Button(onClick = { showMap = false }) { Text("← Camera") }
-                GpsPill(ui)
-                RoadPill(ui, session)
-                Spacer(Modifier.weight(1f))
-                Pill(if (video) "${ui.videos} đoạn video" else "${ui.photos} ảnh", size = 18.sp, bold = true,
-                    dot = if (ui.running) Palette.Red else null)
-            }
-        }
-        if (confirmEnd) EndDialog(ui, video, { confirmEnd = false }, { confirmEnd = false; end(discardIfEmpty = false) })
-        return
     }
 
     if (reviewing && session != null) {
@@ -217,17 +204,11 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
         AndroidView({ previewView }, Modifier.fillMaxSize())
         if (flash) Box(Modifier.fillMaxSize().background(Color(0x77FFFFFF)))
 
-        // ---------- top: status (left), count + map + end (right) ----------
+        // ---------- top: status as plain text (left), "Kết thúc" (right) ----------
         Row(Modifier.fillMaxWidth().safeDrawingPadding().padding(10.dp), verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    GpsPill(ui)
-                    RoadPill(ui, session)
-                    if (!poiMode) MountPill(ui)
-                    if (ui.simulated) Pill("Vị trí giả lập", bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp)
-                }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatusText(ui, session, poiMode)
                 val alert = when {
                     ui.camera == "lost" -> "Camera đang bị app khác dùng (cuộc gọi…). Sẽ tự ghi tiếp khi camera trở lại."
                     ui.error.isNotEmpty() -> ui.error
@@ -240,19 +221,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                             .padding(horizontal = 12.dp, vertical = 8.dp))
                 }
             }
-            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Pill(if (poiMode) (if (ui.poiId != null) "Địa điểm ${ui.poiNumber} · ${ui.poiRoles.values.sum()} ảnh"
-                            else "Đã lưu ${ui.poiNumber} địa điểm") else if (video) "${ui.videos} đoạn video" else "${ui.photos} ảnh",
-                        size = 18.sp, bold = true, dot = if (ui.recording) Palette.Red else null)
-                    if (!notStarted) {
-                        DarkButton("Bản đồ") { showMap = true }
-                        DarkButton("Kết thúc") { confirmEnd = true }
-                    }
-                }
-                if (!poiMode && ui.marks > 0) Pill("★ ${ui.marks} đánh dấu", size = 13.sp)
-                if (!ui.running && !notStarted && !poiMode) Pill("Đang tạm dừng", bg = Palette.AmberLight, fg = Palette.Amber, size = 13.sp)
-            }
+            if (!notStarted) DarkButton("Kết thúc") { confirmEnd = true }
         }
 
         // ---------- right rail, under the thumb: the main actions ----------
@@ -316,8 +285,18 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
         }
         Row(Modifier.align(Alignment.BottomStart).safeDrawingPadding().padding(12.dp), verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!poiMode && !notStarted) Speed(ui)
-            if (!poiMode) thumb?.let { Image(it, "Ảnh vừa chụp", Modifier.size(96.dp, 54.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
+            if (!poiMode && !notStarted) {
+                Speed(ui)
+                ShadowText(if (ui.running) "● Đang ghi" else "Ⅱ Tạm dừng", color = if (ui.running) Color(0xFFFF6B6B) else Palette.AmberLight,
+                    size = 16.sp, modifier = Modifier.padding(bottom = 6.dp))
+            }
+        }
+
+        // ---------- riding: confirmation of a mark ----------
+        if (!poiMode) saved?.let {
+            Text(it, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.Center).background(Color(0xCC000000), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 16.dp, vertical = 10.dp))
         }
 
         // ---------- riding: which side is filmed ----------
@@ -346,6 +325,41 @@ private fun EndDialog(ui: CaptureUi, video: Boolean, onDismiss: () -> Unit, onEn
         confirmButton = { TextButton(onClick = onEnd) { Text("Kết thúc và lưu") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Ghi tiếp") } },
     )
+}
+
+/** Text over the camera picture: white with a dark shadow, no background (information, not a button). */
+@Composable
+private fun ShadowText(text: String, color: Color = Color.White, size: androidx.compose.ui.unit.TextUnit = 15.sp,
+                       modifier: Modifier = Modifier, bold: Boolean = true) {
+    Text(text, color = color, fontSize = size, fontWeight = if (bold) FontWeight.Bold else FontWeight.Medium, maxLines = 1,
+        overflow = TextOverflow.Ellipsis, modifier = modifier,
+        style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, androidx.compose.ui.geometry.Offset(0f, 2f), 6f)))
+}
+
+/** GPS, road and (riding) the camera direction on one or two lines of plain text. */
+@Composable
+private fun StatusText(ui: CaptureUi, session: Session?, poiMode: Boolean) {
+    val gps = when (ui.gps) {
+        "good" -> "● GPS ±${ui.accuracyM ?: "?"} m"
+        "weak" -> "● GPS yếu ±${ui.accuracyM ?: "?"} m"
+        "error" -> "● Lỗi GPS"
+        else -> "● Đang chờ GPS…"
+    }
+    val dot = when (ui.gps) { "good" -> Color(0xFF47CD89); "error" -> Palette.Red; else -> Color(0xFFFEC84B) }
+    val road = when {
+        ui.roadName != null -> ui.roadName
+        session?.road?.auto == true && ui.roadData == "loading" -> null
+        else -> null
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        ShadowText(gps.take(1), color = dot)
+        ShadowText(gps.drop(1) + (road?.let { " · $it" } ?: "") + (if (ui.simulated) " · vị trí giả lập" else ""))
+    }
+    if (!poiMode) when (ui.mount) {
+        "right", "left" -> {}
+        "front", "back" -> ShadowText("Camera đang nhìn về phía ${if (ui.mount == "front") "trước" else "sau"}: xoay sang dãy nhà!", color = Color(0xFFFF6B6B))
+        else -> ShadowText("Đang nhận hướng camera… (tăng tốc / phanh vài lần)", color = Palette.AmberLight, size = 13.sp, bold = false)
+    }
 }
 
 @Composable

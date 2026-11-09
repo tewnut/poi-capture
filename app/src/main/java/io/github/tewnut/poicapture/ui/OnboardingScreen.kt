@@ -326,7 +326,7 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
             Summary(packs.isNotEmpty(), if (packs.isNotEmpty()) "Dữ liệu đường: ${packs.joinToString(", ")}" else "Dữ liệu đường: lấy qua mạng khi ghi",
                 if (packs.isNotEmpty()) null else "Gói đang tải (nếu bạn đã chọn) sẽ dùng được khi tải xong.")
         }
-        Hint("Máy chủ nhận dữ liệu (nếu có) do quản lý cung cấp, nhập ở Hồ sơ. Chưa có thì gửi file zip qua Zalo / Drive.")
+        Hint("Ghi xong, vào “Đã ghi” để xem lại trên bản đồ và gửi (Zalo, Drive, email…).")
     }
 }
 
