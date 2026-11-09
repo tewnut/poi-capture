@@ -159,3 +159,22 @@ object RoadData {
         return null
     }
 }
+
+/** What to tell the user when the pack catalogue (index.json) cannot be fetched. */
+object CatalogueError {
+    /**
+     * GitHub answers a missing release asset with 504, not 404, so on a GitHub release URL a 504 nearly always means
+     * "nothing published there yet" rather than a real gateway timeout.
+     */
+    fun forHttp(code: Int, url: String): String {
+        val githubRelease = url.contains("github.com/") && url.contains("/releases/download/")
+        return when {
+            code == 404 || code == 410 || (code == 504 && githubRelease) ->
+                "nguồn này chưa phát hành gói nào (HTTP $code). Với nguồn mặc định, gói có sau khi quản trị chạy " +
+                    "workflow “roadpacks”; trong lúc chờ có thể dùng “Nhập file gói…”."
+            code == 401 || code == 403 -> "nguồn gói không cho truy cập (HTTP $code), kiểm tra địa chỉ hoặc quyền xem."
+            code >= 500 -> "máy chủ nguồn gói đang lỗi (HTTP $code), thử lại sau."
+            else -> "máy chủ trả HTTP $code."
+        }
+    }
+}

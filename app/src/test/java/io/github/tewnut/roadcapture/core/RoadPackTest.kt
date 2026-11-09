@@ -14,6 +14,21 @@ import java.io.IOException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
+class CatalogueErrorTest {
+    private val gh = "https://github.com/o/r/releases/download/roadpacks/index.json"
+    private val other = "https://example.org/packs/index.json"
+
+    @Test fun githubMissingReleaseIsNotATimeout() {
+        assertTrue(CatalogueError.forHttp(504, gh).contains("chưa phát hành"))
+        assertTrue(CatalogueError.forHttp(404, other).contains("chưa phát hành"))
+    }
+
+    @Test fun otherServersKeepTheGatewayMeaning() {
+        assertTrue(CatalogueError.forHttp(504, other).contains("thử lại sau"))
+        assertTrue(CatalogueError.forHttp(403, gh).contains("không cho truy cập"))
+    }
+}
+
 /** Offline road packs: the fixture is built by tools/roadpack/build_roadpacks.py from tools/roadpack/test/fixture.osm. */
 class RoadPackTest {
     @get:Rule val tmp = TemporaryFolder()

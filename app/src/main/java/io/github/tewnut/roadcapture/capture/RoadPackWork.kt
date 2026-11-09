@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import io.github.tewnut.roadcapture.Prefs
+import io.github.tewnut.roadcapture.core.CatalogueError
 import io.github.tewnut.roadcapture.core.UploadJob
 import io.github.tewnut.roadcapture.net.RoadSource
 import java.io.File
@@ -98,7 +99,12 @@ object RoadPackCatalogue {
         try {
             c.connectTimeout = 15_000
             c.readTimeout = 30_000
-            if (c.responseCode != 200) throw IOException("HTTP ${c.responseCode}")
+            val code = try { c.responseCode } catch (e: java.net.UnknownHostException) {
+                throw IOException("không có mạng hoặc sai địa chỉ (${e.message}).")
+            } catch (e: java.net.SocketTimeoutException) {
+                throw IOException("máy chủ nguồn gói không phản hồi, thử lại sau.")
+            }
+            if (code != 200) throw IOException(CatalogueError.forHttp(code, url))
             val body = c.inputStream.bufferedReader().readText()
             val list = RoadSource.parseCatalogue(body, url)
             RoadSource.saveCatalogue(ctx, url, body)
