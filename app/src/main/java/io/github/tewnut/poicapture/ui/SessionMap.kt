@@ -1,5 +1,8 @@
 package io.github.tewnut.poicapture.ui
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import android.graphics.BitmapFactory
 import android.graphics.drawable.GradientDrawable
 import androidx.compose.foundation.Image
@@ -129,7 +132,7 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
 
     val sel = pins.firstOrNull { it.id == selected }
     Box(modifier) {
-        PinsMap(pins, track, selected, live,
+        PinsMap(pins, track, selected, live, relocating,
             onSelect = { selected = it; relocating = false },
             onMapTap = { p -> val s = selected; if (relocating && s != null) move(s, p) },
             onDragged = { id, p -> move(id, p) },
@@ -156,6 +159,7 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun PhotoPanel(sessionId: String, p: PhotoPin, idx: Int, count: Int, relocating: Boolean,
                        onPrev: () -> Unit, onNext: () -> Unit, onRelocate: () -> Unit, onReset: () -> Unit, onClose: () -> Unit,
@@ -168,11 +172,19 @@ private fun PhotoPanel(sessionId: String, p: PhotoPin, idx: Int, count: Int, rel
             BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = 4 })?.asImageBitmap()
         }
     }
+    var big by remember(p.id) { mutableStateOf(false) }
+    if (big) androidx.compose.ui.window.Dialog(onDismissRequest = { big = false },
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black).clickable { big = false }) {
+            thumb?.let { Image(it, "Ảnh ${idx + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
+            Pill("Chạm để đóng", Modifier.align(Alignment.TopCenter).padding(16.dp))
+        }
+    }
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 10.dp) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(160.dp, 90.dp).border(1.dp, Color(0xFFD0D5DD), RoundedCornerShape(8.dp))) {
-                    thumb?.let { Image(it, "Ảnh ${idx + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
+                Box(Modifier.size(112.dp, 63.dp).border(1.dp, Color(0xFFD0D5DD), RoundedCornerShape(8.dp)).clickable { big = true }) {
+                    thumb?.let { Image(it, "Ảnh ${idx + 1}, chạm để xem lớn", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text("Ảnh ${idx + 1}/$count · ${time(p.tMs)}", fontWeight = FontWeight.Bold, color = Palette.Ink)
@@ -181,14 +193,16 @@ private fun PhotoPanel(sessionId: String, p: PhotoPin, idx: Int, count: Int, rel
                         color = if (p.fixed != null) Palette.Amber else Palette.Muted)
                     p.facadeDistanceM?.let { Hint("■ điểm mặt tiền ước tính, cách ${it.toInt()} m", color = Palette.Muted) }
                 }
-                TextButton(onClick = onClose) { Text("Đóng") }
+                androidx.compose.material3.IconButton(onClick = onClose) { Text("✕", fontSize = 18.sp, color = Palette.Muted) }
             }
             if (relocating) Hint("Chạm vào đúng vị trí trên bản đồ (hoặc giữ và kéo chấm xanh).", color = Palette.Blue)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onPrev, enabled = idx > 0) { Text("‹") }
-                OutlinedButton(onClick = onNext, enabled = idx < count - 1) { Text("›") }
-                Button(onClick = onRelocate) { Text(if (relocating) "Huỷ sửa" else "Sửa vị trí") }
-                if (p.fixed != null && !relocating) TextButton(onClick = onReset) { Text("Về vị trí GPS") }
+            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onPrev, enabled = idx > 0, modifier = Modifier.size(56.dp, 48.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("◀", fontSize = 18.sp) }
+                OutlinedButton(onClick = onNext, enabled = idx < count - 1, modifier = Modifier.size(56.dp, 48.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("▶", fontSize = 18.sp) }
+                Button(onClick = onRelocate, modifier = Modifier.height(48.dp)) { Text(if (relocating) "Huỷ sửa" else "Sửa vị trí", maxLines = 1) }
+                if (p.fixed != null && !relocating) TextButton(onClick = onReset, modifier = Modifier.height(48.dp)) { Text("Về vị trí GPS", maxLines = 1) }
             }
         }
     }
@@ -204,12 +218,14 @@ private fun dot(color: Int, sizeDp: Int, density: Float) = GradientDrawable().ap
 }
 
 @Composable
-private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?, live: Boolean,
+private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?, live: Boolean, relocating: Boolean,
                     onSelect: (String) -> Unit, onMapTap: (LatLon) -> Unit, onDragged: (String, LatLon) -> Unit, modifier: Modifier) {
     val ctx = LocalContext.current
     val select by rememberUpdatedState(onSelect)
     val tap by rememberUpdatedState(onMapTap)
     val dragged by rememberUpdatedState(onDragged)
+    val moving by rememberUpdatedState(relocating)
+    val allPins by rememberUpdatedState(pins)
     val tileUrl = remember { Prefs.settings(ctx).tileUrl }
     val density = ctx.resources.displayMetrics.density
     val icons = remember {
@@ -247,7 +263,22 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
     AndroidView({ map }, modifier) { m ->
         m.overlays.clear()
         m.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
-            override fun singleTapConfirmedHelper(p: GeoPoint): Boolean { tap(LatLon(p.latitude, p.longitude)); return true }
+            override fun singleTapConfirmedHelper(p: GeoPoint): Boolean {
+                // dots are small and close together: a tap selects the nearest one within ~28 dp
+                if (!moving) {
+                    val at = m.projection.toPixels(p, null)
+                    val near = allPins.minByOrNull { pin ->
+                        val q = m.projection.toPixels(GeoPoint(pin.at.lat, pin.at.lon), null)
+                        (q.x - at.x).toDouble().let { it * it } + (q.y - at.y).toDouble().let { it * it }
+                    }
+                    if (near != null) {
+                        val q = m.projection.toPixels(GeoPoint(near.at.lat, near.at.lon), null)
+                        val d = Math.hypot((q.x - at.x).toDouble(), (q.y - at.y).toDouble())
+                        if (d <= 28 * density) { select(near.id); return true }
+                    }
+                }
+                tap(LatLon(p.latitude, p.longitude)); return true
+            }
             override fun longPressHelper(p: GeoPoint): Boolean = false
         }))
         if (track.size > 1) {
@@ -258,7 +289,7 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
             })
         }
         // estimated shop-front points (on the building side), with a line from the camera for the selected photo
-        for (p in pins) {
+        for (p in pins.filter { it.id == selected }) {   // only for the selected photo: dozens of squares hide the dots
             val fc = p.facade ?: continue
             if (p.id == selected) m.overlays.add(Polyline(m).apply {
                 setPoints(listOf(GeoPoint(p.at.lat, p.at.lon), GeoPoint(fc.lat, fc.lon)))
@@ -281,7 +312,7 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
                 icon = icons[if (isSel) "sel" else if (p.fixed != null) "fixed" else "gps"]
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                 setInfoWindow(null)
-                isDraggable = isSel
+                isDraggable = isSel && relocating   // only in "Sửa vị trí": a long press while panning must not move a photo
                 setOnMarkerClickListener { _, _ -> select(p.id); true }
                 setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
                     override fun onMarkerDrag(marker: Marker) {}

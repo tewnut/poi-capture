@@ -49,6 +49,7 @@ import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.core.Settings
+import io.github.tewnut.poicapture.core.PhotoRoles
 import io.github.tewnut.poicapture.core.Vehicle
 import io.github.tewnut.poicapture.ui.CaptureScreen
 import io.github.tewnut.poicapture.ui.Palette
@@ -75,6 +76,18 @@ class MainActivity : ComponentActivity() {
             )) { App() }
         }
     }
+
+    private fun captureKey(keyCode: Int) = CaptureKeys.handler != null && keyCode in setOf(
+        android.view.KeyEvent.KEYCODE_VOLUME_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_UP, android.view.KeyEvent.KEYCODE_CAMERA)
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if (!captureKey(keyCode)) return super.onKeyDown(keyCode, event)
+        if (event.repeatCount == 0) CaptureKeys.handler?.invoke()
+        return true
+    }
+
+    override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent): Boolean =
+        if (captureKey(keyCode)) true else super.onKeyUp(keyCode, event)
 }
 
 /** Per-device profile and settings (SharedPreferences). */
@@ -91,8 +104,38 @@ object Prefs {
     fun saveEmail(ctx: Context, v: String) = sp(ctx).edit().putString("email", v).apply()
     fun onboarded(ctx: Context): Boolean = sp(ctx).getBoolean("onboarded", false)
     fun setOnboarded(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("onboarded", v).apply()
+
+    /** Photo kinds of POI mode: the team's (server), the contributor's own list (Hồ sơ), else the built-in default. */
+    fun photoRoles(ctx: Context): PhotoRoles = sp(ctx).getString("photoRoles", null)?.let { s ->
+        runCatching { JSONObject(s).let { PhotoRoles.fromJson(it, it.optString("source", "local")) } }.getOrNull()
+    } ?: PhotoRoles.DEFAULT
+    fun savePhotoRoles(ctx: Context, r: PhotoRoles?) = sp(ctx).edit().apply {
+        if (r == null || r.source == "default") remove("photoRoles") else putString("photoRoles", r.toJson().toString())
+    }.apply()
+
+    /**
+     * Fetch the team's config when a server API is set ({apiUrl}/config). A config from the server replaces the
+     * contributor's own list; when the server no longer sends one, the phone goes back to its default.
+     */
+    fun refreshConfig(ctx: Context): Boolean {
+        if (settings(ctx).apiUrl.isBlank()) {
+            if (photoRoles(ctx).source == "server") savePhotoRoles(ctx, null)
+            return false
+        }
+        val roles = io.github.tewnut.poicapture.capture.ServerApi.config(ctx) ?: return false
+        savePhotoRoles(ctx, roles)
+        return true
+    }
     fun vehicle(ctx: Context): Vehicle = Vehicle.of(sp(ctx).getString("vehicle", null))
     fun saveVehicle(ctx: Context, v: Vehicle) = sp(ctx).edit().putString("vehicle", v.json).apply()
+}
+
+/**
+ * Hardware keys while capturing: the volume keys (and Bluetooth selfie remotes, which send volume-up) shoot or mark,
+ * so a rider can point out a shop from the handlebar without touching the screen. Set by the capture screen.
+ */
+object CaptureKeys {
+    @Volatile var handler: (() -> Unit)? = null
 }
 
 @Composable
@@ -108,8 +151,11 @@ private fun App() {
     LaunchedEffect(Unit) {
         // the app was reopened while a session is still recording in the background: go back to it
         CaptureService.activeSession.value?.let { capturing = it }
-        // sessions finished earlier (or cut off) that are not on the server yet
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { io.github.tewnut.poicapture.capture.Uploads.enqueuePending(ctx) }
+        // sessions finished earlier (or cut off) that are not on the server yet; the team's config
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            io.github.tewnut.poicapture.capture.Uploads.enqueuePending(ctx)
+            runCatching { Prefs.refreshConfig(ctx) }
+        }
     }
     LaunchedEffect(onboarded) {
         if (!onboarded) return@LaunchedEffect   // the onboarding asks, with the reasons

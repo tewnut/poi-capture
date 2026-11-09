@@ -69,20 +69,24 @@ object Exporter {
     }
 
     /**
-     * POI mode: each place with its photo ids (creation order) and its cover = the first front photo, else the first
-     * sign photo, else the first photo. Places without any photo are kept, flagged `noPhotos`.
+     * POI mode: each place with its photo ids (creation order) and its cover = the first photo of the cover role of
+     * the session's photo kinds ("Mặt tiền" by default), else the first photo in the order of the kinds, else the first
+     * photo. Places without any photo are kept, flagged `noPhotos`.
      */
-    fun poisWithPhotos(store: SessionStore, sessionId: String, items: List<JSONObject>): List<JSONObject> =
-        store.pois(sessionId).map { poi ->
+    fun poisWithPhotos(store: SessionStore, sessionId: String, items: List<JSONObject>): List<JSONObject> {
+        val roles = store.load(sessionId)?.photoRoles ?: PhotoRoles.DEFAULT
+        val rank = roles.roles.mapIndexed { i, r -> r.id to i }.toMap()
+        return store.pois(sessionId).map { poi ->
             val id = poi.getString("id")
             val photos = items.filter { it.optString("poiId") == id && it.optString("kind") == "photo" }
-            val cover = photos.firstOrNull { it.optString("role") == PhotoRole.FACADE.json }
-                ?: photos.firstOrNull { it.optString("role") == PhotoRole.SIGN.json } ?: photos.firstOrNull()
+            val cover = photos.firstOrNull { it.optString("role") == roles.cover.id }
+                ?: photos.filter { it.optString("role") in rank }.minByOrNull { rank.getValue(it.optString("role")) } ?: photos.firstOrNull()
             JSONObject(poi.toString())
                 .put("photos", JSONArray(photos.map { it.getString("id") }))
                 .put("cover", cover?.getString("id") ?: JSONObject.NULL)
                 .also { if (photos.isEmpty()) it.put("noPhotos", true) }
         }
+    }
 
     /** Sweep mode: each "Đánh dấu" with the photos taken within ±5 s of it (the place the contributor pointed out). */
     fun marksWithPhotos(store: SessionStore, sessionId: String, items: List<JSONObject>): List<JSONObject> =

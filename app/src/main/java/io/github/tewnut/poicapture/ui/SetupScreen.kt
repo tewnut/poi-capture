@@ -1,5 +1,9 @@
 package io.github.tewnut.poicapture.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import io.github.tewnut.poicapture.core.Onboarding
 import android.Manifest
 import android.content.Context
@@ -105,13 +109,22 @@ private fun deviceJson(ctx: Context): JSONObject {
  * "Ghi mới": always the right-hand row of buildings, road recognised automatically while riding. The contributor only
  * checks GPS, picks how to record, and presses Start.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
     val ctx = LocalContext.current
     val settings = remember { Prefs.settings(ctx) }
     val email = remember { Prefs.email(ctx) }
     val contributor = remember { Onboarding.displayName(Prefs.contributor(ctx), email) }
-    val live = rememberLiveLocation()
+    val loc = rememberLocationState()
+    val live = loc.live   // a current fix: road, suggestions; the map may show a remembered one
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        if (res.values.any { !it }) {
+            Toast.makeText(ctx, "Cần quyền camera và vị trí chính xác. Mở Cài đặt → Quyền để bật.", Toast.LENGTH_LONG).show()
+            ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.fromParts("package", ctx.packageName, null)))
+        }
+    }
     // "đã quét": where this phone (and, with the server API, the team) already recorded, to go where nothing is yet
     var showCoverage by remember { mutableStateOf(true) }
     var mine by remember { mutableStateOf(CoverLayer()) }
@@ -179,20 +192,27 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         // ---------- map ----------
-        Box(Modifier.weight(0.5f).heightIn(min = 150.dp).fillMaxWidth()) {
-            LiveMap(settings.tileUrl, live, recenter, if (showCoverage) mine else CoverLayer(), if (showCoverage) team else CoverLayer(),
+        Box(Modifier.weight(0.38f).heightIn(min = 150.dp).fillMaxWidth()) {
+            LiveMap(settings.tileUrl, loc.fix, recenter, if (showCoverage) mine else CoverLayer(), if (showCoverage) team else CoverLayer(),
                 Modifier.fillMaxSize().clipToBounds())
             if (mine.lines.isNotEmpty() || mine.points.isNotEmpty() || team.lines.isNotEmpty()) {
                 androidx.compose.material3.FilterChip(showCoverage, { showCoverage = !showCoverage },
-                    { Text(if (team.lines.isNotEmpty()) "Đã quét: xanh = bạn · tím = nhóm" else "Đã quét (của bạn)", fontSize = 12.sp) },
+                    { Text(if (team.lines.isNotEmpty()) "Đã quét · tím = nhóm" else "Đã quét", fontSize = 12.sp) },
                     modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
                     colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(containerColor = Color.White, selectedContainerColor = Palette.GreenLight))
             }
             Column(Modifier.align(Alignment.TopStart).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                when {
-                    live == null -> Pill("Đang tìm vị trí GPS…", dot = Color(0xFFFEC84B))
-                    live.accuracyM <= settings.maxAccuracyM -> Pill("GPS tốt · ±${live.accuracyM.roundToInt()} m", dot = Color(0xFF47CD89))
-                    else -> Pill("GPS yếu · ±${live.accuracyM.roundToInt()} m", dot = Color(0xFFFEC84B))
+                when (loc.status) {
+                    LocStatus.NO_PERMISSION -> Pill("Chưa cho phép vị trí", dot = Palette.Red)
+                    LocStatus.APPROXIMATE_ONLY -> Pill("Chỉ có vị trí gần đúng", dot = Palette.Red)
+                    LocStatus.DISABLED -> Pill("Vị trí của máy đang tắt", dot = Palette.Red)
+                    LocStatus.SEARCHING -> Pill("Đang tìm vị trí" + (if (loc.satsSeen > 0) " · ${loc.satsUsed}/${loc.satsSeen} vệ tinh" else "…"),
+                        dot = Color(0xFFFEC84B))
+                    LocStatus.OK -> live!!.let { l ->
+                        if (!l.gps) Pill("Vị trí từ Wi-Fi / sóng · ±${l.accuracyM.roundToInt()} m, đang chờ GPS", dot = Color(0xFFFEC84B))
+                        else if (l.accuracyM <= settings.maxAccuracyM) Pill("GPS tốt · ±${l.accuracyM.roundToInt()} m", dot = Color(0xFF47CD89))
+                        else Pill("GPS yếu · ±${l.accuracyM.roundToInt()} m", dot = Color(0xFFFEC84B))
+                    }
                 }
                 if (live?.simulated == true) {
                     Pill("Máy ảo: vị trí giả lập, không phải GPS thật", bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp)
@@ -205,17 +225,18 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
         }
 
         // ---------- what will happen + Start ----------
-        Surface(Modifier.weight(0.5f), shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
+        Surface(Modifier.weight(0.62f), shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
             Column(Modifier.fillMaxSize()) {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LocationHelp(loc)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         KindCard("Quét đường", "Chạy xe, app tự chụp dãy nhà", kind == SessionKind.SWEEP, Modifier.weight(1f)) { kind = SessionKind.SWEEP }
                         KindCard("Chụp địa điểm", "Dừng lại, chụp kỹ từng cửa hàng", kind == SessionKind.POI, Modifier.weight(1f)) { kind = SessionKind.POI }
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Hint("Bạn đang ở")
-                        Text(currentRoad ?: if (live == null) "Đang tìm vị trí…" else "Chưa nhận ra đường",
+                        Text(currentRoad ?: if (live == null) "Chờ vị trí…" else "Chưa nhận ra đường",
                             fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink)
                         Hint(roadStatus.ifEmpty { "Tên đường được tự nhận khi bạn chạy, rẽ sang đường khác cũng được." } +
                             when {
@@ -226,11 +247,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                         // outside every installed pack, but the catalogue has one here: suggest it (computed off the UI thread)
                         val suggest = packSuggestion
                         if (suggest != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Hint("Tải dữ liệu đường “${suggest.name}” (${String.format(Locale.ROOT, "%.0f", suggest.bytes / 1048576.0)} MB) để nhận tên đường không cần mạng.",
-                                    Modifier.weight(1f), Palette.Blue)
-                                TextButton(onClick = onOpenProfile) { Text("Tải") }
-                            }
+                            Hint("Tải dữ liệu đường của vùng này để nhận tên đường cả khi mất mạng:", color = Palette.Blue)
+                            PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null })
                         }
                     }
                     if (kind == SessionKind.POI) {
@@ -239,42 +257,43 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                             "Ảnh đã được gắn sẵn với địa điểm, không cần xử lý tách ảnh sau.")
                     } else {
                     Text("Mặt tiền cách camera khoảng", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (d in (listOf(4.0, 6.0, 8.0, 12.0) + settings.facadeDistanceM).distinct().sorted()) {
-                            FilterChip(facade == d, { facade = d }, { Text("${d.roundToInt()} m") })
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (d in (listOf(4, 6, 8, 12) + settings.facadeDistanceM.roundToInt()).distinct().sorted()) {
+                            FilterChip(facade.roundToInt() == d, { facade = d.toDouble() }, { Text("$d m") })
                         }
                     }
                     Hint("Phố hẹp, đi sát lề: 4 m · phố thường: 6 m · vỉa hè rộng: 8 m · đại lộ: 12 m. " +
                         "Giúp đặt địa điểm đúng vào tòa nhà.")
                     Text("Cách ghi", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(mode == Mode.PHOTO_AUTO, { mode = Mode.PHOTO_AUTO }, { Text("Ảnh tự động") })
                         FilterChip(mode == Mode.PHOTO_MANUAL, { mode = Mode.PHOTO_MANUAL }, { Text("Bấm tay") })
                         FilterChip(mode == Mode.VIDEO, { mode = Mode.VIDEO }, { Text("Video") })
                     }
                     Hint(when (mode) {
                         Mode.PHOTO_AUTO -> "1 ảnh mỗi ${String.format(Locale.ROOT, "%.1f", plan.photoEveryM)} m (mỗi biển hiệu có trong ≥ 2 ảnh) · chạy tối đa ${plan.maxSpeedKmh} km/h"
-                        Mode.PHOTO_MANUAL -> "Bấm nút chụp khi thấy biển hiệu · chạy tối đa ${plan.maxSpeedKmh} km/h"
+                        Mode.PHOTO_MANUAL -> "Chụp bằng nút âm lượng hoặc nút bấm Bluetooth trên tay lái, không cần chạm màn hình · chạy tối đa ${plan.maxSpeedKmh} km/h"
                         Mode.VIDEO -> "Quay liên tục · chạy tối đa ${plan.maxSpeedKmh} km/h"
                     })
                     Hint("Gắn máy chắc, nằm ngang, camera nhìn sang dãy nhà cần ghi. App tự nhận bên (phải/trái) khi bạn chạy. " +
                         "Bấm ★ Đánh dấu khi đi qua cửa hàng đáng chú ý.")
                     }
+                }
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     if (!ready) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Hint("Chưa có email người ghi.", Modifier.weight(1f), Palette.Amber)
+                            Hint("Cần email người ghi trước khi bắt đầu.", Modifier.weight(1f), Palette.Amber)
                             TextButton(onClick = onOpenProfile) { Text("Nhập email") }
                         }
                     }
-                }
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     Button(
                         enabled = ready,
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         onClick = {
                             if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED ||
                                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                                Toast.makeText(ctx, "Cần cấp quyền camera và vị trí chính xác (Cài đặt → Ứng dụng).", Toast.LENGTH_LONG).show()
+                                permLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION))
                                 return@Button
                             }
                             if (CaptureService.activeSession.value != null) {
@@ -285,7 +304,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                             val s = Session(id = uid("s_", now), createdAt = iso(now), contributor = contributor, note = "",
                                 vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else mode,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
-                                settings = settings.copy(facadeDistanceM = facade), device = deviceJson(ctx), kind = kind, email = email)
+                                settings = settings.copy(facadeDistanceM = facade), device = deviceJson(ctx), kind = kind, email = email,
+                                photoRoles = if (kind == SessionKind.POI) Prefs.photoRoles(ctx) else null)
                             CaptureService.store(ctx).create(s)
                             onStart(s.id)
                         },

@@ -1,5 +1,6 @@
 package io.github.tewnut.poicapture.ui
 
+import androidx.compose.foundation.layout.size
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -198,7 +199,13 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
                     )
                     Hint("Dữ liệu chỉ nằm trong máy tới khi bạn gửi. Còn trống ${mb(store.root.apply { mkdirs() }.usableSpace)}.")
                 }
-                if (msg.isNotEmpty()) Hint(msg, color = Palette.Green)
+                if (msg.isNotEmpty()) Hint(msg, color = if (msg.startsWith("Lưu không được") || msg.startsWith("Không đóng gói")) Palette.Red else Palette.Green)
+            }
+        }
+        if (list == null) item {
+            Row(Modifier.padding(vertical = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                Hint("Đang đọc các phiên đã ghi…")
             }
         }
         if (list != null && list.isEmpty()) {
@@ -225,8 +232,24 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmDel = null },
             title = { Text("Xoá phiên này?") },
-            text = { Text(if (s.exportedAt == null) "Phiên CHƯA được gửi. Ảnh và video sẽ mất hẳn." else "Ảnh và video trong máy sẽ bị xoá.") },
-            confirmButton = { TextButton(onClick = { store.delete(s.id); Uploads.forget(ctx, s.id); confirmDel = null; msg = "Đã xoá phiên."; reload++ }) { Text("Xoá", color = Palette.Red) } },
+            text = {
+                val up = uploads[s.id]
+                Text(when {
+                    up != null && up.first.state == "uploaded" && !up.second -> "Phiên đã tải lên máy chủ. Chỉ xoá bản trong máy."
+                    up != null && up.first.state == "uploaded" -> "Phiên đã tải lên, nhưng các sửa đổi sau đó CHƯA được tải lại. Xoá thì mất các sửa đổi này."
+                    s.exportedAt != null -> "Phiên đã được gửi. Ảnh và video trong máy sẽ bị xoá."
+                    else -> "Phiên CHƯA được gửi hay tải lên. Ảnh và video sẽ mất hẳn."
+                })
+            },
+            confirmButton = { TextButton(onClick = {
+                confirmDel = null
+                msg = "Đang xoá…"
+                scope.launch {
+                    withContext(Dispatchers.IO) { store.delete(s.id); Uploads.forget(ctx, s.id) }
+                    msg = "Đã xoá phiên."
+                    reload++
+                }
+            }) { Text("Xoá", color = Palette.Red) } },
             dismissButton = { TextButton(onClick = { confirmDel = null }) { Text("Không") } },
         )
     }
@@ -242,8 +265,18 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
     Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(1.dp)) {
         Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(r.title, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.Ink, maxLines = 1,
+                Text(r.title, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.Ink, maxLines = 2,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Box {
+                    IconButton(onClick = { menu = true }, enabled = !recording && !busy) { Icon(Icons.Filled.MoreVert, "Thêm") }
+                    DropdownMenu(menu, { menu = false }) {
+                        if (!empty && upload != null) DropdownMenuItem({ Text("Gửi qua ứng dụng khác") }, { menu = false; onSend() })
+                        if (!empty) DropdownMenuItem({ Text("Lưu file zip vào máy") }, { menu = false; onSave() })
+                        DropdownMenuItem({ Text("Xoá phiên", color = Palette.Red) }, { menu = false; onDelete() })
+                    }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val u = upload?.first
                 when {
                     recording -> Badge("Đang ghi", Palette.Blue, Color(0xFFD1E9FF))
@@ -256,14 +289,6 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                     upload != null -> Badge("Chưa tải lên", Palette.Amber, Palette.AmberLight)
                     s.exportedAt != null -> Badge("Đã gửi", Palette.Green, Palette.GreenLight)
                     else -> Badge("Chưa gửi", Palette.Amber, Palette.AmberLight)
-                }
-                Box {
-                    IconButton(onClick = { menu = true }, enabled = !recording && !busy) { Icon(Icons.Filled.MoreVert, "Thêm") }
-                    DropdownMenu(menu, { menu = false }) {
-                        if (!empty && upload != null) DropdownMenuItem({ Text("Gửi qua ứng dụng khác") }, { menu = false; onSend() })
-                        if (!empty) DropdownMenuItem({ Text("Lưu file zip vào máy") }, { menu = false; onSave() })
-                        DropdownMenuItem({ Text("Xoá phiên", color = Palette.Red) }, { menu = false; onDelete() })
-                    }
                 }
             }
             Hint(listOfNotNull(
@@ -292,10 +317,10 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
             }
             agentStatus?.let { a ->
                 Hint(when (a.optString("state")) {
-                    "done" -> "Agent đã xử lý" + (if (a.has("poisFound")) " · ${a.optInt("poisFound")} địa điểm" else "") +
-                        (a.optJSONArray("recapture")?.length()?.takeIf { it > 0 }?.let { " · $it cần chụp lại" } ?: "")
-                    "processing" -> "Agent đang xử lý…"
-                    "failed" -> "Agent xử lý lỗi: ${a.optString("error")}"
+                    "done" -> "Hệ thống đã xử lý" + (if (a.has("poisFound")) " · tìm thấy ${a.optInt("poisFound")} địa điểm" else "") +
+                        (a.optJSONArray("recapture")?.length()?.takeIf { it > 0 }?.let { " · $it chỗ cần chụp lại (xem trên Bản đồ)" } ?: "")
+                    "processing" -> "Hệ thống đang xử lý…"
+                    "failed" -> "Hệ thống chưa xử lý được phiên này, quản lý sẽ kiểm tra."
                     else -> "Máy chủ đã nhận"
                 }, color = Palette.Blue)
             }
@@ -304,14 +329,14 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                     if (upload != null) {
                         val (u, changed) = upload
                         if (u.state == "none" || u.state == "failed" || changed) {
-                            Button(onClick = onUpload) { Text(if (changed) "Tải lại" else "Tải lên ngay") }
+                            Button(onClick = onUpload, modifier = Modifier.weight(1f)) { Text(if (changed) "Tải lại" else "Tải lên ngay", maxLines = 1) }
                         }
                     } else if (s.exportedAt == null) {
-                        Button(onClick = onSend, enabled = !busy) { Text(if (busy) "Đang đóng gói…" else "Gửi") }
+                        Button(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(if (busy) "Đang đóng gói…" else "Gửi", maxLines = 1) }
                     } else {
-                        OutlinedButton(onClick = onSend, enabled = !busy) { Text(if (busy) "Đang đóng gói…" else "Gửi lại") }
+                        OutlinedButton(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(if (busy) "Đang đóng gói…" else "Gửi lại", maxLines = 1) }
                     }
-                    if (r.photos > 0) OutlinedButton(onClick = onMap) { Text("Bản đồ") }
+                    if (r.photos > 0) OutlinedButton(onClick = onMap, modifier = Modifier.weight(1f)) { Text("Bản đồ", maxLines = 1) }
                 }
             }
         }
@@ -323,7 +348,8 @@ private fun Badge(text: String, fg: Color, bg: Color) =
     Text(text, color = fg, fontSize = 12.sp, fontWeight = FontWeight.Bold,
         modifier = Modifier.background(bg, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 3.dp))
 
-private fun mb(b: Long) = String.format(Locale.ROOT, "%.1f MB", b / 1048576.0)
+private fun mb(b: Long) = if (b >= 1L shl 30) String.format(Locale.ROOT, "%.1f GB", b / 1073741824.0)
+    else String.format(Locale.ROOT, "%.0f MB", b / 1048576.0)
 private fun km(m: Double) = if (m < 1000) "${m.toInt()} m" else String.format(Locale.ROOT, "%.1f km", m / 1000)
 private fun duration(ms: Long): String {
     val min = ms / 60_000

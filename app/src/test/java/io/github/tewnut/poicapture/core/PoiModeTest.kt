@@ -17,9 +17,9 @@ class PoiModeTest {
         sideOfTravel = Side.RIGHT, road = Road.auto(), settings = Settings(), kind = kind,
     )
 
-    private fun photo(id: String, tMs: Long, poiId: String? = null, role: PhotoRole? = null) = JSONObject()
+    private fun photo(id: String, tMs: Long, poiId: String? = null, role: String? = null) = JSONObject()
         .put("id", id).put("kind", "photo").put("tMs", tMs).put("lat", START.lat).put("lon", START.lon)
-        .apply { if (poiId != null) put("poiId", poiId).put("role", role!!.json) }
+        .apply { if (poiId != null) put("poiId", poiId).put("role", role!!) }
 
     @Test fun placesCarryTheirPhotosACoverAndTheReviewedPin() {
         val store = SessionStore(tmp.newFolder("sessions"))
@@ -28,7 +28,7 @@ class PoiModeTest {
         val gps = Fix(1L, START.lat, START.lon, 8.0)
         store.appendPoi(s.id, Pois.new("poi_1", 1000L, gps))
         store.appendPoi(s.id, Pois.new("poi_2", 5000L, gps))
-        for ((id, t, role) in listOf(Triple("p_1", 1100L, PhotoRole.SIGN), Triple("p_2", 1200L, PhotoRole.FACADE), Triple("p_3", 1300L, PhotoRole.INSIDE))) {
+        for ((id, t, role) in listOf(Triple("p_1", 1100L, PhotoRoles.SIGN), Triple("p_2", 1200L, PhotoRoles.FACADE), Triple("p_3", 1300L, PhotoRoles.INSIDE))) {
             store.appendItem(s.id, photo(id, t, "poi_1", role)); store.photoFile(s.id, id).writeBytes(byteArrayOf(1))
         }
         val pin = LatLon(START.lat - 0.00005, START.lon)
@@ -71,10 +71,10 @@ class PoiModeTest {
 
     @Test fun measuringTheCameraDirectionNeverRewritesPhotosOfAPlace() {
         val est = MountEstimate(90.0, CameraSide.RIGHT, 0.95, 8)
-        val poiPhoto = photo("p_1", 1L, "poi_1", PhotoRole.SIGN).put("travelBearing", 0.0)
+        val poiPhoto = photo("p_1", 1L, "poi_1", PhotoRoles.SIGN).put("travelBearing", 0.0)
             .put("cameraBearing", 42.0).put("cameraBearingSource", "compass")
         assertEquals(null, Remeasure.patch(poiPhoto, est, 6.0))
-        val noSource = photo("p_2", 2L, "poi_1", PhotoRole.FACADE).put("travelBearing", 0.0)
+        val noSource = photo("p_2", 2L, "poi_1", PhotoRoles.FACADE).put("travelBearing", 0.0)
         assertEquals(null, Remeasure.patch(noSource, est, 6.0))       // a poiId alone is enough
         assertTrue(Exporter.fileName(session(SessionKind.POI)).let { !it.contains("_right") })
     }
@@ -82,7 +82,7 @@ class PoiModeTest {
     @Test fun olderSessionsAreSweeps() {
         val json = javaClass.classLoader!!.getResourceAsStream("legacy_session_v03.json")!!.bufferedReader().readText()
         assertEquals(SessionKind.SWEEP, Session.fromJson(JSONObject(json)).kind)
-        assertEquals(PhotoRole.FACADE, PhotoRole.of("facade"))
+        assertEquals(PhotoRoles.FACADE, PhotoRoles.DEFAULT.cover.id)
         assertEquals(PoiStatus.NEW, PoiStatus.of(null))
     }
 }

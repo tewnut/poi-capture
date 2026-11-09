@@ -115,6 +115,7 @@ class Session(
     var mount: JSONObject? = null,   // measured camera direction (MountEstimate), null = not measured
     val kind: SessionKind = SessionKind.SWEEP,
     val email: String = "",          // typed at onboarding, not verified; "" before app 0.8
+    var photoRoles: PhotoRoles? = null,  // POI mode: the photo kinds offered (config at the start of the session)
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("schema", SCHEMA).put("kind", kind.json).put("createdAt", createdAt)
@@ -140,6 +141,7 @@ class Session(
         .put("exportedAt", exportedAt.orNull())
         .put("plan", plan.orNull())
         .put("mount", mount.orNull())
+        .put("photoRoles", photoRoles?.toJson()?.getJSONArray("photoRoles").orNull())
 
     companion object {
         fun fromJson(o: JSONObject): Session = Session(
@@ -165,6 +167,7 @@ class Session(
             mount = o.optJSONObject("mount"),
             kind = SessionKind.of(o.optStr("kind")),
             email = o.optString("email"),
+            photoRoles = PhotoRoles.fromJson(o.optJSONArray("photoRoles"), "session"),
         )
     }
 }

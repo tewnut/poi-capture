@@ -67,7 +67,8 @@ import kotlinx.coroutines.withContext
 import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.capture.CaptureUi
 import io.github.tewnut.poicapture.core.Mode
-import io.github.tewnut.poicapture.core.PhotoRole
+import io.github.tewnut.poicapture.core.PhotoRoles
+import io.github.tewnut.poicapture.CaptureKeys
 import io.github.tewnut.poicapture.core.PoiStatus
 import io.github.tewnut.poicapture.core.SessionKind
 import androidx.compose.material3.FilterChip
@@ -75,6 +76,7 @@ import androidx.compose.material3.FilterChipDefaults
 import io.github.tewnut.poicapture.core.Session
 import io.github.tewnut.poicapture.core.Side
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = onDone) {
     val ctx = LocalContext.current
@@ -126,8 +128,10 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     val captured = ui.photos + ui.videos
     val notStarted = !ui.running && captured == 0 && !ui.recording
     val poiMode = session?.kind == SessionKind.POI
-    var role by remember { mutableStateOf(PhotoRole.FACADE) }   // POI mode: what the next photo shows
+    val photoRoles = session?.photoRoles ?: PhotoRoles.DEFAULT
+    var role by remember(session?.id) { mutableStateOf(photoRoles.roles.first().id) }   // POI mode: what the next photo shows
     var reviewing by remember { mutableStateOf(false) }          // POI mode: "Xong địa điểm" sheet open
+    var draft by remember { mutableStateOf(PoiDraft()) }          // what was typed in the sheet, kept across "Chụp thêm"
 
     var thumb by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(ui.lastPhoto) {
@@ -140,7 +144,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     fun end(discardIfEmpty: Boolean) {
         val s = svc ?: run { onDone(); return }
         val id = runCatching { s.session.id }.getOrNull()
-        if (poiMode && ui.poiId != null) s.finishPoi(null, false, emptyMap(), PoiStatus.NEW)   // keep it, at its GPS position
+        if (poiMode && ui.poiId != null) s.finishPoi(draft.pin, draft.moved, draft.fields(), draft.status)   // keep it with what was typed
         s.finishSession()
         if (discardIfEmpty && captured == 0 && id != null) {
             CaptureService.store(ctx).delete(id)
@@ -169,22 +173,50 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
 
     if (reviewing && session != null) {
         val start = remember(ui.poiId) { svc?.poiStartPosition() }
-        PoiSheet(ui.poiNumber, start, ui.poiRoles, onMore = { reviewing = false },
+        PoiSheet(ui.poiNumber, start, ui.poiRoles, photoRoles, draft, onMore = { reviewing = false },
             onSave = { pin, moved, fields, status ->
                 svc?.finishPoi(pin, moved, fields, status)
                 reviewing = false
-                role = PhotoRole.FACADE
+                draft = PoiDraft()
+                role = photoRoles.roles.first().id
             })
         return
     }
 
+    val manual = session?.mode == Mode.PHOTO_MANUAL
+    // POI mode: shoot with the selected kind, then select the next kind without a photo (per the config)
+    fun shoot() {
+        val s = svc ?: return
+        if (ui.camera != "on") return
+        s.takePhoto("manual", role)
+        role = photoRoles.next(role, ui.poiRoles + (role to ((ui.poiRoles[role] ?: 0) + 1)))
+    }
+    // volume keys / Bluetooth remote: shoot (POI, manual) or mark (riding), only while the camera screen is live
+    val keyAction: (() -> Unit)? = when {
+        svc == null || notStarted -> null
+        poiMode -> { { shoot() } }
+        manual -> { { if (ui.camera == "on") svc.takePhoto("manual") } }
+        else -> { { if (ui.running) svc.addMark() } }
+    }
+    val latestKey = androidx.compose.runtime.rememberUpdatedState(keyAction)
+    androidx.compose.runtime.SideEffect { CaptureKeys.handler = if (keyAction != null) ({ latestKey.value?.invoke() }) else null }
+    DisposableEffect(Unit) { onDispose { CaptureKeys.handler = null } }
+    // shutter feedback when the contributor shoots by hand (not for auto photos every few metres)
+    var flash by remember { mutableStateOf(false) }
+    LaunchedEffect(ui.photos) {
+        if (ui.photos > 0 && (poiMode || manual)) { flash = true; kotlinx.coroutines.delay(120); flash = false }
+    }
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView({ previewView }, Modifier.fillMaxSize())
+        if (flash) Box(Modifier.fillMaxSize().background(Color(0x77FFFFFF)))
 
-        // ---------- top: status + count ----------
-        Row(Modifier.fillMaxWidth().safeDrawingPadding().padding(10.dp), verticalAlignment = Alignment.Top) {
+        // ---------- top: status (left), count + map + end (right) ----------
+        Row(Modifier.fillMaxWidth().safeDrawingPadding().padding(10.dp), verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     GpsPill(ui)
                     RoadPill(ui, session)
                     if (!poiMode) MountPill(ui)
@@ -203,84 +235,79 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 }
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Pill(if (poiMode) "${ui.poiNumber} địa điểm · ${ui.photos} ảnh" else if (video) "${ui.videos} đoạn video" else "${ui.photos} ảnh",
-                    size = 20.sp, bold = true, dot = if (ui.recording) Palette.Red else null)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Pill(if (poiMode) "Địa điểm ${ui.poiNumber} · ${ui.photos} ảnh" else if (video) "${ui.videos} đoạn video" else "${ui.photos} ảnh",
+                        size = 18.sp, bold = true, dot = if (ui.recording) Palette.Red else null)
+                    if (!notStarted) {
+                        DarkButton("Bản đồ") { showMap = true }
+                        DarkButton("Kết thúc") { confirmEnd = true }
+                    }
+                }
                 if (!poiMode && ui.marks > 0) Pill("★ ${ui.marks} đánh dấu", size = 13.sp)
-                if (!ui.running && !notStarted) Pill("Đang tạm dừng", bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp)
-                if (!notStarted) OutlinedButton(onClick = { showMap = true },
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0x99000000))) { Text("Bản đồ", color = Color.White) }
+                if (!ui.running && !notStarted && !poiMode) Pill("Đang tạm dừng", bg = Palette.AmberLight, fg = Palette.Amber, size = 13.sp)
             }
         }
 
-        // ---------- side marker ----------
-        session?.takeIf { !poiMode && (ui.mount == "right" || ui.mount == "left") }?.let {
-            Text(if (it.sideOfTravel == Side.RIGHT) "GHI BÊN PHẢI →" else "← GHI BÊN TRÁI",
-                color = Color.White, fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier.align(if (it.sideOfTravel == Side.RIGHT) Alignment.CenterEnd else Alignment.CenterStart)
-                    .safeDrawingPadding().padding(12.dp)
-                    .background(Color(0xCC0B6B4C), RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp))
-        }
-
-        // ---------- bottom: speed, controls ----------
-        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().safeDrawingPadding().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                thumb?.let { Image(it, "Ảnh vừa chụp", Modifier.size(96.dp, 54.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
-                if (!poiMode) Speed(ui)
-            }
-            if (!notStarted && poiMode) {
-                // POI mode: shoot with the selected role, then "Xong địa điểm" to pin the place on its building
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(
-                        onClick = { svc?.takePhoto("manual", role); if (role == PhotoRole.FACADE) role = PhotoRole.SIGN },
-                        enabled = svc != null && ui.camera == "on",
-                        shape = CircleShape, modifier = Modifier.size(88.dp),
-                    ) { Text("Chụp", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
-                    Button(onClick = { reviewing = true }, enabled = ui.poiId != null,
+        // ---------- right rail, under the thumb: the main actions ----------
+        if (!notStarted) Column(Modifier.align(Alignment.CenterEnd).safeDrawingPadding().padding(end = 16.dp, top = 96.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            when {
+                poiMode -> {
+                    thumb?.let { Image(it, "Ảnh vừa chụp", Modifier.size(84.dp, 47.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
+                    Shutter("Chụp", enabled = svc != null && ui.camera == "on", onClick = { shoot() })
+                    Button(onClick = { reviewing = true }, enabled = ui.poiId != null, modifier = Modifier.height(48.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Palette.Blue)) { Text("Xong địa điểm", fontWeight = FontWeight.Bold) }
                 }
-            } else if (!notStarted) {
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(
-                        onClick = { if (ui.running) svc?.pause() else svc?.start() },
-                        enabled = svc != null && ui.camera == "on",
-                        shape = CircleShape, modifier = Modifier.size(88.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = if (ui.running) Palette.Red else Palette.Green),
-                    ) { Text(if (ui.running) "Dừng" else "Tiếp", fontSize = 16.sp, fontWeight = FontWeight.Bold) }
-                    if (session != null && !video) {
-                        OutlinedButton(onClick = { svc?.takePhoto("manual") }, enabled = ui.camera == "on",
-                            shape = CircleShape, modifier = Modifier.size(64.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0x66000000))) { Text("📷", fontSize = 22.sp) }
+                manual -> {
+                    RoundButton(if (ui.running) "Dừng" else "Tiếp", if (ui.running) Palette.Red else Palette.Green, 56.dp, svc != null) {
+                        if (ui.running) svc?.pause() else svc?.start()
                     }
-                    // sweep: point out a place while riding; the photos around this moment go with the mark
-                    OutlinedButton(onClick = { svc?.addMark() }, enabled = ui.running,
-                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0x99000000))) { Text("★ Đánh dấu", color = Color.White) }
+                    Shutter("Chụp", enabled = ui.camera == "on", onClick = { svc?.takePhoto("manual") })
+                    RoundButton("★", Color(0xCC000000), 56.dp, ui.running) { svc?.addMark() }
                 }
-            }
-            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
-                if (!notStarted) {
-                    OutlinedButton(onClick = { confirmEnd = true },
-                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0x99000000))) { Text("Kết thúc", color = Color.White) }
+                else -> {
+                    // riding: "Đánh dấu" is the frequent touch (biggest); stopping is rare
+                    RoundButton(if (ui.running) "Dừng" else "Tiếp", if (ui.running) Palette.Red else Palette.Green, 64.dp,
+                        svc != null && ui.camera == "on") { if (ui.running) svc?.pause() else svc?.start() }
+                    RoundButton("★\nĐánh dấu", Color(0xCC000000), 96.dp, ui.running) { svc?.addMark() }
                 }
             }
         }
 
-        // ---------- POI mode: role of the next photo ----------
+        // ---------- left: POI = kind of the next photo; riding = speed ----------
         if (poiMode && !notStarted) {
-            // one row just above the controls (a column of 6 chips does not fit a landscape screen's height)
-            Row(Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 110.dp)
-                .horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (r in PhotoRole.entries) {
-                    val n = ui.poiRoles[r.json] ?: 0
-                    FilterChip(role == r, { role = r },
-                        { Text((if (r == PhotoRole.FACADE) "★ " else "") + r.label + (if (n > 0) " · $n" else ""), color = Color.White) },
+            Column(Modifier.align(Alignment.CenterStart).safeDrawingPadding().padding(start = 10.dp, top = 56.dp)
+                .verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                for (r in photoRoles.roles) {
+                    val n = ui.poiRoles[r.id] ?: 0
+                    FilterChip(role == r.id, { role = r.id },
+                        { Text((if (r.id == photoRoles.cover.id) "★ " else "") + r.label + (if (n > 0) "  ✓$n" else ""),
+                            color = Color.White, fontWeight = if (role == r.id) FontWeight.Bold else FontWeight.Normal) },
                         colors = FilterChipDefaults.filterChipColors(containerColor = Color(0x99000000), selectedContainerColor = Palette.Green))
                 }
             }
+            val current = photoRoles.roles.firstOrNull { it.id == role }
+            if (current != null) Text(current.label + if (current.hint.isNotBlank()) ": ${current.hint}" else "",
+                color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp).widthIn(max = 420.dp)
+                    .background(Color(0xB3000000), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
+        }
+        Row(Modifier.align(Alignment.BottomStart).safeDrawingPadding().padding(12.dp), verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (!poiMode && !notStarted) Speed(ui)
+            if (!poiMode) thumb?.let { Image(it, "Ảnh vừa chụp", Modifier.size(96.dp, 54.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
+        }
+
+        // ---------- riding: which side is filmed ----------
+        session?.takeIf { !poiMode && (ui.mount == "right" || ui.mount == "left") }?.let {
+            Text(if (it.sideOfTravel == Side.RIGHT) "GHI BÊN PHẢI →" else "← GHI BÊN TRÁI",
+                color = Color.White, fontWeight = FontWeight.ExtraBold,
+                modifier = Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp)
+                    .background(Color(0xCC0B6B4C), RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp))
         }
 
         // ---------- get-ready overlay ----------
-        if (notStarted && session != null) ReadyCard(ui, session, Modifier.align(Alignment.Center),
+        if (notStarted && session != null) ReadyCard(ui, session, photoRoles, Modifier.align(Alignment.Center),
             onStart = { svc?.start() }, onCancel = { end(discardIfEmpty = true) })
     }
 
@@ -340,7 +367,7 @@ private fun Speed(ui: CaptureUi) {
 }
 
 @Composable
-private fun ReadyCard(ui: CaptureUi, s: Session, modifier: Modifier, onStart: () -> Unit, onCancel: () -> Unit) {
+private fun ReadyCard(ui: CaptureUi, s: Session, roles: PhotoRoles, modifier: Modifier, onStart: () -> Unit, onCancel: () -> Unit) {
 
     // the checklist scrolls inside the card; the Start row is always visible (small phones, large system fonts)
     Surface(modifier.width(440.dp).padding(vertical = 12.dp), shape = RoundedCornerShape(20.dp), color = Color.White, shadowElevation = 12.dp) {
@@ -356,10 +383,14 @@ private fun ReadyCard(ui: CaptureUi, s: Session, modifier: Modifier, onStart: ()
                 else -> Check(null, "Chưa có dữ liệu đường: vẫn ghi được, đường được nhận sau")
             }
             if (poi) {
-                Check(null, "Mỗi địa điểm: chụp ★ mặt tiền trực diện, biển hiệu, rồi bên hông / bên trong / thông tin nếu có.")
+                Check(null, "Mỗi địa điểm: chụp ★ ${roles.cover.label.lowercase()}, rồi " +
+                    roles.roles.filter { it.id != roles.cover.id }.joinToString(", ") { it.label.lowercase() } + " nếu có. App tự chọn loại ảnh tiếp theo.")
                 Check(null, "Bấm “Xong địa điểm” để ghim lên đúng tòa nhà, rồi sang địa điểm tiếp.")
+                Check(null, "Nút âm lượng cũng là nút chụp.")
             } else {
                 Check(null, "Máy gắn chắc, nằm ngang, camera nhìn sang dãy nhà cần ghi. App tự nhận bên sau vài lần tăng tốc / phanh.")
+                Check(null, if (s.mode == Mode.PHOTO_MANUAL) "Nút âm lượng (hoặc nút bấm Bluetooth trên tay lái) là nút chụp."
+                    else "Nút âm lượng (hoặc nút bấm Bluetooth trên tay lái) = ★ Đánh dấu, không cần chạm màn hình.")
                 Check(null, "Mặt tiền cách ~${s.settings.facadeDistanceM.toInt()} m: " +
                     (if (s.mode == Mode.PHOTO_AUTO) "1 ảnh mỗi ${String.format(java.util.Locale.ROOT, "%.1f", ui.photoEveryM)} m, " else "") +
                     "chạy tối đa ${ui.maxSpeedKmh} km/h")
@@ -386,4 +417,32 @@ private fun Check(ok: Boolean?, text: String) {
             color = when (ok) { true -> Palette.Green; false -> Palette.Amber; null -> Palette.Muted }, modifier = Modifier.width(18.dp))
         Text(text, color = Palette.Ink)
     }
+}
+
+/** Big round shutter: white, high contrast on any camera picture. */
+@Composable
+private fun Shutter(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Button(onClick = onClick, enabled = enabled, shape = CircleShape,
+        modifier = Modifier.size(84.dp).border(4.dp, Color(0x99FFFFFF), CircleShape),
+        colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Palette.Ink),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+        Text(label, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun RoundButton(label: String, color: Color, size: androidx.compose.ui.unit.Dp, enabled: Boolean, onClick: () -> Unit) {
+    Button(onClick = onClick, enabled = enabled, shape = CircleShape, modifier = Modifier.size(size),
+        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+        Text(label, fontSize = if (size >= 80.dp) 16.sp else 15.sp, fontWeight = FontWeight.Bold,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center, lineHeight = 18.sp)
+    }
+}
+
+/** Secondary action over the camera picture. */
+@Composable
+private fun DarkButton(label: String, onClick: () -> Unit) {
+    OutlinedButton(onClick = onClick, modifier = Modifier.height(44.dp),
+        colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0x99000000))) { Text(label, color = Color.White) }
 }

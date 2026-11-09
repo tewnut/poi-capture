@@ -68,35 +68,35 @@ fun ProfileScreen(onDone: () -> Unit, onReplayOnboarding: () -> Unit) {
         ProfileCard("Khoảng cách tới mặt tiền (mặc định)") {
             Hint("Từ camera tới mặt tiền nhà (không phải tới mép đường), thường gặp khi bạn chạy làn sát lề. " +
                 "Dùng để tính khoảng cách giữa các ảnh, tốc độ tối đa và đặt địa điểm đúng vào tòa nhà. Chỉnh lại được ở mỗi lần ghi.")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { settings = settings.copy(facadeDistanceM = (settings.facadeDistanceM - 1).coerceAtLeast(2.0)); save() }) { Text("−1 m") }
-                Text("${settings.facadeDistanceM.toInt()} m", fontWeight = FontWeight.SemiBold, fontSize = 20.sp, modifier = Modifier.width(70.dp))
-                OutlinedButton(onClick = { settings = settings.copy(facadeDistanceM = (settings.facadeDistanceM + 1).coerceAtMost(20.0)); save() }) { Text("+1 m") }
-            }
             val plan = CapturePlan.of(settings.facadeDistanceM)
-            Hint("→ 1 ảnh mỗi ${String.format(java.util.Locale.ROOT, "%.1f", plan.photoEveryM)} m, chạy tối đa ${plan.maxSpeedKmh} km/h.")
+            Stepper("${settings.facadeDistanceM.toInt()} m",
+                onMinus = { settings = settings.copy(facadeDistanceM = (settings.facadeDistanceM - 1).coerceAtLeast(2.0)); save() },
+                onPlus = { settings = settings.copy(facadeDistanceM = (settings.facadeDistanceM + 1).coerceAtMost(20.0)); save() },
+                caption = "1 ảnh mỗi ${String.format(java.util.Locale.ROOT, "%.1f", plan.photoEveryM)} m · tối đa ${plan.maxSpeedKmh} km/h",
+                minus = "−1 m", plus = "+1 m",
+                minusEnabled = settings.facadeDistanceM > 2.0, plusEnabled = settings.facadeDistanceM < 20.0)
         }
 
-        ProfileCard("Góc chếch giá đỡ (chỉnh tay)") {
-            Hint("App tự đo hướng camera khi bạn tăng tốc / phanh vài lần. Chỉ chỉnh ở đây nếu app báo chưa đo được: " +
-                "camera hơi chếch về phía trước hay phía sau bao nhiêu độ.")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(onClick = { settings = settings.copy(mountOffsetDeg = settings.mountOffsetDeg - 5); save() }) { Text("−5°") }
-                Text(
-                    when {
-                        settings.mountOffsetDeg > 0 -> "Chếch ${settings.mountOffsetDeg.toInt()}° về trước"
-                        settings.mountOffsetDeg < 0 -> "Chếch ${-settings.mountOffsetDeg.toInt()}° về sau"
-                        else -> "Vuông góc (0°)"
-                    },
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.width(150.dp),
-                )
-                OutlinedButton(onClick = { settings = settings.copy(mountOffsetDeg = settings.mountOffsetDeg + 5); save() }) { Text("+5°") }
-            }
-        }
+        ProfileCard("Loại ảnh khi chụp địa điểm") { PhotoRolesCard() }
 
         ProfileCard("Dữ liệu đường offline") { RoadPacksCard() }
 
-        ProfileCard("Máy chủ nhận dữ liệu") {
+        var advanced by remember { mutableStateOf(false) }
+        androidx.compose.material3.TextButton(onClick = { advanced = !advanced }) {
+            Text(if (advanced) "▾ Ẩn cài đặt nâng cao" else "▸ Cài đặt nâng cao (góc giá đỡ, máy chủ)")
+        }
+        if (advanced) ProfileCard("Góc chếch giá đỡ (chỉnh tay)") {
+            Hint("App tự đo hướng camera khi bạn tăng tốc / phanh vài lần. Chỉ chỉnh ở đây nếu app báo chưa đo được: " +
+                "camera hơi chếch về phía trước hay phía sau bao nhiêu độ.")
+            val deg = settings.mountOffsetDeg.toInt()
+            Stepper(if (deg == 0) "0°" else "${kotlin.math.abs(deg)}°",
+                onMinus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg - 5).coerceAtLeast(-45.0)); save() },
+                onPlus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg + 5).coerceAtMost(45.0)); save() },
+                caption = when { deg > 0 -> "chếch về phía trước"; deg < 0 -> "chếch về phía sau"; else -> "vuông góc với đường" },
+                minus = "−5°", plus = "+5°")
+        }
+
+        if (advanced) ProfileCard("Máy chủ nhận dữ liệu") {
             Hint("Do quản lý cung cấp. Có máy chủ thì các phiên tự tải lên khi có Wi-Fi (tiếp tục được nếu mất mạng); " +
                 "không có thì gửi file zip qua Zalo / Drive như trước.")
             OutlinedTextField(settings.uploadUrl, { settings = settings.copy(uploadUrl = it.trim()); save() },

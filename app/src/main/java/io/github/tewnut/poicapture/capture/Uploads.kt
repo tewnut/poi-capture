@@ -109,6 +109,14 @@ object ServerApi {
             ?.let { runCatching { JSONObject(it) }.getOrNull() }
     }
 
+    /** The team's app config ({"photoRoles": [...]}), or null when not set up / not served / not valid. */
+    fun config(ctx: Context): io.github.tewnut.poicapture.core.PhotoRoles? {
+        val st = Prefs.settings(ctx)
+        if (st.apiUrl.isBlank()) return null
+        val body = get(st.apiUrl.trimEnd('/') + "/config", st.uploadToken) ?: return null
+        return runCatching { io.github.tewnut.poicapture.core.PhotoRoles.fromJson(JSONObject(body), "server") }.getOrNull()
+    }
+
     /** Team coverage in a box (GeoJSON), or null. */
     fun coverage(ctx: Context, s: Double, w: Double, n: Double, e: Double): String? {
         val st = Prefs.settings(ctx)

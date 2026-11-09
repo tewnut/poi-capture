@@ -66,7 +66,7 @@ import io.github.tewnut.poicapture.core.CapturePlan
 import io.github.tewnut.poicapture.core.MountEstimate
 import io.github.tewnut.poicapture.core.MountEstimator
 import io.github.tewnut.poicapture.core.LatLon
-import io.github.tewnut.poicapture.core.PhotoRole
+import io.github.tewnut.poicapture.core.PhotoRoles
 import io.github.tewnut.poicapture.core.PoiStatus
 import io.github.tewnut.poicapture.core.Pois
 import io.github.tewnut.poicapture.core.SessionKind
@@ -247,7 +247,7 @@ class CaptureService : LifecycleService() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("Ghi hình đường phố")
+            .setContentTitle("POI Capture")
             .setContentText("Đang ghi: ${session.road.label}")
             .setOngoing(true)
             .setContentIntent(open)
@@ -506,7 +506,7 @@ class CaptureService : LifecycleService() {
 
     // ---------- photos ----------
 
-    fun takePhoto(trigger: String, role: PhotoRole? = null) {
+    fun takePhoto(trigger: String, role: String? = null) {
         val ic = imageCapture ?: return
         if (_state.value.camera != "on") return
         val poiMode = session.kind == SessionKind.POI
@@ -520,8 +520,8 @@ class CaptureService : LifecycleService() {
         val motion = imu?.snapshot(en)
         motion?.let { meta.put("motion", it) }
         if (poiId != null) {
-            val r = role ?: PhotoRole.FACADE
-            meta.put("poiId", poiId).put("role", r.json)
+            val r = role ?: (session.photoRoles ?: PhotoRoles.DEFAULT).cover.id
+            meta.put("poiId", poiId).put("role", r)
             // on foot the travel direction means nothing: the camera direction comes from the orientation sensor
             meta.put("cameraBearing", motion?.opt("cameraAzimuthDeg") ?: JSONObject.NULL).put("cameraBearingSource", "compass")
                 .put("sideOfWay", JSONObject.NULL).put("travel", JSONObject.NULL)

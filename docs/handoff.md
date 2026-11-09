@@ -12,6 +12,13 @@ contract.
 - `session.email`: the contributor's email, typed once at onboarding and **not verified**. Use it to group a person's
   sessions and to credit them; never as proof of identity. `""` in older sessions (only `contributor` then).
   `session.contributor` is the display name (the part before `@` when none was given).
+- **Photo kinds are config** (POI sessions, app 0.9): `session.photoRoles` = the list offered while shooting,
+  `[{id, label, hint, cover, advance}]`, from the team's server (`GET {apiUrl}/config`, see server-api.md), the
+  contributor's own list or the default. `photo.role` is one of those ids; a team can add its own (e.g. `"menu"`,
+  `"parking"`). The place's `cover` is the first photo of the kind with `cover: true`. Older sessions have no
+  `photoRoles`: read the role ids below.
+- Hardware keys (app 0.9): in a sweep the volume keys or a Bluetooth remote on the handlebar add a "★ Đánh dấu"
+  (`marks`), or shoot in "bấm tay" mode; nothing changes in the format.
 
 ## Changes in `road-capture/3` (app 0.5)
 

@@ -57,8 +57,26 @@ Same bearer token. Without it the app still uploads; it just cannot show what ha
   "error": "…" }
 ```
 
-`404` = not received yet. The app polls it every 30 s while "Đã ghi" is open and shows "Agent đã xử lý · 23 địa điểm ·
-4 cần chụp lại". (`recapture` is meant to feed a future "cần chụp lại" list in the POI mode; the app only counts it.)
+`404` = not received yet. The app polls it every 30 s while "Đã ghi" is open and shows "Hệ thống đã xử lý · tìm thấy 23
+địa điểm · 4 chỗ cần chụp lại". A `failed` state is shown without the raw error (the contributor cannot act on it). (`recapture` is meant to feed a future "cần chụp lại" list in the POI mode; the app only counts it.)
+
+### `GET {apiUrl}/config`
+
+The team's app config, fetched at every app start and with "Lấy từ máy chủ" in Hồ sơ. Today it holds the photo kinds of
+"Chụp địa điểm" (the buttons above the shutter), in shooting order:
+
+```json
+{ "photoRoles": [
+    { "id": "facade", "label": "Mặt tiền", "hint": "Chụp thẳng, thấy cả cửa hàng (ảnh bìa)", "cover": true, "advance": true },
+    { "id": "sign",   "label": "Biển hiệu", "hint": "Gần, đọc được tên và số điện thoại", "advance": true },
+    { "id": "menu",   "label": "Thực đơn" } ] }
+```
+
+- `id`: lowercase `a-z 0-9 _ -`, unique, stable (it is what the export carries as `photo.role`); `label` / `hint` are
+  only shown. `cover`: the kind used as the place's cover photo (default: the first). `advance`: after one photo of this
+  kind the app selects the next kind that has no photo yet.
+- A valid config replaces the contributor's own list (shown read-only in Hồ sơ). `404` or an invalid document: the phone
+  keeps its list (its own, or the built-in default above with side / inside / info / context).
 
 ### `GET {apiUrl}/coverage?bbox={south},{west},{north},{east}`
 

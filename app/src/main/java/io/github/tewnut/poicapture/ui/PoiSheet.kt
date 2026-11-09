@@ -6,7 +6,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -47,71 +50,94 @@ import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.core.LatLon
-import io.github.tewnut.poicapture.core.PhotoRole
+import io.github.tewnut.poicapture.core.PhotoRoles
 import io.github.tewnut.poicapture.core.PoiStatus
 
 private val CATEGORIES = listOf("Quán ăn", "Cà phê", "Tạp hoá", "Thời trang", "Điện thoại", "Sửa xe", "Thuốc", "Làm đẹp", "Dịch vụ")
 
 /**
- * End of a place: put the pin on the building (tap or drag), optionally note what is readable on site, set the status.
- * Everything except the pin is optional: the agent reads the sign on the photos anyway.
+ * What the contributor typed for the current place. Lives in the capture screen, so "Chụp thêm" (which closes the sheet
+ * to take more photos) keeps it; a new place starts with a new draft.
  */
+class PoiDraft {
+    var pin by mutableStateOf<LatLon?>(null)
+    var moved by mutableStateOf(false)
+    var name by mutableStateOf("")
+    var category by mutableStateOf("")
+    var house by mutableStateOf("")
+    var phone by mutableStateOf("")
+    var note by mutableStateOf("")
+    var status by mutableStateOf(PoiStatus.NEW)
+    fun fields() = mapOf("name" to name, "category" to category, "houseNumber" to house, "phone" to phone, "note" to note)
+}
+
+/**
+ * End of a place: put the pin on the building (tap or drag), optionally note what is readable on site, set the status.
+ * Everything except the pin is optional: the photos are read afterwards anyway.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>,
+fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: PhotoRoles, d: PoiDraft,
              onMore: () -> Unit, onSave: (pin: LatLon?, moved: Boolean, fields: Map<String, String>, status: PoiStatus) -> Unit) {
-    var pin by remember { mutableStateOf(start) }
-    var moved by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
-    var category by remember { mutableStateOf("") }
-    var house by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
-    var status by remember { mutableStateOf(PoiStatus.NEW) }
-    val noFront = (roles[PhotoRole.FACADE.json] ?: 0) == 0
+    val ctx = LocalContext.current
+    if (d.pin == null && !d.moved) d.pin = start
+    // no GPS fix for this place yet: open the map where the phone was last seen, not at 0,0
+    val centre = remember { start ?: lastKnown(ctx) }
+    val noFront = (roles[photoRoles.cover.id] ?: 0) == 0
 
     Row(Modifier.fillMaxSize().background(Color.White).safeDrawingPadding()) {
         Box(Modifier.weight(1f).fillMaxHeight()) {
-            PinMap(pin, onPin = { pin = it; moved = true }, modifier = Modifier.fillMaxSize().clipToBounds())
-            Pill(if (moved) "Đã đặt ghim lên tòa nhà ✓" else "Chạm hoặc kéo ghim lên đúng tòa nhà",
+            PinMap(d.pin, centre, onPin = { d.pin = it; d.moved = true }, modifier = Modifier.fillMaxSize().clipToBounds())
+            Pill(when {
+                    d.moved -> "Đã đặt ghim lên tòa nhà ✓"
+                    d.pin == null -> "Chưa có GPS: chạm vào tòa nhà để đặt ghim"
+                    else -> "Chạm hoặc kéo ghim lên đúng tòa nhà"
+                },
                 Modifier.align(Alignment.TopCenter).padding(10.dp), size = 13.sp,
-                dot = if (moved) Color(0xFF47CD89) else Color(0xFFFEC84B))
+                dot = if (d.moved) Color(0xFF47CD89) else Color(0xFFFEC84B))
         }
-        // fields scroll; status and the two actions stay pinned at the bottom (landscape screens are short)
+        // everything scrolls (landscape screens are short, the keyboard takes half); the two actions stay pinned
         Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 16.dp, vertical = 8.dp)) {
           Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Địa điểm $number", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Palette.Ink)
-            Hint(PhotoRole.entries.mapNotNull { r -> roles[r.json]?.let { "${r.label} $it" } }.joinToString(" · ").ifEmpty { "Chưa có ảnh" })
-            if (noFront) Hint("Chưa có ảnh mặt tiền (ảnh bìa). Nên chụp thêm một ảnh trực diện.", color = Palette.Amber)
-            Hint("Không bắt buộc: ghi những gì đọc được tại chỗ, phần còn lại agent đọc từ ảnh.")
-            OutlinedTextField(name, { name = it }, label = { Text("Tên trên biển hiệu") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(category, { category = it }, label = { Text("Loại hình") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
-                for (c in CATEGORIES.take(5)) FilterChip(category == c, { category = c }, { Text(c, fontSize = 12.sp) })
+            Hint(roles.entries.sortedBy { e -> photoRoles.roles.indexOfFirst { it.id == e.key }.let { if (it < 0) 99 else it } }
+                .joinToString(" · ") { "${photoRoles.label(it.key)} ${it.value}" }.ifEmpty { "Chưa có ảnh" })
+            if (noFront) Hint("Chưa có ảnh “${photoRoles.cover.label}” (ảnh bìa). Nên chụp thêm một ảnh.", color = Palette.Amber)
+            Text("Tình trạng", fontWeight = FontWeight.SemiBold, color = Palette.Ink)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (st in PoiStatus.entries) FilterChip(d.status == st, { d.status = st }, { Text(st.label) })
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(house, { house = it }, label = { Text("Số nhà") }, singleLine = true, modifier = Modifier.weight(1f))
-                OutlinedTextField(phone, { phone = it }, label = { Text("Số điện thoại") }, singleLine = true, modifier = Modifier.weight(1.4f),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
+            Hint("Không bắt buộc: ghi những gì đọc được tại chỗ, phần còn lại được đọc từ ảnh.")
+            OutlinedTextField(d.name, { d.name = it }, label = { Text("Tên trên biển hiệu") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(d.category, { d.category = it }, label = { Text("Loại hình") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (c in CATEGORIES) FilterChip(d.category == c, { d.category = if (d.category == c) "" else c }, { Text(c) })
             }
-            OutlinedTextField(note, { note = it }, label = { Text("Ghi chú") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(d.house, { d.house = it }, label = { Text("Số nhà") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(d.phone, { d.phone = it }, label = { Text("Số điện thoại") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
+            OutlinedTextField(d.note, { d.note = it }, label = { Text("Ghi chú") }, singleLine = true, modifier = Modifier.fillMaxWidth())
           }
-            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Tình trạng:", fontWeight = FontWeight.SemiBold, color = Palette.Ink)
-                for (s in PoiStatus.entries) FilterChip(status == s, { status = s }, { Text(s.label, fontSize = 12.sp) })
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onMore) { Text("Chụp thêm") }
-                Button(onClick = {
-                    onSave(pin, moved, mapOf("name" to name, "category" to category, "houseNumber" to house, "phone" to phone, "note" to note), status)
-                }, modifier = Modifier.weight(1f)) { Text("Lưu, sang địa điểm tiếp", fontWeight = FontWeight.Bold) }
+            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = onMore, modifier = Modifier.height(48.dp)) { Text("Chụp thêm", maxLines = 1) }
+                Button(onClick = { onSave(d.pin, d.moved, d.fields(), d.status) }, modifier = Modifier.weight(1f).height(48.dp)) {
+                    Text("Lưu & tiếp", fontWeight = FontWeight.Bold, maxLines = 1)
+                }
             }
         }
     }
 }
 
+@android.annotation.SuppressLint("MissingPermission")
+private fun lastKnown(ctx: android.content.Context): LatLon? = runCatching {
+    val lm = ctx.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+    lm.getProviders(true).mapNotNull { lm.getLastKnownLocation(it) }.maxByOrNull { it.elapsedRealtimeNanos }
+        ?.let { LatLon(it.latitude, it.longitude) }
+}.getOrNull()
+
 /** Map with one draggable pin; tapping the map moves the pin there. */
 @Composable
-private fun PinMap(pin: LatLon?, onPin: (LatLon) -> Unit, modifier: Modifier) {
+private fun PinMap(pin: LatLon?, centre: LatLon?, onPin: (LatLon) -> Unit, modifier: Modifier) {
     val ctx = LocalContext.current
     val setPin by rememberUpdatedState(onPin)
     val density = ctx.resources.displayMetrics.density
@@ -130,7 +156,7 @@ private fun PinMap(pin: LatLon?, onPin: (LatLon) -> Unit, modifier: Modifier) {
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             maxZoomLevel = 19.0
             controller.setZoom(19.0)
-            pin?.let { controller.setCenter(GeoPoint(it.lat, it.lon)) }
+            (pin ?: centre)?.let { controller.setCenter(GeoPoint(it.lat, it.lon)) }
         }
     }
     val owner = LocalLifecycleOwner.current

@@ -52,6 +52,7 @@ fun RoadPacksCard() {
     var installed by remember { mutableStateOf(RoadSource.packs(ctx).installed().map { Triple(it.id, it.name, it.version) to it.file.length() }) }
     var msg by remember { mutableStateOf("") }
     var refresh by remember { mutableIntStateOf(0) }
+    var confirmDelete by remember { mutableStateOf<Triple<String, String, Long>?>(null) }
     fun reloadInstalled() { installed = RoadSource.packs(ctx).installed().map { Triple(it.id, it.name, it.version) to it.file.length() } }
     LaunchedEffect(refresh) { reloadInstalled() }
 
@@ -83,15 +84,15 @@ fun RoadPacksCard() {
                 Text(name, fontWeight = FontWeight.SemiBold, color = Palette.Ink)
                 Hint("Đã cài · ${sizeMb(bytes)} · dữ liệu ngày $version")
             }
-            TextButton(onClick = { RoadSource.packs(ctx).delete(id); refresh++ }) { Text("Xoá", color = Palette.Red) }
+            TextButton(onClick = { confirmDelete = Triple(id, name, bytes) }) { Text("Xoá", color = Palette.Red) }
         }
     }
 
     // catalogue
     OutlinedTextField(url, { url = it.trim(); Prefs.saveSettings(ctx, Prefs.settings(ctx).copy(roadPackIndexUrl = url)) },
         label = { Text("Nguồn gói (địa chỉ index.json)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(enabled = url.isNotBlank(), onClick = {
+    Column {
+        OutlinedButton(enabled = url.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
             msg = "Đang tải danh sách…"
             scope.launch {
                 msg = try {
@@ -100,14 +101,27 @@ fun RoadPacksCard() {
                 } catch (e: Exception) { "Không tải được danh sách: ${e.message}" }
             }
         }) { Text("Tải danh sách") }
-        OutlinedButton(onClick = { importer.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }) { Text("Nhập file gói…") }
+        TextButton(onClick = { importer.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }) { Text("Nhập file gói (Zalo, Drive…)") }
     }
-    if (msg.isNotEmpty()) Hint(msg, color = Palette.Blue)
+    if (msg.isNotEmpty()) Hint(msg, color = if (msg.startsWith("Không")) Palette.Red else Palette.Blue)
     for (e in catalogue) {
         val have = installed.firstOrNull { it.first.first == e.id }?.first?.third
-        PackRow(e, have, anyNetwork = false, onInstalled = { refresh++ })
+        PackRow(e, have, anyNetwork = true, onInstalled = { refresh++ })   // asked for now, size shown: 4G is fine
     }
     Hint("Dữ liệu đường © OpenStreetMap contributors (ODbL), qua Geofabrik.")
+
+    confirmDelete?.let { (id, name, bytes) ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmDelete = null },
+            title = { Text("Xoá gói “$name”?") },
+            text = { Text("Giải phóng ${sizeMb(bytes)}. Muốn dùng lại phải tải lại gói.") },
+            confirmButton = { TextButton(onClick = {
+                confirmDelete = null
+                scope.launch { withContext(Dispatchers.IO) { RoadSource.packs(ctx).delete(id) }; refresh++ }
+            }) { Text("Xoá", color = Palette.Red) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Không") } },
+        )
+    }
 }
 
 /**

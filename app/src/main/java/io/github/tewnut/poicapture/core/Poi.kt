@@ -14,20 +14,6 @@ enum class SessionKind(val json: String) {
     }
 }
 
-/** Role of a photo of a place (POI mode). */
-enum class PhotoRole(val json: String, val label: String) {
-    FACADE("facade", "Mặt tiền"),     // straight-on front: the cover photo
-    SIGN("sign", "Biển hiệu"),        // the signboard, close: name / phone / category readable
-    SIDE("side", "Bên hông"),
-    INSIDE("inside", "Bên trong"),
-    INFO("info", "Thông tin"),        // opening hours, menu, price list, phone number on the door
-    CONTEXT("context", "Toàn cảnh");  // the place among its neighbours (helps find it again)
-
-    companion object {
-        fun of(s: String?) = entries.firstOrNull { it.json == s }
-    }
-}
-
 /** Status of a place as seen on site. */
 enum class PoiStatus(val json: String, val label: String) {
     NEW("new", "Mới"), EXISTS("exists", "Đã có trên bản đồ"), CLOSED("closed", "Đã đóng cửa"), MOVED("moved", "Đã chuyển đi");

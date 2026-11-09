@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.tewnut.poicapture"
         minSdk = 30            // Android 11+: raw GNSS, camera/location foreground-service types
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.8.0"
+        versionCode = 9
+        versionName = "0.9.0"
     }
     signingConfigs {
         // Release key from the environment (GitHub Actions secrets, see .github/workflows/release.yml). Without it the
