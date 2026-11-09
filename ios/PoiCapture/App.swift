@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreLocation
 import ImageIO
+import Shared
 import SwiftUI
 
 // POI Capture for iPhone: Place capture (stop at each shop, photograph it). Same rules and export as the Android
