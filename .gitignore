@@ -22,6 +22,8 @@ tools/roadpack/packs/
 tools/roadpack/.venv/
 *.osm.pbf
 *.nodeidx.bin
+*.areaidx.bin
+*.osm.pbf.md5
 
 # Claude Code: worktrees and personal settings
 .claude/worktrees/
