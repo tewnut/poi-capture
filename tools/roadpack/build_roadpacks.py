@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build offline road packs for the road-capture app from an OpenStreetMap extract (Geofabrik).
+Build offline road packs for the POI Capture app from an OpenStreetMap extract (Geofabrik).
 
     python build_roadpacks.py --pbf vietnam-latest.osm.pbf --regions regions.json --out packs/
 
@@ -16,7 +16,7 @@ import osmium
 FORMAT = 1
 MAGIC = "road-capture-roadpack"
 CELL = 0.005
-# == Overpass.SKIP_AREA in app/src/main/java/io/github/tewnut/roadcapture/core/Road.kt (same unanchored regex semantics)
+# == Overpass.SKIP_AREA in app/src/main/java/io/github/tewnut/poicapture/core/Road.kt (same unanchored regex semantics)
 SKIP = ("footway|path|steps|cycleway|pedestrian|bridleway|corridor|elevator|platform|proposed|construction"
         "|service|track|bus_guideway|raceway|abandoned|razed")
 SKIP_RE = re.compile(SKIP)

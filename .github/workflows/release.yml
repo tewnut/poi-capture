@@ -1,0 +1,79 @@
+# Signed APK for every version tag. Bump versionCode / versionName in app/build.gradle.kts, commit, then
+#   git tag v0.8.0 && git push origin v0.8.0
+# GitHub runs the unit tests, builds app-release.apk, signs it with the release key kept in the repository secrets
+# (RELEASE_KEYSTORE_B64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS) and attaches poi-capture-vX.Y.Z.apk to the
+# release vX.Y.Z. Download: https://github.com/<owner>/<repo>/releases/latest
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build again, e.g. v0.8.0"
+        required: true
+
+permissions:
+  contents: write              # create the release, upload the APK
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: The tag must match versionName
+        run: |
+          V=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          if [ "v$V" != "$TAG" ]; then echo "::error::tag $TAG does not match versionName $V"; exit 1; fi
+
+      - name: Release key
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo "::error::secret RELEASE_KEYSTORE_B64 is missing"; exit 1; fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "RELEASE_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Test and build
+        env:
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Check the signature
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "$APK"
+          cp "$APK" "poi-capture-$TAG.apk"
+          sha256sum "poi-capture-$TAG.apk" > "poi-capture-$TAG.apk.sha256"
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Publish
+        run: |
+          FILES="poi-capture-$TAG.apk poi-capture-$TAG.apk.sha256"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" $FILES --clobber
+          else
+            gh release create "$TAG" $FILES --verify-tag --title "POI Capture $TAG" --generate-notes
+          fi
+          gh release view "$TAG" --json assets -q '.assets[] | "\(.name) \(.size)"'

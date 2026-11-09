@@ -7,18 +7,32 @@ plugins {
 }
 
 android {
-    namespace = "io.github.tewnut.roadcapture"
+    namespace = "io.github.tewnut.poicapture"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.tewnut.roadcapture"
+        applicationId = "io.github.tewnut.poicapture"
         minSdk = 30            // Android 11+: raw GNSS, camera/location foreground-service types
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.7.0"
+        versionCode = 8
+        versionName = "0.8.0"
+    }
+    signingConfigs {
+        // Release key from the environment (GitHub Actions secrets, see .github/workflows/release.yml). Without it the
+        // release build is unsigned; debug builds always use the local debug key.
+        val keystore = System.getenv("RELEASE_KEYSTORE_FILE")
+        if (!keystore.isNullOrBlank()) create("release") {
+            storeFile = file(keystore)
+            storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")?.trim()
+            keyAlias = System.getenv("RELEASE_KEY_ALIAS")?.trim()
+            keyPassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")?.trim()
+        }
     }
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

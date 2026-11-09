@@ -1,6 +1,6 @@
 # Capture server contract (app 0.6)
 
-What the road-capture app expects from the VMAP side. Nothing here is implemented in this repository: the app only
+What the POI Capture app expects from the VMAP side. Nothing here is implemented in this repository: the app only
 needs a tus endpoint to upload, and optionally a small read API. Configure it on the phone in **Hồ sơ → Máy chủ nhận
 dữ liệu** (upload URL, access token, API URL, "cho phép tải bằng 4G").
 
@@ -18,7 +18,9 @@ storage (S3-compatible), with its post-finish hook triggering the agent.
   A `409` makes the app re-read the offset. **To check with the real server:** the method-override header is part of
   the tus protocol's recommendations, but it has only been tested here against a test stub, not against tusd.
 - `Upload-Metadata` keys (base64 values as per tus): `filename`, `filetype` (`application/zip`), `sessionId`,
-  `schema` (`road-capture/3`), `kind` (`sweep` / `poi`), `contributor`, `sha256` (hex SHA-256 of the whole zip).
+  `schema` (`poi-capture/3`; `road-capture/3` before app 0.8), `kind` (`sweep` / `poi`), `contributor`, `email`
+  (typed at onboarding, not verified: group sessions by it, do not trust it for access), `sha256` (hex SHA-256 of the
+  whole zip).
 - The upload is the session zip described in [handoff.md](handoff.md). **Verify `sha256` after the upload completes.**
 - The same `sessionId` can be uploaded again: after the contributor edited the session (moved a photo, reviewed a place)
   the app uploads a new zip. Keep the latest one per `sessionId`.

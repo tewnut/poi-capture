@@ -1,14 +1,16 @@
-# Ghi hình đường phố (road-capture), Android
+# POI Capture (Android)
 
-A native Android app for field contributors: pick a road, pick the side of the road, then ride slowly (motorbike or car)
-with the phone mounted, landscape, camera facing the chosen side. The app takes a full-resolution photo every few metres
-(or records video in segments), each tagged with GPS, road and side. It also logs raw GNSS measurements and the IMU
-so positions can be refined later. Sessions stay on the phone until exported as a zip for the POI agent, which
-corrects positions, reads signboards and contributes the places to VMAP. The zip format (`road-capture/2`) and the agent
-pipeline are in [docs/handoff.md](docs/handoff.md).
+An Android app for field contributors who put shops and other places on the map. Ride along a street with the phone
+mounted (the app photographs the row of buildings by itself), or stop at each place and photograph it on purpose. Every
+photo carries GPS, the road, the camera direction and an estimated point on the shop front; raw GNSS and the IMU are
+logged so positions can be refined later. Sessions stay on the phone until uploaded (or shared as a zip) for the POI
+agent, which corrects positions, reads signboards and contributes the places to the map. The zip format
+(`poi-capture/3`) and the agent pipeline are in [docs/handoff.md](docs/handoff.md).
 
-This replaces the former Vue web app. The last web version is archived beside this folder in
-`road-capture-web-backup-2026-11-08.zip`.
+## Download
+
+**[Latest APK](https://github.com/tewnut/poi-capture/releases/latest)** (`poi-capture-vX.Y.Z.apk`, Android 11+). Open it
+on the phone and allow installing from that source. New versions install over the old one and keep the sessions.
 
 ## Flow
 
@@ -20,8 +22,12 @@ Two kinds of session, chosen on "Ghi mới":
   house number / phone / note and a status (mới / đã có / đóng cửa / chuyển đi). Photos are grouped by place in the
   export, so the agent does not have to sort them.
 
-0. **Hồ sơ** (first run, once per phone): contributor name, default distance from the camera to the shop fronts, and a
-   manual mount angle used only when the app could not measure the camera direction.
+0. **Onboarding** (first run, about a minute): what the app does → **email** (format checked, not verified; it credits
+   and groups the contributor's sessions) and an optional display name → **permissions** (camera, precise location,
+   notifications, each with its reason; a shortcut to Settings when refused) → **road data**: the pack catalogue is
+   fetched and the smallest region covering the contributor's position is suggested, downloaded in the background even
+   on 4G → **ready**: facade distance, how to mount the phone, a summary. Everything can be changed later in **Hồ sơ**
+   (which also has the server, the manual mount angle and "Xem lại phần giới thiệu").
 1. **Ghi mới** (one screen): live map with GPS accuracy (and a "vị trí giả lập" note on emulators / mock locations),
    "Bạn đang ở: <road>" (recognised automatically, also while riding; works offline, names come later), **mặt tiền
    cách camera** 4 / 6 / 8 / 12 m, mode (**ảnh tự động**, **bấm tay**, **video**), then one **Bắt đầu** button.
@@ -53,7 +59,8 @@ Safety: the phone is mounted; the app never needs a tap while riding in auto mod
   [docs/server-api.md](docs/server-api.md).
 - **Without a server**: "Gửi" shares the zip (Zalo, Drive, email…) or saves it, as before.
 - **Offline road data** (Hồ sơ → Dữ liệu đường offline): road packs per region built from OpenStreetMap (Geofabrik)
-  by [tools/roadpack](tools/roadpack/README.md), downloaded over Wi-Fi from a catalogue URL or imported from a file.
+  by [tools/roadpack](tools/roadpack/README.md) and published monthly as the GitHub release `roadpacks`; downloaded
+  over Wi-Fi (or right away during onboarding) from that catalogue or another URL, or imported from a file.
   The road is then recognised without network; elsewhere the app asks Overpass and keeps the answer on the phone.
 - **Already recorded** ("đã quét"): "Ghi mới" draws the phone's own sessions in green and, with the server API, the
   team's in purple, so contributors go where nothing is recorded yet.
@@ -73,6 +80,21 @@ $env:JAVA_HOME = "$env:USERPROFILE\.jdks\jbr-21.0.11"
 ```
 
 Or open the folder in Android Studio and set Gradle JDK to a 17/21 JDK. Requires Android 11+ (minSdk 30).
+
+## Release
+
+Bump `versionCode` / `versionName` in `app/build.gradle.kts`, commit, then push a matching tag:
+
+```
+git tag v0.8.0
+git push origin main v0.8.0
+```
+
+[.github/workflows/release.yml](.github/workflows/release.yml) runs the unit tests, builds the release APK, signs it
+with the release key from the repository secrets (`RELEASE_KEYSTORE_B64`, `RELEASE_KEYSTORE_PASSWORD`,
+`RELEASE_KEY_ALIAS`), checks the signature and attaches `poi-capture-vX.Y.Z.apk` (+ `.sha256`) to the release. Keep the
+keystore backed up outside the repository: an APK signed with another key cannot update the installed app. A local
+signed build works the same way with `RELEASE_KEYSTORE_FILE` set to the keystore path.
 
 ## Status
 
@@ -114,7 +136,9 @@ length, mount offset. Only the mount offset has a field in the UI so far.
 | `capture/Uploads.kt` | WorkManager upload worker, server read API (status, coverage) |
 | `ui/PoiSheet.kt` | "Xong địa điểm": pin on the building, optional fields, status |
 | `net/OverpassClient.kt` | Overpass HTTP with mirror fallback, shared cache (setup screen warms what the service needs) |
-| `MainActivity.kt` | app shell: edge-to-edge, bottom navigation (Ghi mới / Đã ghi / Hồ sơ), first run → profile |
+| `MainActivity.kt` | app shell: edge-to-edge, bottom navigation (Ghi mới / Đã ghi / Hồ sơ), first run → onboarding |
+| `ui/OnboardingScreen.kt`, `core/Onboarding.kt` | first-run flow; email check, display name, pack suggestion |
+| `ui/RoadPacksCard.kt`, `capture/RoadPackWork.kt`, `core/RoadPack.kt` | offline road packs: catalogue, download, lookup |
 | `ui/SetupScreen.kt` | live map + GPS status, road mode, side pictures, mode, Start |
 | `ui/CaptureScreen.kt` | camera preview, HUD, get-ready checklist |
 | `ui/SessionMap.kt` | session map: track, photo dots, photo panel, position correction (tap or drag) |

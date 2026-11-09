@@ -13,7 +13,7 @@ curl -LO https://download.geofabrik.de/asia/vietnam-latest.osm.pbf        # ~316
 **Published automatically**: `.github/workflows/roadpacks.yml` rebuilds the packs on the 3rd of every month (or on
 demand: Actions → roadpacks → Run workflow, or `gh workflow run roadpacks.yml`) and replaces the assets of the GitHub
 release `roadpacks`. The app's default catalogue is
-`https://github.com/tewnut/road-capture/releases/download/roadpacks/index.json` (works once the repository is public).
+`https://github.com/tewnut/poi-capture/releases/download/roadpacks/index.json` (works once the repository is public).
 Forks: change `DEFAULT_ROADPACK_INDEX` in `core/Session.kt` or set "Nguồn gói" in the app.
 
 Output: `packs/<region>.zip` + `packs/index.json` (only these: the ~750 MB temporary node index is written next to

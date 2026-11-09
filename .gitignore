@@ -6,6 +6,7 @@ captures/
 *.apk
 *.aab
 *.keystore
+*.jks
 .externalNativeBuild/
 .cxx/
 
@@ -22,5 +23,6 @@ tools/roadpack/.venv/
 *.osm.pbf
 *.nodeidx.bin
 
-# Claude Code worktrees
+# Claude Code: worktrees and personal settings
 .claude/worktrees/
+.claude/settings.local.json

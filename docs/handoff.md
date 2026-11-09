@@ -1,9 +1,17 @@
-# Handoff to the POI agent (`road-capture/3`)
+# Handoff to the POI agent (`poi-capture/3`)
 
 A contributor exports one zip per session from the Android app (uploaded in the background to the capture server, see
 [server-api.md](server-api.md), or shared by hand). The agent reads it, corrects positions, finds the
 places on the photos, and contributes them to the target map (VMAP) through its contribution tools. This file is the
 contract.
+
+## Changes in app 0.8 (POI Capture)
+
+- The app was renamed POI Capture: the schema id is now `poi-capture/3` (same format as `road-capture/3`; accept both)
+  and the zips are named `poi-capture_….zip`.
+- `session.email`: the contributor's email, typed once at onboarding and **not verified**. Use it to group a person's
+  sessions and to credit them; never as proof of identity. `""` in older sessions (only `contributor` then).
+  `session.contributor` is the display name (the part before `@` when none was given).
 
 ## Changes in `road-capture/3` (app 0.5)
 
@@ -90,7 +98,7 @@ contract.
 ## Zip layout
 
 ```
-manifest.json        session + one entry per photo/video (schema "road-capture/2")
+manifest.json        session + one entry per photo/video (schema "poi-capture/3")
 track.geojson        every GPS fix (LineString + one Point per fix with t, accuracy, speed, heading, elapsedNanos)
 gnss_raw.csv         raw GNSS measurements (present when the phone delivers them)
 imu.csv              sensor,elapsedNanos,x,y,z,w   g = gyro rad/s, a = accel m/s², r = rotation vector
@@ -102,10 +110,10 @@ videos/<id>.mp4      video segments (H.264, ≈1080p, no audio, landscape)
 
 ```jsonc
 {
-  "schema": "road-capture/2",
+  "schema": "poi-capture/3",
   "exportedAt": "2026-11-08T10:18:00Z",
   "session": {
-    "id": "s_…", "schema": "road-capture/2", "contributor": "…", "note": "…",
+    "id": "s_…", "schema": "poi-capture/3", "contributor": "…", "email": "…", "note": "…",
     "vehicle": "motorbike" | "car",
     "mode": "photo-auto" | "photo-manual" | "video",
     "createdAt": "ISO", "startedAt": "ISO", "endedAt": "ISO" | null,   // null = cut off (crash, dead battery)

@@ -24,9 +24,9 @@ jobs:
       PBF: vietnam-latest.osm.pbf
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -46,7 +46,7 @@ jobs:
       - name: Publish to the "roadpacks" release
         run: |
           VERSION=$(python -c "import json; print(json.load(open('packs/index.json'))['version'])")
-          NOTES="Offline road packs for road-capture, OpenStreetMap data of $VERSION (Geofabrik, ODbL 1.0: © OpenStreetMap contributors). Catalogue: index.json"
+          NOTES="Offline road packs for POI Capture, OpenStreetMap data of $VERSION (Geofabrik, ODbL 1.0: © OpenStreetMap contributors). Catalogue: index.json"
           if gh release view roadpacks >/dev/null 2>&1; then
             gh release edit roadpacks --title "Road packs $VERSION" --notes "$NOTES" --latest=false
           else
