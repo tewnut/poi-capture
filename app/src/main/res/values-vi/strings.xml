@@ -321,11 +321,8 @@
     <string name="sessionmap_photo_desc">Ảnh %1$d</string>
     <string name="sessionmap_photo_thumb_desc">Ảnh %1$d, chạm để xem lớn</string>
     <string name="sessionmap_no_road">Chưa nhận ra đường</string>
-    <string name="sessionmap_moved">Đã sửa vị trí</string>
     <string name="sessionmap_gps">Vị trí GPS</string>
     <string name="sessionmap_gps_accuracy">Vị trí GPS ±%1$d m</string>
-    <string name="sessionmap_move">Sửa vị trí</string>
-    <string name="sessionmap_back_gps">Về vị trí GPS</string>
 
     <!-- Shared components (ui/Components.kt) -->
     <string name="common_loc_no_permission">App chưa được phép dùng vị trí, nên không biết ảnh chụp ở đâu.</string>
@@ -444,10 +441,6 @@
     <string name="device_need_camera_why">Biển hiệu phải đọc được trên ảnh.</string>
     <string name="device_footer">Vui lòng ghi bằng điện thoại khác.</string>
     <string name="device_close">Đóng</string>
-    <string name="sessionmap_move_banner">Kéo bản đồ dưới ghim</string>
-    <string name="sessionmap_move_title">Sửa vị trí ảnh %1$d/%2$d</string>
-    <string name="sessionmap_move_hint">Ghim luôn ở giữa; phóng to để đặt đúng cửa.</string>
-    <string name="sessionmap_move_distance">Cách vị trí cũ %1$d m</string>
     <string name="sessionmap_place_here">Đặt ở đây</string>
     <string name="sessionmap_cancel">Huỷ</string>
     <string name="setup_sweep_sub">Chạy xe · tự chụp</string>
@@ -472,4 +465,13 @@
     <string name="sessions_title">Ghi POI</string>
     <string name="home_new_session">Ghi mới</string>
     <string name="session_no_street">Chưa rõ tên đường</string>
+    <string name="sessionmap_moved">Đã đặt vị trí</string>
+    <string name="sessionmap_back_gps">Đặt lại</string>
+    <string name="sessionmap_move">Sửa vị trí</string>
+    <string name="sessionmap_move_banner">Kéo bản đồ tới cửa hàng</string>
+    <string name="sessionmap_move_title">Vị trí ảnh %1$d/%2$d</string>
+    <string name="sessionmap_move_hint">Ghim luôn ở giữa; phóng to để đặt đúng cửa.</string>
+    <string name="sessionmap_move_distance">Cách chỗ chụp %1$d m</string>
+    <string name="sessionmap_legend_photo">Chỗ chụp</string>
+    <string name="sessionmap_legend_place">Cửa hàng</string>
 </resources>

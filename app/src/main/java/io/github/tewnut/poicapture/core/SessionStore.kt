@@ -122,14 +122,15 @@ class SessionStore(val root: File) {
     }
 
     /**
-     * The contributor moved a photo on the map: keep the GPS position, store the corrected one next to it.
-     * `null` puts the photo back on its GPS position.
+     * The contributor put the place seen on a photo where it really is (Photo locations → Move). The camera position
+     * stays the GPS one (`lat` / `lon`); `null` goes back to the app's estimate. Before app 0.12 a move corrected the
+     * camera position instead (`relocatedLat` / `relocatedLon`, still read).
      */
-    fun relocate(sessionId: String, itemId: String, p: LatLon?, nowMs: Long = System.currentTimeMillis()) =
+    fun placeAt(sessionId: String, itemId: String, p: LatLon?, nowMs: Long = System.currentTimeMillis()) =
         patchItem(sessionId, itemId, JSONObject()
-            .put("relocatedLat", p?.lat ?: JSONObject.NULL)
-            .put("relocatedLon", p?.lon ?: JSONObject.NULL)
-            .put("relocatedAt", if (p != null) iso(nowMs) else JSONObject.NULL))
+            .put("placeLat", p?.lat ?: JSONObject.NULL)
+            .put("placeLon", p?.lon ?: JSONObject.NULL)
+            .put("placedAt", if (p != null) iso(nowMs) else JSONObject.NULL))
 
     /** Track points (lat/lon) for drawing. */
     fun trackPoints(sessionId: String): List<LatLon> {

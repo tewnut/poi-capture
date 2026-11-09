@@ -114,15 +114,15 @@ class StoreExportTest {
         val store = SessionStore(tmp.newFolder("sessions"))
         store.create(session())
         store.appendItem("s_test", JSONObject().put("id", "p_1").put("kind", "photo").put("tMs", 1).put("lat", 21.0).put("lon", 105.0))
-        store.relocate("s_test", "p_1", LatLon(21.0001, 105.0002), nowMs = 5000L)
+        store.placeAt("s_test", "p_1", LatLon(21.0001, 105.0002), nowMs = 5000L)
         var it = store.items("s_test").single()
         assertEquals(21.0, it.getDouble("lat"), 0.0)                 // GPS position kept
-        assertEquals(21.0001, it.getDouble("relocatedLat"), 0.0)
-        assertEquals(105.0002, it.getDouble("relocatedLon"), 0.0)
-        assertEquals("1970-01-01T00:00:05Z", it.getString("relocatedAt"))
-        store.relocate("s_test", "p_1", null)                         // back to GPS
+        assertEquals(21.0001, it.getDouble("placeLat"), 0.0)
+        assertEquals(105.0002, it.getDouble("placeLon"), 0.0)
+        assertEquals("1970-01-01T00:00:05Z", it.getString("placedAt"))
+        store.placeAt("s_test", "p_1", null)                          // back to the estimate
         it = store.items("s_test").single()
-        assertTrue(it.isNull("relocatedLat"))
+        assertTrue(it.isNull("placeLat"))
         assertEquals(21.0, it.getDouble("lat"), 0.0)
     }
 

@@ -104,7 +104,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                     items.count { it.optString("kind") == "video" && store.videoFile(s.id, it.getString("id")).length() > 0 },
                     TrackStats.of(store.trackFile(s.id), s.settings.maxAccuracyM),
                     store.dir(s.id).walkTopDown().filter { it.isFile }.sumOf { it.length() },
-                    items.count { it.has("relocatedLat") && !it.isNull("relocatedLat") },
+                    items.count { (it.has("placeLat") && !it.isNull("placeLat")) || (it.has("relocatedLat") && !it.isNull("relocatedLat")) },
                     pois.size, if (s.kind == SessionKind.SWEEP) store.marks(s.id).size else 0)
             }
         }

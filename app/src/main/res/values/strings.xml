@@ -335,11 +335,8 @@
     <string name="sessionmap_photo_desc">Photo %1$d</string>
     <string name="sessionmap_photo_thumb_desc">Photo %1$d, tap to enlarge</string>
     <string name="sessionmap_no_road">Road not recognised</string>
-    <string name="sessionmap_moved">Moved by hand</string>
     <string name="sessionmap_gps">GPS position</string>
     <string name="sessionmap_gps_accuracy">GPS position ±%1$d m</string>
-    <string name="sessionmap_move">Move</string>
-    <string name="sessionmap_back_gps">Back to GPS</string>
 
     <!-- Shared components (ui/Components.kt) -->
     <string name="common_loc_no_permission">The app isn\'t allowed to use your location, so it can\'t tell where photos were taken.</string>
@@ -460,10 +457,6 @@
     <string name="device_need_camera_why">Signs must be readable on the photos.</string>
     <string name="device_footer">Please record with another phone.</string>
     <string name="device_close">Close</string>
-    <string name="sessionmap_move_banner">Drag the map under the pin</string>
-    <string name="sessionmap_move_title">Moving photo %1$d of %2$d</string>
-    <string name="sessionmap_move_hint">The pin stays in the middle; zoom in for the exact door.</string>
-    <string name="sessionmap_move_distance">%1$d m from where it was</string>
     <string name="sessionmap_place_here">Place here</string>
     <string name="sessionmap_cancel">Cancel</string>
     <string name="setup_sweep_sub">Ride · auto photos</string>
@@ -488,4 +481,13 @@
     <string name="sessions_title">POI Captures</string>
     <string name="home_new_session">New Capture</string>
     <string name="session_no_street">No street name</string>
+    <string name="sessionmap_moved">Place set by hand</string>
+    <string name="sessionmap_back_gps">Reset place</string>
+    <string name="sessionmap_move">Move place</string>
+    <string name="sessionmap_move_banner">Drag the map onto the shop</string>
+    <string name="sessionmap_move_title">Place of photo %1$d of %2$d</string>
+    <string name="sessionmap_move_hint">The pin stays in the middle; zoom in for the exact door.</string>
+    <string name="sessionmap_move_distance">%1$d m from where the photo was taken</string>
+    <string name="sessionmap_legend_photo">Photo taken</string>
+    <string name="sessionmap_legend_place">Shop</string>
 </resources>

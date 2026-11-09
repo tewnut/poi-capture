@@ -96,9 +96,12 @@ photos and contributes them to the target map through that map's contribution to
 - **Road fields may be null**: `wayId`, `roadName`, `distanceToRoadM`, `segmentBearing`, `travel` and `sideOfWay` are
   null when no road data covered that spot. The agent then recomputes them from `sideOfTravel` + `travelBearing` + its
   own map-matching on the track.
-- **Manual position correction**: the contributor sees every photo as a dot on the map and can move a wrong one. The
-  GPS position stays in `lat` / `lon`; the correction is added as `relocatedLat`, `relocatedLon`, `relocatedAt`
-  (absent / null = not corrected). **Prefer the corrected position**; `cameraBearing` and `sideOfTravel` still apply.
+- **Place set by hand** (app 0.12+): on the map each selected photo shows where it was taken (the camera, GPS, with
+  its accuracy) and where the place it shows is (the estimate, or the contributor's pin). "Move place" puts **the
+  place**, not the camera: `placeLat`, `placeLon`, `placedAt` (absent / null = not set). **It wins over the
+  triangulated and the estimated position.** The camera position is never edited by hand: `lat` / `lon` stay GPS.
+  Older sessions (≤ 0.11) instead corrected the **camera** position: `relocatedLat`, `relocatedLon`, `relocatedAt`;
+  use that as the photo's origin, with `cameraBearing` and `sideOfTravel` still applying.
 - **Measured instead of asked**:
   - `session.vehicle` is `"unspecified"` (older sessions: `"motorbike"` / `"car"`). Photo spacing and the speed limit
     come from `session.plan`, the speed from the phone.
@@ -128,7 +131,7 @@ photos and contributes them to the target map through that map's contribution to
   - Per item **estimated facade point**: `facadeLat`, `facadeLon`, `facadeDistanceM`, `facadeSource: "roadType"`
     (older sessions: `"profile"`) = camera position + `facadeDistanceM` along `cameraBearing`. A rough prior to put the place on the building, not on the
     road: snap it to the street-facing edge of the nearest building footprint, refine by triangulating the sign over
-    consecutive photos and by the house number. When the photo was moved by hand, recompute it from
+    consecutive photos and by the house number. In older sessions with a corrected camera, recompute it from
     `relocatedLat / Lon` + `cameraBearing` + `facadeDistanceM`.
 - `session.exportedAt` (last send / save by the contributor) and `session.device.emulator`.
 
@@ -190,7 +193,7 @@ videos/<id>.mp4      video segments (H.264, ≈1080p, no audio, landscape)
       "facadeLat": 21.02845, "facadeLon": 105.80512, "facadeDistanceM": 6, "facadeSource": "roadType", "facadeRoadType": "residential",
       "wayId": 123456, "roadName": "Phố Tràng Tiền", "distanceToRoadM": 3.2, "segmentBearing": 90,   // null without road data
       "travel": "forward", "sideOfTravel": "right", "sideOfWay": "right",   // per item: a U-turn flips the side
-      "relocatedLat": 21.02853, "relocatedLon": 105.80519, "relocatedAt": "ISO",   // only when moved by hand
+      "placeLat": 21.02851, "placeLon": 105.80527, "placedAt": "ISO",   // only when the place was set by hand
       "poiId": "poi_…", "role": "sign", "ocr": { … },                                // place photos only
       "width": 2560, "height": 1440, "exifOrientation": 1, "bytes": 812345,
       "exposureS": 0.002, "iso": 100, "focalLengthMm": 6.9,
@@ -241,13 +244,41 @@ Notes for the agent:
    `pois[].position` (pin, or GPS snapped to the building), the photos of the place, `read` and `fields` as hints.
 2. **Map-match** each fix to `road.ways` (HMM / nearest segment with heading); the contributor's position snaps onto the
    carriageway they drove (right lane in Vietnam).
-3. **Place the frontage**: a place seen on a photo lies on the `sideOfWay` side, roughly `facadeDistanceM` (10–40 m
-   for wide streets) from the snapped position along `cameraBearing`. Use consecutive frames (parallax) to refine the
-   distance when the same sign is seen twice.
-4. **Group frames**: the same signboard appears on 2–5 consecutive photos or many video frames; cluster by position +
-   visual similarity, keep the sharpest frontal frame as the cover photo.
-5. **Read the sign** with a vision model: business name, category, phone numbers, website / social pages, house number,
-   opening hours. Normalise the name to the map's naming rules (e.g. all-caps signs → title case).
+3. **Group frames**: the same signboard appears on 2–5 consecutive photos (street sweep spaces them for that: each
+   point of the facade on ≥ 2 photos); detect the sign in each photo (its bounding box), and cluster detections by
+   sign text (normalised, diacritics folded) + visual similarity + consistent bearings (step 4). Prefer photos with
+   `blur.blurry = false`; keep the sharpest frontal frame as the cover photo.
+4. **Triangulate each sign** (bearing-only intersection). Every detection is a ray from the camera towards the sign:
+   - origin `pᵢ`: the camera position (`lat` / `lon`, or the post-processed track at the photo's `elapsedNanos`),
+     projected to a local metric frame (east / north metres around the session);
+   - bearing `θᵢ = cameraBearing + atan((x − W/2) / f)`, with `x` the sign's centre column in the upright image,
+     `W` the image `width` and `f = (W/2) / tan(hFovDeg/2)` (per item: portrait and landscape frames differ);
+     direction `uᵢ = (sin θᵢ, cos θᵢ)`;
+   - weight `wᵢ = 1 / σᵢ²` with `σᵢ² ≈ (dᵢ · δθᵢ)² + accuracyM²`, `dᵢ` the distance to the current estimate (start
+     with `facadeDistanceM`) and `δθᵢ` the bearing error: about 3° when `cameraBearingSource = "measured"`, 10° when
+     `"assumed"`, 20° for `"compass"` (Place capture on foot).
+
+   The point closest to all rays (weighted least squares) solves the 2 × 2 system
+   `(Σ wᵢ Mᵢ) x = Σ wᵢ Mᵢ pᵢ` with `Mᵢ = I − uᵢ uᵢᵀ` (the projector onto each ray's normal). Do **not** average the
+   pairwise crossings: nearly parallel pairs land far away and drag the mean. Then:
+   - **check the geometry**: the solution must be in front of every camera (`(x − pᵢ) · uᵢ > 0`) and the rays should
+     span a useful angle (≥ about 20° between the extreme bearings); with only near-parallel rays, fall back to the
+     single-photo prior below;
+   - **reject outliers**: drop the ray with the largest normalised residual `|Mᵢ (x − pᵢ)| / σᵢ` when it exceeds 3,
+     re-solve, repeat while ≥ 2 rays remain (a mismatched sign, a reflection, a wrong bearing);
+   - **report the uncertainty**: the covariance is `(Σ wᵢ Mᵢ)⁻¹`; its eigenvalues give the error ellipse (store it
+     with the place, use it to decide whether to auto-contribute or ask for review);
+   - **apply the map**: the place should be off the carriageway and on the `sideOfWay` side (the same checks as the
+     app's Move warnings: `MoveCheck`), and on or next to a building outline when one exists; when the ellipse
+     crosses a building's street edge, snap to that edge.
+
+   What triangulation does not remove: GPS error shared by consecutive photos moves all rays together (correct the
+   track first with the raw GNSS, `gnss_raw.csv`), and a constant bearing bias (mount yaw) shifts the point along
+   the street on a straight ride. A sign seen on one photo only: use the **single-photo prior** = the item's
+   estimated facade point (`facadeLat` / `facadeLon`: camera + `facadeDistanceM` along the bearing to the sign),
+   flagged low confidence. A place the contributor set by hand (`placeLat` / `placeLon`) wins over both.
+5. **Read the sign** with a vision model, on the photos of its cluster: business name, category, phone numbers,
+   website / social pages, house number, opening hours. Normalise the name to the map's naming rules (e.g. all-caps signs → title case).
 6. **Address**: house number from the sign if visible, street = the matched road, ward / province from the corrected
    position.
 7. **Dedup against the target map** at the corrected point (an existing place with a matching name / phone nearby).

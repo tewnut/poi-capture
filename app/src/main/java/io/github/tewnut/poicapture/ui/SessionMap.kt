@@ -48,6 +48,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import io.github.tewnut.poicapture.R
+import io.github.tewnut.poicapture.core.CapturePlan
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,6 +70,7 @@ import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.views.overlay.Polyline
 import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.capture.CaptureService
@@ -87,21 +89,30 @@ internal class TemplateTileSource(private val template: String) :
         .replace("{y}", MapTileIndex.getY(index).toString())
 }
 
-/** A photo on the map: GPS position, and the contributor's correction when there is one. */
-data class PhotoPin(val id: String, val gps: LatLon, val fixed: LatLon?, val tMs: Long, val roadName: String?, val accuracyM: Int?,
-                    val cameraBearing: Double?, val facadeDistanceM: Double?) {
-    val at: LatLon get() = fixed ?: gps
-    /** estimated shop-front point, from the effective (possibly corrected) camera position */
-    val facade: LatLon? get() = if (cameraBearing != null && facadeDistanceM != null) Geo.destination(at, cameraBearing, facadeDistanceM) else null
+/**
+ * A photo on the map: where it was taken (the camera, GPS), and where the place it shows is: put there by the
+ * contributor ([placed]), else the app's estimate (camera + facade distance along the camera direction).
+ */
+data class PhotoPin(val id: String, val gps: LatLon, val legacyFix: LatLon?, val placed: LatLon?, val tMs: Long, val roadName: String?,
+                    val accuracyM: Int?, val cameraBearing: Double?, val facadeDistanceM: Double?, val hFovDeg: Double?) {
+    /** where the photo was taken (sessions before 0.12 could correct it by hand: [legacyFix]) */
+    val camera: LatLon get() = legacyFix ?: gps
+    val at: LatLon get() = camera
+    /** camera + expected distance along the camera direction (Place capture on foot: a few metres in front) */
+    val estimate: LatLon? get() = cameraBearing?.let { Geo.destination(camera, it, facadeDistanceM ?: ON_FOOT_M) }
+    /** where the place is: by hand, else the estimate, else (no direction known) the camera itself */
+    val place: LatLon get() = placed ?: estimate ?: camera
+    val edited: Boolean get() = placed != null || legacyFix != null
     companion object {
+        const val ON_FOOT_M = 5.0
+        private fun JSONObject.ll(a: String, b: String) = if (has(a) && !isNull(a) && has(b) && !isNull(b)) LatLon(getDouble(a), getDouble(b)) else null
+        private fun JSONObject.d(k: String) = if (has(k) && !isNull(k)) optDouble(k).takeIf { !it.isNaN() } else null
         fun of(o: JSONObject): PhotoPin? {
             if (o.optString("kind") != "photo" || o.isNull("lat") || !o.has("lat")) return null
-            val fixed = if (!o.isNull("relocatedLat") && o.has("relocatedLat")) LatLon(o.getDouble("relocatedLat"), o.getDouble("relocatedLon")) else null
-            return PhotoPin(o.getString("id"), LatLon(o.getDouble("lat"), o.getDouble("lon")), fixed, o.optLong("tMs"),
+            return PhotoPin(o.getString("id"), LatLon(o.getDouble("lat"), o.getDouble("lon")), o.ll("relocatedLat", "relocatedLon"),
+                o.ll("placeLat", "placeLon"), o.optLong("tMs"),
                 o.optString("roadName").takeIf { it.isNotBlank() && it != "null" },
-                if (o.isNull("accuracyM")) null else o.optDouble("accuracyM").toInt(),
-                if (o.isNull("cameraBearing") || !o.has("cameraBearing")) null else o.getDouble("cameraBearing"),
-                if (o.isNull("facadeDistanceM") || !o.has("facadeDistanceM")) null else o.getDouble("facadeDistanceM"))
+                o.d("accuracyM")?.toInt(), o.d("cameraBearing"), o.d("facadeDistanceM"), o.d("hFovDeg"))
         }
     }
 }
@@ -150,7 +161,7 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
 
     fun move(id: String, to: LatLon?) {
         scope.launch {
-            withContext(Dispatchers.IO) { store.relocate(sessionId, id, to) }
+            withContext(Dispatchers.IO) { store.placeAt(sessionId, id, to) }
             relocating = false
             reload++
         }
@@ -164,7 +175,7 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
     val sel = pins.getOrNull(pager.currentPage)
     val insetPx = if (relocating) barPx else cardsPx
     // Move starts with the pin on the photo: 0 m until the map is dragged
-    LaunchedEffect(relocating) { if (relocating) centre = sel?.at }
+    LaunchedEffect(relocating) { if (relocating) centre = sel?.place }   // Move starts with the pin on the place
     Box(modifier) {
         PinsMap(pins, track, selected, live, relocating, bottomInsetPx = insetPx, moveCentre = if (relocating) centre else null,
             onSelect = { id -> pins.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } },
@@ -173,8 +184,8 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
 
         if (relocating && sel != null) {
             // warnings only (the contributor decides): too far, on the road, across the street
-            val warn = centre?.let { io.github.tewnut.poicapture.core.MoveCheck.warnings(sel.gps, sel.cameraBearing, it, ways) }.orEmpty()
-            val pinColor = if (warn.isEmpty()) Palette.Blue else Palette.Amber
+            val warn = centre?.let { io.github.tewnut.poicapture.core.MoveCheck.warnings(sel.camera, sel.cameraBearing, it, ways) }.orEmpty()
+            val pinColor = if (warn.isEmpty()) Color(0xFFF79009) else Palette.Red   // the shop pin; red = check it
             // edit mode: framed map, the pin stays in the middle of what is visible, the map moves under it
             Box(Modifier.fillMaxSize().border(4.dp, Palette.Blue))
             val liftDp = with(density) { (insetPx / 2).toDp() }
@@ -186,15 +197,23 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
                 .background(Color(0x55000000), RoundedCornerShape(50)))   // the pin's shadow on the spot
             Pill(stringResource(R.string.sessionmap_move_banner), Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 12.dp, end = 72.dp),
                 size = 14.sp, bg = Palette.Blue, bold = true)
-            MoveBar(sessionId, sel, pager.currentPage, pins.size, movedM = centre?.let { Geo.distanceM(sel.at, it).roundToInt() }, warn = warn,
+            MoveBar(sessionId, sel, pager.currentPage, pins.size, movedM = centre?.let { Geo.distanceM(sel.camera, it).roundToInt() }, warn = warn,
                 Modifier.align(Alignment.BottomCenter).onSizeChanged { barPx = it.height },
                 onCancel = { relocating = false },
                 onPlace = { mapView?.let { m -> move(sel.id, pinPoint(m, insetPx)) } })
         }
 
-        if (!relocating) Column(Modifier.align(Alignment.TopCenter).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        if (!relocating) Column(Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 12.dp, end = 72.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
             if (noGps > 0) Pill(ctx.resources.getQuantityString(R.plurals.sessionmap_no_gps, noGps, noGps), size = 13.sp, dot = Palette.Red)
+            // which pin is which (a selected photo shows both)
+            if (sel != null) Row(Modifier.background(Color(0xE6FFFFFF), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(Modifier.size(10.dp).background(Palette.Blue, androidx.compose.foundation.shape.CircleShape))
+                Text(stringResource(R.string.sessionmap_legend_photo), fontSize = 12.sp, color = Palette.Ink)
+                Box(Modifier.size(10.dp).background(Color(0xFFF79009), androidx.compose.foundation.shape.CircleShape))
+                Text(stringResource(R.string.sessionmap_legend_place), fontSize = 12.sp, color = Palette.Ink)
+            }
         }
 
         if (relocating) Unit
@@ -237,10 +256,10 @@ private fun PhotoCard(sessionId: String, p: PhotoPin, idx: Int, count: Int,
             Text(p.roadName ?: stringResource(R.string.sessionmap_no_road), fontWeight = FontWeight.Bold, color = Palette.Ink,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Hint(if (p.fixed != null) stringResource(R.string.sessionmap_moved)
+                Hint(if (p.edited) stringResource(R.string.sessionmap_moved)
                     else p.accuracyM?.let { stringResource(R.string.sessionmap_gps_accuracy, it) } ?: stringResource(R.string.sessionmap_gps),
-                    Modifier.weight(1f), color = if (p.fixed != null) Palette.Amber else Palette.Muted)
-                if (p.fixed != null) TextButton(onClick = onReset, modifier = Modifier.height(40.dp)) {
+                    Modifier.weight(1f), color = if (p.edited) Palette.Amber else Palette.Muted)
+                if (p.placed != null) TextButton(onClick = onReset, modifier = Modifier.height(40.dp)) {
                     Text(stringResource(R.string.sessionmap_back_gps), maxLines = 1)
                 }
                 Button(onClick = onRelocate, modifier = Modifier.height(40.dp)) {
@@ -366,6 +385,7 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
                 setSize((9 * density).toInt(), (9 * density).toInt())
             })
     }
+    val shopPin = remember { androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_shop_pin) }
     val map = remember {
         MapView(ctx).apply {
             setTileSource(TemplateTileSource(tileUrl))
@@ -432,54 +452,66 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
                 outlinePaint.strokeWidth = 6f
             })
         }
-        val moving0 = pins.firstOrNull { it.id == selected }.takeIf { relocating }
-        if (moving0 != null) {
-            // edit mode: only this photo, where it was (ring) and a dashed line to the pin
-            m.overlays.add(Marker(m).apply {
-                position = GeoPoint(moving0.at.lat, moving0.at.lon)
-                icon = icons["origin"]
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+        fun dot(p: LatLon, key: String, onTap: () -> Unit) = m.overlays.add(Marker(m).apply {
+            position = GeoPoint(p.lat, p.lon)
+            icon = icons[key]
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            setInfoWindow(null)
+            setOnMarkerClickListener { _, _ -> onTap(); true }
+        })
+        // the other photos: small dots where they were taken (orange = place set by hand); hidden while moving
+        if (!relocating) for (p in pins) if (p.id != selected) dot(p.camera, if (p.edited) "fixed" else "gps") { select(p.id) }
+        val sp = pins.firstOrNull { it.id == selected }
+        if (sp != null) {
+            val cam = sp.camera
+            val shop = if (relocating) moveCentre ?: sp.place else sp.place
+            // how sure the GPS was: a light circle around the camera
+            sp.accuracyM?.takeIf { it > 0 }?.let { r ->
+                m.overlays.add(Polygon(m).apply {
+                    points = Polygon.pointsAsCircle(GeoPoint(cam.lat, cam.lon), r.toDouble())
+                    fillPaint.color = 0x221570EF
+                    outlinePaint.color = 0x661570EF
+                    outlinePaint.strokeWidth = 2 * density
+                    setOnClickListener { _, _, _ -> false }
+                })
+            }
+            // what the camera saw: its field of view as a wedge, out to just past the place
+            sp.cameraBearing?.let { b ->
+                val half = (sp.hFovDeg ?: CapturePlan.DEFAULT_HFOV) / 2
+                val len = (Geo.distanceM(cam, shop) + 4.0).coerceIn(6.0, 40.0)
+                val arc = (-6..6).map { k -> Geo.destination(cam, b + half * k / 6.0, len) }
+                m.overlays.add(Polygon(m).apply {
+                    points = (listOf(cam) + arc + cam).map { GeoPoint(it.lat, it.lon) }
+                    fillPaint.color = 0x1F12B76A
+                    outlinePaint.color = 0x5512B76A
+                    outlinePaint.strokeWidth = 1.5f * density
+                    setOnClickListener { _, _, _ -> false }
+                })
+            }
+            // camera → place
+            if (Geo.distanceM(cam, shop) > 0.5) m.overlays.add(Polyline(m).apply {
+                setPoints(listOf(GeoPoint(cam.lat, cam.lon), GeoPoint(shop.lat, shop.lon)))
+                outlinePaint.color = 0xFFF79009.toInt()
+                outlinePaint.strokeWidth = 3 * density
+                if (relocating || sp.placed == null) outlinePaint.pathEffect =
+                    android.graphics.DashPathEffect(floatArrayOf(8 * density, 6 * density), 0f)   // dashed = estimate / being moved
+            })
+            dot(cam, "sel") {}
+            // the place pin (while moving, the fixed pin in the middle of the screen is the place)
+            if (!relocating) m.overlays.add(Marker(m).apply {
+                position = GeoPoint(shop.lat, shop.lon)
+                icon = shopPin
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                 setInfoWindow(null)
                 setOnMarkerClickListener { _, _ -> true }
             })
-            moveCentre?.let { c ->
-                m.overlays.add(Polyline(m).apply {
-                    setPoints(listOf(GeoPoint(moving0.at.lat, moving0.at.lon), GeoPoint(c.lat, c.lon)))
-                    outlinePaint.color = Palette.Blue.toArgb()
-                    outlinePaint.strokeWidth = 4 * density
-                    outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(10 * density, 8 * density), 0f)
-                })
-            }
-        }
-        // estimated shop-front points (on the building side), with a line from the camera for the selected photo
-        for (p in pins.filter { it.id == selected && !relocating }) {   // only for the selected photo: dozens of squares hide the dots
-            val fc = p.facade ?: continue
-            if (p.id == selected) m.overlays.add(Polyline(m).apply {
-                setPoints(listOf(GeoPoint(p.at.lat, p.at.lon), GeoPoint(fc.lat, fc.lon)))
-                outlinePaint.color = 0xFF7A5AF8.toInt()
-                outlinePaint.strokeWidth = 4f
-            })
-            m.overlays.add(Marker(m).apply {
-                position = GeoPoint(fc.lat, fc.lon)
-                icon = icons["facade"]
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                setInfoWindow(null)
-                setOnMarkerClickListener { _, _ -> select(p.id); true }
-            })
-        }
-        // selected last so it is drawn on top
-        for (p in pins.sortedBy { it.id == selected }.takeIf { !relocating }.orEmpty()) {
-            val isSel = p.id == selected
-            m.overlays.add(Marker(m).apply {
-                position = GeoPoint(p.at.lat, p.at.lon)
-                icon = icons[if (isSel) "sel" else if (p.fixed != null) "fixed" else "gps"]
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                setInfoWindow(null)
-                setOnMarkerClickListener { _, _ -> select(p.id); true }
-            })
         }
         val all = track + pins.map { it.at }
-        if (!fitted && all.size > 1) {
+        if (!fitted && pins.isNotEmpty()) {
+            // open on the selected photo (its camera and place, above the cards) at a sharp zoom; zoom out for the rest
+            fitted = true
+            m.controller.setZoom(19.0)
+        } else if (!fitted && all.size > 1) {
             fitted = true
             shownSel = selected   // the whole session is in view: no jump to photo 1
             m.post {
@@ -498,7 +530,8 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
         if (sel != null && fitted && (sel.id != shownSel || (relocating && !shownMoving && bottomInsetPx > 0))) {
             val z = if (relocating) maxOf(m.zoomLevelDouble, 20.0) else m.zoomLevelDouble
             // the photo goes to the middle of what the cards / move bar leave visible (where the move pin is)
-            m.post { m.controller.animateTo(GeoPoint(sel.at.lat - shiftLat(sel.at.lat, z, bottomInsetPx / 2), sel.at.lon), z, 400L) }
+            val t = if (relocating) sel.place else LatLon((sel.camera.lat + sel.place.lat) / 2, (sel.camera.lon + sel.place.lon) / 2)
+            m.post { m.controller.animateTo(GeoPoint(t.lat - shiftLat(t.lat, z, bottomInsetPx / 2), t.lon), z, 400L) }
             shownSel = sel.id
         }
         shownMoving = relocating && (shownMoving || bottomInsetPx > 0)

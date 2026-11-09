@@ -90,8 +90,9 @@ Two kinds of session, chosen on **New**:
    and **Done with place** on the right, under the thumb. Capture runs in a foreground service (camera + location), keeps
    going with the screen off or another app on top, and resumes after a phone call.
 3. **Sessions**: what is left to send; per session date, duration, distance, counts and a badge; **Send** (share sheet:
-   the contributor picks where it goes), **Map** (track, a dot per photo, the estimated shop-front point; tap a dot to
-   see the photo, **Move** it by tapping the right place or dragging the dot, **Back to GPS** to undo), save the zip or
+   the contributor picks where it goes), **Map** (track and a dot per photo; swipe the photo cards; the selected photo shows where it was
+   taken, with the GPS accuracy and what the camera saw, and the shop; **Move place** puts the shop pin on the right
+   building, **Reset place** undoes it), save the zip or
    delete in the ⋮ menu. Sessions cut off by a crash or a dead battery can still be sent.
 
 Safety: in a street sweep the phone is mounted and the app never needs a tap; marks can come from a handlebar remote.
