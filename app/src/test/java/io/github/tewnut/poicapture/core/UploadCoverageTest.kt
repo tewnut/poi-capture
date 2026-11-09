@@ -137,9 +137,12 @@ class UploadCoverageTest {
         val store = SessionStore(tmp.newFolder("sessions"))
         val s = sessionWithPhotos(store)
         val up = tmp.newFolder("uploads")
+        // a 409 first (re-read the offset and go on), then the connection drops after 2 chunks: stops half-way on any
+        // machine (a time budget made this depend on the speed of the CI runner)
         tus.conflictOnce = true
-        assertEquals(UploadJob.Result.PARTIAL, UploadJob.run(store, s.id, up, client(), System.currentTimeMillis() + 150))
-            .let { }   // either PARTIAL (time budget) or DONE: both fine, the point is no failure on 409
+        tus.dropAfterPatches = 2
+        assertEquals(UploadJob.Result.RETRY, UploadJob.run(store, s.id, up, client(), far()))
+        assertEquals(2L * 64 * 1024, store.uploadState(s.id).offset)          // the 409 cost nothing
         tus.data.clear()                                                     // server forgot the upload (expired)
         val r = UploadJob.run(store, s.id, up, client(), far())
         assertEquals(UploadJob.Result.DONE, r)

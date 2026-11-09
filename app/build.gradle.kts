@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.tewnut.poicapture"
         minSdk = 30            // Android 11+: raw GNSS, camera/location foreground-service types
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.9.0"
+        versionCode = 10
+        versionName = "0.9.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
