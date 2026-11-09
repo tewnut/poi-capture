@@ -1,0 +1,8 @@
+road-capture
+Copyright 2026 The road-capture authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Offline road packs built by tools/roadpack (published as release assets, not part of this source tree) contain
+OpenStreetMap data, © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0:
+https://www.openstreetmap.org/copyright

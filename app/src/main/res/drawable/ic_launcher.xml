@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Road with a camera dot: green rounded square, white road, yellow centre line. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#0B6B4C" android:pathData="M8,0h32a8,8 0,0 1,8 8v32a8,8 0,0 1,-8 8h-32a8,8 0,0 1,-8 -8v-32a8,8 0,0 1,8 -8z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M20,44 L22,4 L26,4 L28,44 Z" />
+    <path android:fillColor="#FEC84B" android:pathData="M23.4,8h1.2v6h-1.2z M23.4,20h1.2v6h-1.2z M23.4,32h1.2v7h-1.2z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M38,20m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
+    <path android:fillColor="#0B6B4C" android:pathData="M38,20m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0" />
+</vector>

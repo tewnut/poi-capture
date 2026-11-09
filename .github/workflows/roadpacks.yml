@@ -1,0 +1,60 @@
+# Offline road packs: rebuilt monthly from the Geofabrik Vietnam extract and published as the assets of the fixed
+# GitHub release "roadpacks" (replaced in place), so the app's catalogue URL never changes:
+#   https://github.com/<owner>/<repo>/releases/download/roadpacks/index.json
+# Pack URLs in index.json are relative to it. Data © OpenStreetMap contributors, ODbL 1.0.
+name: roadpacks
+
+on:
+  schedule:
+    - cron: "0 2 3 * *"        # 02:00 UTC on the 3rd of every month (Geofabrik refreshes daily)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write              # create / update the release
+
+concurrency:
+  group: roadpacks
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PBF: vietnam-latest.osm.pbf
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install builder
+        run: pip install -r tools/roadpack/requirements.txt
+
+      - name: Download the OSM extract (and check its md5)
+        run: |
+          curl -fsSL -o "$PBF" "https://download.geofabrik.de/asia/$PBF"
+          curl -fsSL -o "$PBF.md5" "https://download.geofabrik.de/asia/$PBF.md5"
+          md5sum -c "$PBF.md5"
+          ls -lh "$PBF"
+
+      - name: Build packs
+        run: python tools/roadpack/build_roadpacks.py --pbf "$PBF" --regions tools/roadpack/regions.json --out packs
+
+      - name: Publish to the "roadpacks" release
+        run: |
+          VERSION=$(python -c "import json; print(json.load(open('packs/index.json'))['version'])")
+          NOTES="Offline road packs for road-capture, OpenStreetMap data of $VERSION (Geofabrik, ODbL 1.0: © OpenStreetMap contributors). Catalogue: index.json"
+          if gh release view roadpacks >/dev/null 2>&1; then
+            gh release edit roadpacks --title "Road packs $VERSION" --notes "$NOTES" --latest=false
+          else
+            gh release create roadpacks --title "Road packs $VERSION" --notes "$NOTES" --latest=false --target "$GITHUB_SHA"
+          fi
+          gh release upload roadpacks packs/*.zip packs/index.json --clobber
+          # drop packs of regions removed from regions.json
+          for a in $(gh release view roadpacks --json assets -q '.assets[].name'); do
+            [ -f "packs/$a" ] || gh release delete-asset roadpacks "$a" -y
+          done
+          gh release view roadpacks --json assets -q '.assets[] | "\(.name) \(.size)"'

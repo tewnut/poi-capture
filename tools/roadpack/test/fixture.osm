@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Tiny extract for the app's RoadPack test: a street crossing a cell boundary (lon 105.805), a 2 km straight segment
+     (densified into pieces), and two ways the filter must drop (footway, service). -->
+<osm version="0.6" generator="road-capture test">
+  <node id="1" lat="21.0285" lon="105.8040" version="1"/>
+  <node id="2" lat="21.0285" lon="105.8045" version="1"/>
+  <node id="3" lat="21.0285" lon="105.8070" version="1"/>
+  <node id="4" lat="21.0300" lon="105.8100" version="1"/>
+  <node id="5" lat="21.0300" lon="105.8300" version="1"/>
+  <node id="6" lat="21.0290" lon="105.8041" version="1"/>
+  <node id="7" lat="21.0290" lon="105.8049" version="1"/>
+  <way id="100" version="1">
+    <nd ref="1"/><nd ref="2"/><nd ref="3"/>
+    <tag k="highway" v="residential"/><tag k="name" v="Phố Thử Nghiệm"/>
+  </way>
+  <way id="200" version="1">
+    <nd ref="4"/><nd ref="5"/>
+    <tag k="highway" v="primary"/><tag k="name" v="Đường Thẳng Dài"/><tag k="ref" v="QL99"/>
+  </way>
+  <way id="300" version="1">
+    <nd ref="6"/><nd ref="7"/>
+    <tag k="highway" v="footway"/>
+  </way>
+  <way id="400" version="1">
+    <nd ref="6"/><nd ref="7"/>
+    <tag k="highway" v="service"/>
+  </way>
+</osm>

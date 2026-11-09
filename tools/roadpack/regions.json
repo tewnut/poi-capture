@@ -1,0 +1,7 @@
+[
+  {"id": "ha-noi-noi-thanh", "name": "Hà Nội – nội thành", "bbox": [20.95, 105.75, 21.10, 105.90]},
+  {"id": "ha-noi", "name": "Hà Nội – toàn vùng", "bbox": [20.53, 105.28, 21.39, 106.02]},
+  {"id": "tp-hcm-trung-tam", "name": "TP.HCM – khu trung tâm", "bbox": [10.70, 106.60, 10.88, 106.80]},
+  {"id": "tp-hcm", "name": "TP.HCM – vùng mở rộng", "bbox": [10.35, 106.35, 11.20, 107.05]},
+  {"id": "da-nang", "name": "Đà Nẵng – trung tâm", "bbox": [15.95, 108.10, 16.15, 108.30]}
+]

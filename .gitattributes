@@ -1,0 +1,8 @@
+* text=auto
+# shell scripts must keep LF line endings (gradlew breaks with CRLF on Linux / macOS)
+gradlew text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.zip binary
+*.png binary

@@ -1,0 +1,26 @@
+# Gradle / Android
+.gradle/
+build/
+local.properties
+captures/
+*.apk
+*.aab
+*.keystore
+.externalNativeBuild/
+.cxx/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+.kotlin/
+
+# offline road packs (built artefacts, inputs)
+tools/roadpack/packs/
+tools/roadpack/.venv/
+*.osm.pbf
+*.nodeidx.bin
+
+# Claude Code worktrees
+.claude/worktrees/
