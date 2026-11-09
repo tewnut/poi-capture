@@ -16,6 +16,11 @@ release `roadpacks`. The app's default catalogue is
 `https://github.com/tewnut/poi-capture/releases/download/roadpacks/index.json`. Forks: change `DEFAULT_ROADPACK_INDEX`
 in `core/Session.kt`, or set the catalogue URL in the app.
 
+Reference run (vietnam-latest of 2026-11-08, 34 provinces): 15 min, peak RAM 3.9 GB; packs 2.4–10.1 MB (Hà Nội
+7.4 MB, TP. Hồ Chí Minh 9.2 MB), 214 MB in all; index.json 68 KB. OSM already carries the 34 new boundaries; Khánh Hòa's
+relation does not assemble as an area (members out at sea), so its outline is rebuilt from the ways that are present
+(the fallback in `areas_from_ways`).
+
 Output: `packs/<region>.zip` + `packs/index.json`. Temporary node indexes (~750 MB) are written next to the pbf
 (`<pbf>.nodeidx.bin`, `<pbf>.areaidx.bin`) and deleted, or by the next run when Windows still holds them. Host the
 folder on any static HTTPS server (or object storage) and give the app the URL of `index.json`. A pack file can also be

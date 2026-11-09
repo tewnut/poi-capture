@@ -165,6 +165,54 @@ def admin_areas(pbf):
     return out
 
 
+def areas_from_ways(pbf, names):
+    """
+    Fallback for boundaries the area assembler rejects (a relation with members outside the extract, e.g. remote
+    islands): polygonize the outer ways that are present. Closed parts (the mainland) come out whole; open ones drop.
+    Returns normalised name -> list of polygons.
+    """
+    from shapely.geometry import LineString
+    from shapely.ops import polygonize, unary_union
+    wanted = {norm(n) for n in names}
+    rel_ways = {}                                        # normalised name -> {"outer": set(ids), "inner": set(ids)}
+    for r in osmium.FileProcessor(pbf, osmium.osm.RELATION).with_filter(
+            osmium.filter.TagFilter(("boundary", "administrative"))):
+        if r.tags.get("admin_level") != "4":
+            continue
+        keys = {norm(r.tags.get(k)) for k in ("name", "name:vi", "official_name", "old_name") if r.tags.get(k)} & wanted
+        for k in keys:
+            d = rel_ways.setdefault(k, {"outer": set(), "inner": set()})
+            for m in r.members:
+                if m.type == "w":
+                    d["inner" if m.role == "inner" else "outer"].add(m.ref)
+    all_ids = set().union(*[d["outer"] | d["inner"] for d in rel_ways.values()]) if rel_ways else set()
+    lines = {}
+    idx = os.path.abspath(pbf) + ".wayidx.bin"
+    if os.path.exists(idx):
+        os.unlink(idx)
+    fp = osmium.FileProcessor(pbf, osmium.osm.NODE | osmium.osm.WAY).with_locations("sparse_file_array," + idx)
+    for w in fp:
+        if w.is_way() and w.id in all_ids:
+            try:
+                pts = [(n.lon, n.lat) for n in w.nodes]
+            except osmium.InvalidLocationError:
+                continue
+            if len(pts) >= 2:
+                lines[w.id] = LineString(pts)
+    del fp
+    remove_index(idx)
+    out = {}
+    for k, d in rel_ways.items():
+        outer = list(polygonize(unary_union([lines[i] for i in d["outer"] if i in lines])))
+        inner = list(polygonize(unary_union([lines[i] for i in d["inner"] if i in lines])))
+        if outer:
+            geom = unary_union(outer)
+            if inner:
+                geom = geom.difference(unary_union(inner))
+            out[k] = list(getattr(geom, "geoms", [geom]))
+    return out
+
+
 def area_region(r, areas):
     """Geometry, bbox, outline and covered cells of a region built from administrative areas."""
     import numpy as np
@@ -225,6 +273,13 @@ def build(pbf, regions, out_dir, base_url=""):
     if any("from" in r for r in regions):
         areas = admin_areas(pbf)
         print("admin_level=4 boundaries read: %d names (%.0f s)" % (len(areas), time.time() - t0))
+        # regions none of whose names came out of the area assembler: rebuild those boundaries from their ways
+        lost = [r for r in regions if "from" in r and not any(norm(n) in areas for n in r["from"])]
+        if lost:
+            names = [n for r in lost for n in r["from"]]
+            print("assembling from ways: %s" % [r["id"] for r in lost])
+            for k, polys in areas_from_ways(pbf, names).items():
+                areas.setdefault(k, polys)
         for r in regions:
             if "from" in r:
                 r.update(area_region(r, areas))
