@@ -2,6 +2,7 @@ package io.github.tewnut.poicapture.core
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -134,6 +135,24 @@ class RoadPackTest {
         val packs = RoadPacks(tmp.newFolder("packs"))
         try { packs.install(pack(JSONObject(ok.toString()).put("skip", "footway"))); fail() } catch (e: IOException) { }
         assertTrue(packs.installed().isEmpty())
+    }
+
+    @Test fun aProvincePackCoversOnlyItsListedCells() {
+        val f = tmp.newFile("province.zip")
+        // bbox 21.0..21.1 x 105.0..105.1, but only row y=4202 x 21000..21003 and row y=4203 x 21000..21000 are covered
+        val header = JSONObject().put("magic", RoadPack.MAGIC).put("format", 2).put("id", "p").put("cellSize", RoadCells.SIZE)
+            .put("skip", Overpass.SKIP_AREA).put("bbox", org.json.JSONArray(listOf(21.0, 105.0, 21.1, 105.1)))
+            .put("coverage", org.json.JSONArray(listOf(org.json.JSONArray(listOf(4202, 21000, 21003)), org.json.JSONArray(listOf(4203, 21000, 21000, 21005, 21006)))))
+        ZipOutputStream(f.outputStream()).use { z -> z.putNextEntry(ZipEntry("pack.json")); z.write(header.toString().toByteArray()); z.closeEntry() }
+        RoadPack(f).use { p ->
+            fun cell(x: Int, y: Int) = RoadCells.Cell(x, y)
+            assertTrue(p.covers(cell(21000, 4202)))
+            assertTrue(p.covers(cell(21003, 4202)))
+            assertFalse(p.covers(cell(21004, 4202)))      // inside the bbox, outside the province
+            assertTrue(p.covers(cell(21006, 4203)))
+            assertFalse(p.covers(cell(21001, 4203)))
+            assertFalse(p.covers(cell(21000, 4210)))
+        }
     }
 
     @Test fun encodeDecodeRoundTrip() {

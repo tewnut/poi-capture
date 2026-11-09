@@ -20,18 +20,31 @@ class RoadPack(val file: File) : AutoCloseable {
     val id: String
     val name: String
     val south: Double; val west: Double; val north: Double; val east: Double
+    /**
+     * Format 2 (a province): the cells the pack covers, per row y the inclusive x ranges. Null for format 1 (a box: every
+     * cell of the bbox). A province's bbox overlaps its neighbours, so only the listed cells are "covered".
+     */
+    private val coverage: Map<Int, IntArray>?
 
     init {
         try {
             header = JSONObject(zip.getInputStream(zip.getEntry("pack.json") ?: throw IOException("thiếu pack.json")).bufferedReader().readText())
             if (header.optString("magic") != MAGIC) throw IOException("không phải gói dữ liệu đường")
-            if (header.optInt("format") != FORMAT) throw IOException("định dạng gói ${header.optInt("format")} không hỗ trợ (cần $FORMAT)")
+            if (header.optInt("format") !in 1..FORMAT) throw IOException("định dạng gói ${header.optInt("format")} không hỗ trợ (tối đa $FORMAT)")
             if (header.optDouble("cellSize") != RoadCells.SIZE) throw IOException("kích thước ô của gói khác với app")
             if (header.optString("skip") != Overpass.SKIP_AREA) throw IOException("gói dùng bộ lọc loại đường khác với app")
             id = header.getString("id")
             name = header.optString("name", id)
             val b = header.getJSONArray("bbox")
             south = b.getDouble(0); west = b.getDouble(1); north = b.getDouble(2); east = b.getDouble(3)
+            coverage = header.optJSONArray("coverage")?.let { rows ->
+                HashMap<Int, IntArray>(rows.length() * 2).also { m ->
+                    for (i in 0 until rows.length()) {
+                        val r = rows.getJSONArray(i)
+                        m[r.getInt(0)] = IntArray(r.length() - 1) { k -> r.getInt(k + 1) }
+                    }
+                }
+            }
         } catch (e: Exception) {
             zip.close()
             throw if (e is IOException) e else IOException("gói hỏng: ${e.message}")
@@ -42,7 +55,13 @@ class RoadPack(val file: File) : AutoCloseable {
     val attribution: String get() = header.optString("attribution")
     val source: String get() = "pack:$id@$version"
 
-    fun covers(c: RoadCells.Cell): Boolean = !(c.north <= south || c.south >= north || c.east <= west || c.west >= east)
+    fun covers(c: RoadCells.Cell): Boolean {
+        val cov = coverage ?: return !(c.north <= south || c.south >= north || c.east <= west || c.west >= east)
+        val r = cov[c.y] ?: return false
+        var i = 0
+        while (i + 1 < r.size) { if (c.x in r[i]..r[i + 1]) return true; i += 2 }
+        return false
+    }
 
     /** Ways (pieces) of one cell; empty when the pack covers the cell but it has no road. */
     @Synchronized
@@ -56,7 +75,7 @@ class RoadPack(val file: File) : AutoCloseable {
 
     companion object {
         const val MAGIC = "road-capture-roadpack"   // from the app's first name; published packs carry it, keep it
-        const val FORMAT = 1
+        const val FORMAT = 2   // 1 = a box, 2 = an administrative area with its list of covered cells
 
         fun decode(a: JSONArray): Way {
             val c = a.getJSONArray(6)

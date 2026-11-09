@@ -35,6 +35,25 @@ class OnboardingTest {
         assertNull(Onboarding.suggest(all, 10.77, 106.7) { it.b })                               // no pack there
     }
 
+    @Test fun locatesTheProvinceByItsOutlineNotItsBox() {
+        // two neighbours whose boxes overlap; the point is in B's outline but also inside A's (bigger) box
+        data class Prov(val id: String, val rings: List<List<LatLon>>, val b: Onboarding.Box)
+        val a = Prov("a", listOf(listOf(LatLon(0.0, 0.0), LatLon(0.0, 2.0), LatLon(1.0, 2.0), LatLon(2.0, 0.0))),
+            Onboarding.Box(0.0, 0.0, 2.0, 2.0))
+        val b = Prov("b", listOf(listOf(LatLon(1.2, 1.6), LatLon(1.2, 3.0), LatLon(3.0, 3.0), LatLon(3.0, 1.6))),
+            Onboarding.Box(1.2, 1.6, 3.0, 3.0))
+        val island = Prov("i", listOf(listOf(LatLon(0.0, 5.0), LatLon(0.0, 6.0), LatLon(1.0, 6.0), LatLon(1.0, 5.0)),
+            listOf(LatLon(4.0, 5.0), LatLon(4.0, 5.5), LatLon(4.5, 5.5), LatLon(4.5, 5.0))), Onboarding.Box(0.0, 5.0, 4.5, 6.0))
+        val all = listOf(a, b, island)
+        fun at(lat: Double, lon: Double) = Onboarding.locate(all, lat, lon, { it.rings }) { it.b }?.id
+        assertEquals("b", at(1.5, 1.8))      // A's box covers it too, its outline does not (the diagonal edge)
+        assertEquals("a", at(0.5, 0.5))
+        assertEquals("i", at(4.2, 5.2))      // second ring (an island)
+        assertNull(at(10.0, 10.0))
+        assertTrue(Onboarding.inRings(0.5, 0.5, a.rings))
+        assertFalse(Onboarding.inRings(1.9, 1.9, a.rings))
+    }
+
     @Test fun sessionCarriesTheEmail() {
         val s = Session(id = "s_e", createdAt = "2026-11-09T01:00:00Z", contributor = "lan", note = "", vehicle = Vehicle.UNSPECIFIED,
             mode = Mode.PHOTO_AUTO, sideOfTravel = Side.RIGHT, road = Road.auto(), settings = Settings(), email = "lan@gmail.com")

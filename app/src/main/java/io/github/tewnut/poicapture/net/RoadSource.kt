@@ -4,6 +4,7 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import io.github.tewnut.poicapture.core.CellCache
+import io.github.tewnut.poicapture.core.LatLon
 import io.github.tewnut.poicapture.core.Onboarding
 import io.github.tewnut.poicapture.core.RoadCells
 import io.github.tewnut.poicapture.core.RoadData
@@ -29,8 +30,11 @@ object RoadSource {
     // ---------- catalogue (index.json of downloadable packs) ----------
 
     data class Entry(val id: String, val name: String, val version: String, val bytes: Long, val sha256: String,
-                     val url: String, val south: Double, val west: Double, val north: Double, val east: Double) {
-        fun covers(lat: Double, lon: Double) = lat in south..north && lon in west..east
+                     val url: String, val south: Double, val west: Double, val north: Double, val east: Double,
+                     val outline: List<List<LatLon>> = emptyList()) {
+        /** In the province (its outline) when the catalogue has one, else in the box. */
+        fun covers(lat: Double, lon: Double) =
+            if (outline.isNotEmpty()) Onboarding.inRings(lat, lon, outline) else lat in south..north && lon in west..east
     }
 
     private fun catalogueFile(ctx: Context) = File(ctx.filesDir, "roadpacks-index.json")
@@ -40,15 +44,19 @@ object RoadSource {
         return (0 until a.length()).map { i ->
             val o = a.getJSONObject(i)
             val b = o.getJSONArray("bbox")
+            val rings = o.optJSONArray("outline")?.let { rs ->
+                (0 until rs.length()).map { r -> rs.getJSONArray(r).let { pts -> (0 until pts.length()).map { k ->
+                    pts.getJSONArray(k).let { LatLon(it.getDouble(0), it.getDouble(1)) } } } }
+            } ?: emptyList()
             Entry(o.getString("id"), o.optString("name"), o.optString("version"), o.optLong("bytes"), o.optString("sha256"),
                 java.net.URL(java.net.URL(baseUrl), o.getString("url")).toString(),
-                b.getDouble(0), b.getDouble(1), b.getDouble(2), b.getDouble(3))
+                b.getDouble(0), b.getDouble(1), b.getDouble(2), b.getDouble(3), rings)
         }
     }
 
     /** The pack to suggest at a position: the smallest region covering it. */
     fun suggest(list: List<Entry>, lat: Double, lon: Double): Entry? =
-        Onboarding.suggest(list, lat, lon) { Onboarding.Box(it.south, it.west, it.north, it.east) }
+        Onboarding.locate(list, lat, lon, { it.outline }) { Onboarding.Box(it.south, it.west, it.north, it.east) }
 
     /** The last catalogue fetched (kept so "Ghi mới" can suggest a pack offline). */
     fun cachedCatalogue(ctx: Context): List<Entry> = runCatching {

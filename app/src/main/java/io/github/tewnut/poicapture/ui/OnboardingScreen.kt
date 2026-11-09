@@ -58,6 +58,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.capture.RoadPackCatalogue
+import io.github.tewnut.poicapture.capture.RoadPackDownloads
 import io.github.tewnut.poicapture.core.CapturePlan
 import io.github.tewnut.poicapture.core.Onboarding
 import io.github.tewnut.poicapture.net.RoadSource
@@ -255,13 +256,23 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     }
     val live = rememberLiveLocation()
     val suggestion = live?.let { RoadSource.suggest(catalogue, it.lat, it.lon) }
+    // the province the contributor is in: download its pack right away (once), no tap needed
+    var autoStarted by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(suggestion?.id, installed) {
+        val s = suggestion ?: return@LaunchedEffect
+        if (!autoStarted && installed[s.id] != s.version) {
+            RoadPackDownloads.enqueue(ctx, s, anyNetwork = true)
+            autoStarted = true
+        }
+    }
+    var showAll by rememberSaveable { mutableStateOf(false) }
 
-    StepFrame("Dữ liệu đường", "Tải gói đường của vùng bạn sẽ ghi để app nhận tên đường ngay cả khi mất mạng. " +
-        "Ngoài vùng có gói, app lấy từ OpenStreetMap khi có mạng.", "Tiếp tục", onNext = onNext) {
+    StepFrame("Dữ liệu đường", "Dữ liệu đường của tỉnh / thành bạn đang ở giúp app nhận tên đường ngay cả khi mất mạng.",
+        "Tiếp tục", onNext = onNext) {
         when {
             loading && catalogue.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                Hint("Đang tải danh sách gói…")
+                Hint("Đang tải danh sách tỉnh / thành…")
             }
             error != null && catalogue.isEmpty() -> {
                 Hint("Không tải được danh sách: $error", color = Palette.Red)
@@ -273,17 +284,21 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
         }
         if (suggestion != null) {
             WhiteCard {
-                Text("Gợi ý cho vị trí của bạn", fontWeight = FontWeight.Bold, color = Palette.Green)
+                Text("Bạn đang ở ${suggestion.name}", fontWeight = FontWeight.Bold, color = Palette.Green, fontSize = 17.sp)
                 PackRow(suggestion, installed[suggestion.id], anyNetwork = true, onInstalled = { refresh++ })
-                Hint("Tải ngay cả khi dùng 4G (dung lượng ghi ở trên). Gói tải tiếp ở nền, bạn có thể đi tiếp.")
+                Hint(if (installed[suggestion.id] == suggestion.version) "Đã có dữ liệu đường, sẵn sàng ghi."
+                    else "Đang tự tải (cả khi dùng 4G). Gói tải tiếp ở nền, bạn có thể đi tiếp.")
             }
         } else if (catalogue.isNotEmpty()) {
-            Hint(if (live == null) "Chưa có vị trí: chọn vùng bạn sẽ ghi." else "Vị trí hiện tại chưa có gói: chọn vùng bạn sẽ ghi.")
+            Hint(if (live == null) "Đang chờ vị trí để biết bạn ở tỉnh / thành nào… hoặc chọn bên dưới."
+                else "Vị trí hiện tại không thuộc tỉnh / thành nào có gói: chọn bên dưới.")
         }
-        val others = catalogue.filter { it.id != suggestion?.id }
+        val others = catalogue.filter { it.id != suggestion?.id }.sortedBy { it.name }
         if (others.isNotEmpty()) {
-            WhiteCard {
-                Text(if (suggestion != null) "Vùng khác" else "Các vùng có gói", fontWeight = FontWeight.Bold, color = Palette.Ink)
+            if (suggestion != null && !showAll) {
+                TextButton(onClick = { showAll = true }) { Text("Chọn tỉnh / thành khác (${others.size})") }
+            } else WhiteCard {
+                Text(if (suggestion != null) "Tỉnh / thành khác" else "Các tỉnh / thành", fontWeight = FontWeight.Bold, color = Palette.Ink)
                 for (e in others) PackRow(e, installed[e.id], anyNetwork = true, onInstalled = { refresh++ })
             }
         }
