@@ -102,9 +102,11 @@ fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: P
         Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 16.dp, vertical = 8.dp)) {
           Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Địa điểm $number", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Palette.Ink)
-            Hint(roles.entries.sortedBy { e -> photoRoles.roles.indexOfFirst { it.id == e.key }.let { if (it < 0) 99 else it } }
+            val tagged = roles.keys.any { it.isNotEmpty() }
+            if (!tagged) Hint(roles.values.sum().let { if (it == 0) "Chưa có ảnh" else "$it ảnh" })
+            else Hint(roles.entries.sortedBy { e -> photoRoles.roles.indexOfFirst { it.id == e.key }.let { if (it < 0) 99 else it } }
                 .joinToString(" · ") { "${photoRoles.label(it.key)} ${it.value}" }.ifEmpty { "Chưa có ảnh" })
-            if (noFront) Hint("Chưa có ảnh “${photoRoles.cover.label}” (ảnh bìa). Nên chụp thêm một ảnh.", color = Palette.Amber)
+            if (tagged && noFront) Hint("Chưa có ảnh “${photoRoles.cover.label}” (ảnh bìa). Nên chụp thêm một ảnh.", color = Palette.Amber)
             Text("Không cần nhập gì: chỉ cần đặt ghim đúng tòa nhà.", color = Palette.Green, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Column(Modifier.fillMaxWidth().background(Palette.GreenLight, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                 .padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {

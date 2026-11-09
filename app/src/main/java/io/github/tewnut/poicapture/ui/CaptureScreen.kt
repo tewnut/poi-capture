@@ -128,10 +128,13 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     val captured = ui.photos + ui.videos
     val notStarted = !ui.running && captured == 0 && !ui.recording
     val poiMode = session?.kind == SessionKind.POI
+    val askRole = session?.photoRoles != null          // POI: the contributor picks the kind of each photo (off by default)
     val photoRoles = session?.photoRoles ?: PhotoRoles.DEFAULT
     var role by remember(session?.id) { mutableStateOf(photoRoles.roles.first().id) }   // POI mode: what the next photo shows
     var reviewing by remember { mutableStateOf(false) }          // POI mode: "Xong địa điểm" sheet open
     var draft by remember { mutableStateOf(PoiDraft()) }          // what was typed in the sheet, kept across "Chụp thêm"
+    var saved by remember { mutableStateOf<String?>(null) }       // "Đã lưu địa điểm N" for a few seconds
+    LaunchedEffect(saved) { if (saved != null) { kotlinx.coroutines.delay(3000); saved = null } }
 
     var thumb by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(ui.lastPhoto) {
@@ -177,8 +180,10 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             onSave = { pin, moved, fields, status ->
                 svc?.finishPoi(pin, moved, fields, status)
                 reviewing = false
+                saved = "✓ Đã lưu địa điểm ${ui.poiNumber}. Chụp địa điểm tiếp theo."
                 draft = PoiDraft()
                 role = photoRoles.roles.first().id
+                thumb = null
             })
         return
     }
@@ -188,6 +193,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     fun shoot() {
         val s = svc ?: return
         if (ui.camera != "on") return
+        if (!askRole) { s.takePhoto("manual"); return }
         s.takePhoto("manual", role)
         role = photoRoles.next(role, ui.poiRoles + (role to ((ui.poiRoles[role] ?: 0) + 1)))
     }
@@ -236,7 +242,8 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             }
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Pill(if (poiMode) "Địa điểm ${ui.poiNumber} · ${ui.photos} ảnh" else if (video) "${ui.videos} đoạn video" else "${ui.photos} ảnh",
+                    Pill(if (poiMode) (if (ui.poiId != null) "Địa điểm ${ui.poiNumber} · ${ui.poiRoles.values.sum()} ảnh"
+                            else "Đã lưu ${ui.poiNumber} địa điểm") else if (video) "${ui.videos} đoạn video" else "${ui.photos} ảnh",
                         size = 18.sp, bold = true, dot = if (ui.recording) Palette.Red else null)
                     if (!notStarted) {
                         DarkButton("Bản đồ") { showMap = true }
@@ -249,14 +256,22 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
         }
 
         // ---------- right rail, under the thumb: the main actions ----------
-        if (!notStarted) Column(Modifier.align(Alignment.CenterEnd).safeDrawingPadding().padding(end = 16.dp, top = 96.dp),
+        if (!notStarted) Column(Modifier.align(Alignment.CenterEnd).safeDrawingPadding().padding(end = 16.dp, top = if (poiMode) 48.dp else 96.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when {
                 poiMode -> {
-                    thumb?.let { Image(it, "Ảnh vừa chụp", Modifier.size(84.dp, 47.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
+                    if (ui.poiId != null) thumb?.let { Image(it, "Ảnh vừa chụp", Modifier.size(84.dp, 47.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
                     Shutter("Chụp", enabled = svc != null && ui.camera == "on", onClick = { shoot() })
-                    Button(onClick = { reviewing = true }, enabled = ui.poiId != null, modifier = Modifier.height(48.dp),
+                    Button(onClick = {
+                        svc?.finishPoi(draft.pin, draft.moved, draft.fields(), draft.status)
+                        saved = "✓ Đã lưu địa điểm ${ui.poiNumber}. Chụp địa điểm tiếp theo."
+                        draft = PoiDraft()
+                        role = photoRoles.roles.first().id
+                        thumb = null
+                    }, enabled = ui.poiId != null, modifier = Modifier.height(48.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Palette.Blue)) { Text("Xong địa điểm", fontWeight = FontWeight.Bold) }
+                    // optional, when needed: pin on the right building, closed / moved, a note
+                    if (ui.poiId != null) DarkButton("Ghim, tình trạng…") { reviewing = true }
                 }
                 manual -> {
                     RoundButton(if (ui.running) "Dừng" else "Tiếp", if (ui.running) Palette.Red else Palette.Green, 56.dp, svc != null) {
@@ -276,7 +291,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
 
         // ---------- left: POI = kind of the next photo; riding = speed ----------
         if (poiMode && !notStarted) {
-            Column(Modifier.align(Alignment.CenterStart).safeDrawingPadding().padding(start = 10.dp, top = 56.dp)
+            if (askRole) Column(Modifier.align(Alignment.CenterStart).safeDrawingPadding().padding(start = 10.dp, top = 56.dp)
                 .verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 for (r in photoRoles.roles) {
                     val n = ui.poiRoles[r.id] ?: 0
@@ -289,8 +304,12 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             val current = photoRoles.roles.firstOrNull { it.id == role }
             Column(Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp).widthIn(max = 420.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ReadLine(ui)
-                if (current != null) Text(current.label + if (current.hint.isNotBlank()) ": ${current.hint}" else "",
+                saved?.let {
+                    Text(it, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.background(Palette.Green, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
+                }
+                if (saved == null) ReadLine(ui)
+                if (askRole && current != null) Text(current.label + if (current.hint.isNotBlank()) ": ${current.hint}" else "",
                     color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.background(Color(0xB3000000), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
             }
@@ -386,9 +405,12 @@ private fun ReadyCard(ui: CaptureUi, s: Session, roles: PhotoRoles, modifier: Mo
                 else -> Check(null, "Chưa có dữ liệu đường: vẫn ghi được, đường được nhận sau")
             }
             if (poi) {
-                Check(null, "Mỗi địa điểm: chụp ★ ${roles.cover.label.lowercase()}, rồi " +
+                if (s.photoRoles != null) Check(null, "Mỗi địa điểm: chụp ★ ${roles.cover.label.lowercase()}, rồi " +
                     roles.roles.filter { it.id != roles.cover.id }.joinToString(", ") { it.label.lowercase() } + " nếu có. App tự chọn loại ảnh tiếp theo.")
-                Check(null, "Bấm “Xong địa điểm” để ghim lên đúng tòa nhà, rồi sang địa điểm tiếp.")
+                else Check(null, "Mỗi địa điểm: chụp mặt tiền thấy cả cửa hàng, biển hiệu đọc được chữ, thêm bên trong / bảng giá nếu có. " +
+                    "Hệ thống tự nhận ra ảnh nào là gì.")
+                Check(null, "Chụp xong một địa điểm thì bấm “Xong địa điểm” và chụp tiếp địa điểm sau, không cần nhập gì. " +
+                    "Vị trí theo GPS; cần thì “Ghim, tình trạng…” để đặt lên đúng tòa nhà hoặc báo đã đóng cửa.")
                 Check(null, "Nút âm lượng cũng là nút chụp.")
             } else {
                 Check(null, "Máy gắn chắc, nằm ngang, camera nhìn sang dãy nhà cần ghi. App tự nhận bên sau vài lần tăng tốc / phanh.")

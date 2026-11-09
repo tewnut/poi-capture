@@ -305,7 +305,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                                 vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else mode,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
                                 settings = settings.copy(facadeDistanceM = facade), device = deviceJson(ctx), kind = kind, email = email,
-                                photoRoles = if (kind == SessionKind.POI) Prefs.photoRoles(ctx) else null)
+                                photoRoles = if (kind == SessionKind.POI && Prefs.askPhotoRole(ctx)) Prefs.photoRoles(ctx) else null)
                             CaptureService.store(ctx).create(s)
                             onStart(s.id)
                         },

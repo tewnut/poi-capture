@@ -77,13 +77,11 @@ fun ProfileScreen(onDone: () -> Unit, onReplayOnboarding: () -> Unit) {
                 minusEnabled = settings.facadeDistanceM > 2.0, plusEnabled = settings.facadeDistanceM < 20.0)
         }
 
-        ProfileCard("Loại ảnh khi chụp địa điểm") { PhotoRolesCard() }
-
         ProfileCard("Dữ liệu đường offline") { RoadPacksCard() }
 
         var advanced by remember { mutableStateOf(false) }
         androidx.compose.material3.TextButton(onClick = { advanced = !advanced }) {
-            Text(if (advanced) "▾ Ẩn cài đặt nâng cao" else "▸ Cài đặt nâng cao (góc giá đỡ, máy chủ)")
+            Text(if (advanced) "▾ Ẩn cài đặt nâng cao" else "▸ Cài đặt nâng cao (góc giá đỡ, loại ảnh, máy chủ)")
         }
         if (advanced) ProfileCard("Góc chếch giá đỡ (chỉnh tay)") {
             Hint("App tự đo hướng camera khi bạn tăng tốc / phanh vài lần. Chỉ chỉnh ở đây nếu app báo chưa đo được: " +
@@ -94,6 +92,17 @@ fun ProfileScreen(onDone: () -> Unit, onReplayOnboarding: () -> Unit) {
                 onPlus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg + 5).coerceAtMost(45.0)); save() },
                 caption = when { deg > 0 -> "chếch về phía trước"; deg < 0 -> "chếch về phía sau"; else -> "vuông góc với đường" },
                 minus = "−5°", plus = "+5°")
+        }
+
+        if (advanced) ProfileCard("Chọn loại ảnh khi chụp địa điểm") {
+            var ask by remember { mutableStateOf(Prefs.askPhotoRole(ctx)) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Hỏi loại của từng ảnh (mặt tiền, biển hiệu…)", modifier = Modifier.weight(1f), color = Palette.Ink)
+                androidx.compose.material3.Switch(ask, { ask = it; Prefs.setAskPhotoRole(ctx, it) },
+                    enabled = Prefs.photoRoles(ctx).source != "server")
+            }
+            Hint("Không cần: hệ thống tự nhận ra ảnh nào là mặt tiền, biển hiệu, bên trong. Chỉ bật khi nhóm yêu cầu.")
+            if (ask) PhotoRolesCard()
         }
 
         if (advanced) ProfileCard("Máy chủ nhận dữ liệu") {

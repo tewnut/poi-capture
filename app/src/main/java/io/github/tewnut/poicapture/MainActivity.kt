@@ -80,9 +80,16 @@ class MainActivity : ComponentActivity() {
     private fun captureKey(keyCode: Int) = CaptureKeys.handler != null && keyCode in setOf(
         android.view.KeyEvent.KEYCODE_VOLUME_DOWN, android.view.KeyEvent.KEYCODE_VOLUME_UP, android.view.KeyEvent.KEYCODE_CAMERA)
 
+    private var lastCaptureKeyMs = 0L
+
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
         if (!captureKey(keyCode)) return super.onKeyDown(keyCode, event)
-        if (event.repeatCount == 0) CaptureKeys.handler?.invoke()
+        // one action per press: no auto-repeat, and cheap Bluetooth remotes that send a key twice count once
+        val now = android.os.SystemClock.uptimeMillis()
+        if (event.repeatCount == 0 && now - lastCaptureKeyMs > 350) {
+            lastCaptureKeyMs = now
+            CaptureKeys.handler?.invoke()
+        }
         return true
     }
 
@@ -109,6 +116,12 @@ object Prefs {
     fun photoRoles(ctx: Context): PhotoRoles = sp(ctx).getString("photoRoles", null)?.let { s ->
         runCatching { JSONObject(s).let { PhotoRoles.fromJson(it, it.optString("source", "local")) } }.getOrNull()
     } ?: PhotoRoles.DEFAULT
+    /**
+     * Ask the kind of each photo while shooting a place? Off by default (the server's agent tells a front from a sign or a
+     * menu by itself); on when the contributor wants it or the team's server sends its own list.
+     */
+    fun askPhotoRole(ctx: Context): Boolean = sp(ctx).getBoolean("askPhotoRole", false) || photoRoles(ctx).source == "server"
+    fun setAskPhotoRole(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("askPhotoRole", v).apply()
     fun savePhotoRoles(ctx: Context, r: PhotoRoles?) = sp(ctx).edit().apply {
         if (r == null || r.source == "default") remove("photoRoles") else putString("photoRoles", r.toJson().toString())
     }.apply()

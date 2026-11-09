@@ -528,8 +528,9 @@ class CaptureService : LifecycleService() {
         val motion = imu?.snapshot(en)
         motion?.let { meta.put("motion", it) }
         if (poiId != null) {
-            val r = role ?: (session.photoRoles ?: PhotoRoles.DEFAULT).cover.id
-            meta.put("poiId", poiId).put("role", r)
+            meta.put("poiId", poiId)
+            // the kind of photo only when the contributor is asked for it; otherwise the agent tells it from the image
+            session.photoRoles?.let { pr -> meta.put("role", role ?: pr.cover.id) }
             // on foot the travel direction means nothing: the camera direction comes from the orientation sensor
             meta.put("cameraBearing", motion?.opt("cameraAzimuthDeg") ?: JSONObject.NULL).put("cameraBearingSource", "compass")
                 .put("sideOfWay", JSONObject.NULL).put("travel", JSONObject.NULL)
@@ -583,12 +584,16 @@ class CaptureService : LifecycleService() {
                 SignText.merge(poiReadings[poiId].orEmpty())
             }
             val textRole = role == PhotoRoles.SIGN || role == PhotoRoles.INFO
+            val photosOfPlace = _state.value.poiRoles.values.sum()
             _state.update {
                 if (it.poiId != poiId) it.copy(reading = (it.reading - 1).coerceAtLeast(0))
                 else it.copy(reading = (it.reading - 1).coerceAtLeast(0), poiRead = merged,
                     readNote = when {
                         r == null -> null
                         textRole && r.empty -> "Chưa đọc được chữ trên ảnh vừa chụp. Thử chụp gần hơn, thẳng hơn, không bị loá."
+                        // no kinds asked: warn when none of the place's photos has readable text (sign missing or blurred)
+                        session.photoRoles == null && merged == null && photosOfPlace >= 2 ->
+                            "Chưa đọc được chữ nào trên ảnh của địa điểm này. Nên chụp biển hiệu gần hơn, thẳng hơn."
                         else -> null
                     })
             }

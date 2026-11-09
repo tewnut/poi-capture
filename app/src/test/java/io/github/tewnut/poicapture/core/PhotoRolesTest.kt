@@ -54,6 +54,19 @@ class PhotoRolesTest {
         assertEquals(5, d.without("context").roles.size)
     }
 
+    @Test fun withoutKindsTheCoverIsTheFirstPhoto() {
+        val store = SessionStore(tmp.newFolder("plain"))
+        val s = Session(id = "s_n", createdAt = "2026-11-09T01:00:00Z", contributor = "t", note = "", vehicle = Vehicle.UNSPECIFIED,
+            mode = Mode.PHOTO_MANUAL, sideOfTravel = Side.RIGHT, road = Road.auto(), settings = Settings(), kind = SessionKind.POI)
+        store.create(s)
+        assertNull(store.load("s_n")!!.photoRoles)
+        store.appendPoi("s_n", Pois.new("poi_1", 1L, null))
+        val photos = listOf("p_1", "p_2").map { JSONObject().put("id", it).put("kind", "photo").put("poiId", "poi_1") }
+        val poi = Exporter.poisWithPhotos(store, "s_n", photos).single()
+        assertEquals("p_1", poi.getString("cover"))
+        assertEquals(2, poi.getJSONArray("photos").length())
+    }
+
     @Test fun coverFollowsTheSessionConfig() {
         val store = SessionStore(tmp.newFolder("sessions"))
         val roles = PhotoRoles(listOf(PhotoRole("sign", "Biển hiệu"), PhotoRole("menu", "Thực đơn", cover = true)), "local")
