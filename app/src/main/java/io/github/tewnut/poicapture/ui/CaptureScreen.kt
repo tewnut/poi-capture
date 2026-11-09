@@ -173,7 +173,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
 
     if (reviewing && session != null) {
         val start = remember(ui.poiId) { svc?.poiStartPosition() }
-        PoiSheet(ui.poiNumber, start, ui.poiRoles, photoRoles, draft, onMore = { reviewing = false },
+        PoiSheet(ui.poiNumber, start, ui.poiRoles, photoRoles, draft, ui.poiRead, ui.reading > 0, onMore = { reviewing = false },
             onSave = { pin, moved, fields, status ->
                 svc?.finishPoi(pin, moved, fields, status)
                 reviewing = false
@@ -287,10 +287,13 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 }
             }
             val current = photoRoles.roles.firstOrNull { it.id == role }
-            if (current != null) Text(current.label + if (current.hint.isNotBlank()) ": ${current.hint}" else "",
-                color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp).widthIn(max = 420.dp)
-                    .background(Color(0xB3000000), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
+            Column(Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp).widthIn(max = 420.dp),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ReadLine(ui)
+                if (current != null) Text(current.label + if (current.hint.isNotBlank()) ": ${current.hint}" else "",
+                    color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.background(Color(0xB3000000), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
+            }
         }
         Row(Modifier.align(Alignment.BottomStart).safeDrawingPadding().padding(12.dp), verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -417,6 +420,23 @@ private fun Check(ok: Boolean?, text: String) {
             color = when (ok) { true -> Palette.Green; false -> Palette.Amber; null -> Palette.Muted }, modifier = Modifier.width(18.dp))
         Text(text, color = Palette.Ink)
     }
+}
+
+/** What the phone read on the current place's photos, or a request to shoot the sign again. */
+@Composable
+private fun ReadLine(ui: CaptureUi) {
+    val r = ui.poiRead
+    val (text, warn) = when {
+        ui.readNote != null -> ui.readNote to true
+        ui.reading > 0 -> "Đang đọc chữ trên ảnh…" to false
+        r != null && (r.name != null || r.phones.isNotEmpty() || r.category != null) ->
+            ("Đọc được: " + listOfNotNull(r.name, r.phones.firstOrNull(), r.category).joinToString(" · ")) to false
+        else -> return
+    }
+    Text(text, color = if (warn) Palette.Amber else Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+        maxLines = 2, overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.background(if (warn) Palette.AmberLight else Color(0xCC0B6B4C), RoundedCornerShape(10.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
 /** Big round shutter: white, high contrast on any camera picture. */

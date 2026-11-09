@@ -67,6 +67,8 @@ import io.github.tewnut.poicapture.core.MountEstimate
 import io.github.tewnut.poicapture.core.MountEstimator
 import io.github.tewnut.poicapture.core.LatLon
 import io.github.tewnut.poicapture.core.PhotoRoles
+import io.github.tewnut.poicapture.core.SignReading
+import io.github.tewnut.poicapture.core.SignText
 import io.github.tewnut.poicapture.core.PoiStatus
 import io.github.tewnut.poicapture.core.Pois
 import io.github.tewnut.poicapture.core.SessionKind
@@ -123,6 +125,9 @@ data class CaptureUi(
     val poiId: String? = null,           // place being photographed, null = next shot starts a new one
     val poiNumber: Int = 0,              // places started in this session
     val poiRoles: Map<String, Int> = emptyMap(),   // photos of the current place per role
+    val poiRead: SignReading? = null,  // what the phone read on its photos (hint)
+    val reading: Int = 0,                // photos waiting for / in on-device text reading
+    val readNote: String? = null,        // e.g. a sign photo with no readable text: shoot closer
     // sweep mode: "Đánh dấu" taps
     val marks: Int = 0,
 )
@@ -164,6 +169,8 @@ class CaptureService : LifecycleService() {
     private lateinit var fp: FixProcessor
     private lateinit var shutter: AutoShutter
     private val io = Executors.newSingleThreadExecutor()
+    private val ocr = Executors.newSingleThreadExecutor()   // on-device text reading of POI photos (~1 s each)
+    private val poiReadings = HashMap<String, MutableList<SignReading>>()
 
     private var lm: LocationManager? = null
     private var gnss: GnssRecorder? = null
@@ -238,6 +245,7 @@ class CaptureService : LifecycleService() {
     override fun onDestroy() {
         if (activeSession.value != null) finishSession()
         io.shutdown()
+        ocr.shutdown()
         super.onDestroy()
     }
 
@@ -549,6 +557,7 @@ class CaptureService : LifecycleService() {
                     } else it.poiRoles
                     it.copy(photos = it.photos + 1, lastPhoto = file.absolutePath, poiRoles = roles)
                 }
+                if (poiId != null) readSign(poiId, id, meta.optString("role"), file)
             }
 
             override fun onError(e: ImageCaptureException) {
@@ -560,12 +569,38 @@ class CaptureService : LifecycleService() {
 
     // ---------- POI mode ----------
 
+    /**
+     * Read the text on a place's photo on the phone (hint for the agent, stored as the item's `ocr`), and tell the
+     * contributor right away when a sign photo has no readable text, while still in front of the shop.
+     */
+    private fun readSign(poiId: String, itemId: String, role: String, file: java.io.File) {
+        _state.update { it.copy(reading = it.reading + 1) }
+        ocr.execute {
+            val r = runCatching { SignOcr.read(file) }.getOrNull()
+            if (r != null) store.patchItem(session.id, itemId, JSONObject().put("ocr", r.toJson()))
+            val merged = synchronized(poiReadings) {
+                if (r != null) poiReadings.getOrPut(poiId) { mutableListOf() }.add(r)
+                SignText.merge(poiReadings[poiId].orEmpty())
+            }
+            val textRole = role == PhotoRoles.SIGN || role == PhotoRoles.INFO
+            _state.update {
+                if (it.poiId != poiId) it.copy(reading = (it.reading - 1).coerceAtLeast(0))
+                else it.copy(reading = (it.reading - 1).coerceAtLeast(0), poiRead = merged,
+                    readNote = when {
+                        r == null -> null
+                        textRole && r.empty -> "Chưa đọc được chữ trên ảnh vừa chụp. Thử chụp gần hơn, thẳng hơn, không bị loá."
+                        else -> null
+                    })
+            }
+        }
+    }
+
     /** Start a new place at the current position (refined by a pin on the building when the contributor reviews it). */
     fun newPoi(): String {
         val now = System.currentTimeMillis()
         val id = uid("poi_", now)
         store.appendPoi(session.id, Pois.new(id, now, fp.fix))
-        _state.update { it.copy(poiId = id, poiNumber = it.poiNumber + 1, poiRoles = emptyMap()) }
+        _state.update { it.copy(poiId = id, poiNumber = it.poiNumber + 1, poiRoles = emptyMap(), poiRead = null, readNote = null) }
         return id
     }
 
@@ -580,7 +615,7 @@ class CaptureService : LifecycleService() {
     fun finishPoi(pin: LatLon?, pinMoved: Boolean, fields: Map<String, String>, status: PoiStatus) {
         val id = _state.value.poiId ?: return
         store.patchPoi(session.id, id, Pois.review(pin, !pinMoved, fields, status, System.currentTimeMillis()))
-        _state.update { it.copy(poiId = null, poiRoles = emptyMap()) }
+        _state.update { it.copy(poiId = null, poiRoles = emptyMap(), poiRead = null, readNote = null) }
     }
 
     // ---------- sweep marks ----------

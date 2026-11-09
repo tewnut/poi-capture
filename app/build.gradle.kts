@@ -16,6 +16,7 @@ android {
         targetSdk = 35
         versionCode = 9
         versionName = "0.9.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
         // Release key from the environment (GitHub Actions secrets, see .github/workflows/release.yml). Without it the
@@ -64,6 +65,13 @@ dependencies {
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    // reads the signboards of places on the phone (Latin script incl. Vietnamese). Model from Google Play services,
+    // downloaded at install (manifest meta-data): +0.3 MB instead of +41 MB of native libs for the bundled model. On a
+    // phone without Play services the reading is skipped and the server reads the photos as before.
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20180813")   // real org.json for JVM tests (android.jar only has stubs)

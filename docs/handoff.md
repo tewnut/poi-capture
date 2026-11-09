@@ -31,12 +31,24 @@ contract.
   ```jsonc
   { "id": "poi_…", "createdAt": "ISO", "tMs": 1793…,
     "position": { "lat": …, "lon": …, "source": "pin" | "gps", "accuracyM": 8 },  // pin = put on the building by hand
-    "fields": { "name": "…", "category": "…", "houseNumber": "…", "phone": "…", "note": "…" },  // optional, typed on site
+    "fields": { "name": "…", "category": "…", "houseNumber": "…", "phone": "…", "note": "…" },  // usually empty, see below
     "status": "new" | "exists" | "closed" | "moved", "reviewedAt": "ISO",
     "photos": ["p_…", …],            // creation order
     "cover": "p_…",                  // first "facade" photo, else first "sign", else first photo
     "noPhotos": true }               // only when the place has no photo
   ```
+  Contributors are **not asked to type** (app 0.9): the agent reads name, address / house number, phone and category from
+  the photos (cover + "sign" / "info" kinds). `fields` are only hints for what a photo cannot show (sign hidden, no
+  sign): when present they win over the reading, and `note` is free text for the agent.
+- **On-device reading** (app 0.9, POI photos only): each photo item carries `ocr` = what ML Kit (Latin script, which
+  covers Vietnamese) read on the phone, `{engine: "mlkit-latin", text, lines: [{text, heightPx, box: [l,t,r,b]}], name,
+  phones, houseNumber, category}`; each place carries `read` = the same merged over its photos (without `lines`).
+  - `text` / `lines` are raw OCR: diacritics may be missing or wrong, use them as a hint next to your own reading of the
+    image. `box` is in the pixels of the stored JPEG (before EXIF rotation).
+  - `phones` (Vietnamese formats, digits only), `houseNumber` ("12", "45/3") and `category` (keyword rules, see
+    `core/SignText.kt`) are guesses by rules; `name` = the tallest line that is not a sponsor (Coca-Cola, Viettel…),
+    a phone or an address. The agent decides: name vs brand, category, address normalisation, dedup against the map.
+  - Missing `ocr` = not read on the phone (sweep photos, reading still running when the zip was made, old app).
   `position.source = "pin"`: trust it as the place's location (on its building). `"gps"`: the contributor's position
   when the place was started (in front of it): snap to the nearest building footprint within ~15 m.
 - **Photo role** (POI sessions): items carry `poiId` and `role`: `"facade"` (straight-on front, the cover), `"sign"`,

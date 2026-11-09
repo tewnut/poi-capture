@@ -16,11 +16,13 @@ on the phone and allow installing from that source. New versions install over th
 
 Two kinds of session, chosen on "Ghi mới":
 - **Quét đường** (sweep): ride along a street, the app photographs the row of buildings automatically; "★ Đánh dấu"
-  points out a place while riding.
-- **Chụp địa điểm** (POI): stop at each place, choose the role of each photo (★ mặt tiền / biển hiệu / bên hông /
-  bên trong / thông tin / toàn cảnh) and shoot; "Xong địa điểm" puts a pin on the building, optional name / category /
-  house number / phone / note and a status (mới / đã có / đóng cửa / chuyển đi). Photos are grouped by place in the
-  export, so the agent does not have to sort them.
+  (or the volume keys / a Bluetooth remote on the handlebar) points out a place while riding.
+- **Chụp địa điểm** (POI): stop at each place and shoot its photo kinds (configurable: ★ mặt tiền / biển hiệu / bên
+  hông / bên trong / thông tin / toàn cảnh by default; the next kind is selected by itself). **Nothing to type**: the
+  phone reads the text on the photos (ML Kit, Latin script incl. Vietnamese) and shows "Đọc được: name · phone ·
+  category", or asks to shoot the sign again when nothing is readable; the server's agent decides name, address and
+  category. "Xong địa điểm" only puts the pin on the building and, if needed, a status (đã có / đóng cửa / chuyển đi);
+  optional notes stay folded. Photos are grouped by place in the export, so the agent does not have to sort them.
 
 0. **Onboarding** (first run, about a minute): what the app does → **email** (format checked, not verified; it credits
    and groups the contributor's sessions) and an optional display name → **permissions** (camera, precise location,
@@ -134,7 +136,9 @@ length, mount offset. Only the mount offset has a field in the UI so far.
 | `core/Upload.kt` | tus client and the resumable upload job (zip once, SHA-256, resume, re-upload after edits) |
 | `core/Coverage.kt` | thinned tracks / places for the "đã quét" map, team coverage GeoJSON |
 | `capture/Uploads.kt` | WorkManager upload worker, server read API (status, coverage) |
-| `ui/PoiSheet.kt` | "Xong địa điểm": pin on the building, optional fields, status |
+| `ui/PoiSheet.kt` | "Xong địa điểm": pin on the building, what was read, status, folded notes |
+| `core/SignText.kt`, `capture/SignOcr.kt` | on-device sign reading: ML Kit OCR, then phone / house number / category / name rules |
+| `core/PhotoRoles.kt`, `ui/PhotoRolesCard.kt` | photo kinds of POI mode as config (default, Hồ sơ, team server) |
 | `net/OverpassClient.kt` | Overpass HTTP with mirror fallback, shared cache (setup screen warms what the service needs) |
 | `MainActivity.kt` | app shell: edge-to-edge, bottom navigation (Ghi mới / Đã ghi / Hồ sơ), first run → onboarding |
 | `ui/OnboardingScreen.kt`, `core/Onboarding.kt` | first-run flow; email check, display name, pack suggestion |

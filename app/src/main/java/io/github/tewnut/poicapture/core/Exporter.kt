@@ -85,6 +85,8 @@ object Exporter {
                 .put("photos", JSONArray(photos.map { it.getString("id") }))
                 .put("cover", cover?.getString("id") ?: JSONObject.NULL)
                 .also { if (photos.isEmpty()) it.put("noPhotos", true) }
+                .put("read", SignText.merge(photos.mapNotNull { SignReading.fromJson(it.optJSONObject("ocr")) })
+                    ?.toJson()?.apply { remove("lines") } ?: JSONObject.NULL)
         }
     }
 

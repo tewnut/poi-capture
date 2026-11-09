@@ -72,12 +72,14 @@ class PoiDraft {
 }
 
 /**
- * End of a place: put the pin on the building (tap or drag), optionally note what is readable on site, set the status.
- * Everything except the pin is optional: the photos are read afterwards anyway.
+ * End of a place: put the pin on the building (tap or drag) and, if it is not a new open shop, its status. Nothing to
+ * type: name, address, phone and category are read from the photos (on the phone when it can, then by the server's
+ * agent). The fields stay behind "Ghi chú thêm" for what a photo cannot show (sign hidden, shop without a sign).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: PhotoRoles, d: PoiDraft,
+             read: io.github.tewnut.poicapture.core.SignReading?, reading: Boolean,
              onMore: () -> Unit, onSave: (pin: LatLon?, moved: Boolean, fields: Map<String, String>, status: PoiStatus) -> Unit) {
     val ctx = LocalContext.current
     if (d.pin == null && !d.moved) d.pin = start
@@ -103,20 +105,38 @@ fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: P
             Hint(roles.entries.sortedBy { e -> photoRoles.roles.indexOfFirst { it.id == e.key }.let { if (it < 0) 99 else it } }
                 .joinToString(" · ") { "${photoRoles.label(it.key)} ${it.value}" }.ifEmpty { "Chưa có ảnh" })
             if (noFront) Hint("Chưa có ảnh “${photoRoles.cover.label}” (ảnh bìa). Nên chụp thêm một ảnh.", color = Palette.Amber)
+            Text("Không cần nhập gì: chỉ cần đặt ghim đúng tòa nhà.", color = Palette.Green, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Column(Modifier.fillMaxWidth().background(Palette.GreenLight, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                .padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Đọc được từ ảnh", fontWeight = FontWeight.Bold, color = Palette.Ink)
+                val rows = listOfNotNull(read?.name?.let { "Tên: $it" }, read?.phones?.takeIf { it.isNotEmpty() }?.let { "Điện thoại: ${it.joinToString(", ")}" },
+                    read?.houseNumber?.let { "Số nhà: $it" }, read?.category?.let { "Loại hình: $it" })
+                when {
+                    reading -> Hint("Đang đọc chữ trên ảnh…")
+                    rows.isEmpty() -> Hint("Máy chưa đọc được gì. Hệ thống sẽ đọc lại ảnh trên máy chủ.")
+                    else -> rows.forEach { Text(it, color = Palette.Ink) }
+                }
+                Hint("Gợi ý cho hệ thống; tên, địa chỉ, loại hình được kiểm tra lại với ảnh và bản đồ.")
+            }
             Text("Tình trạng", fontWeight = FontWeight.SemiBold, color = Palette.Ink)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (st in PoiStatus.entries) FilterChip(d.status == st, { d.status = st }, { Text(st.label) })
             }
-            Hint("Không bắt buộc: ghi những gì đọc được tại chỗ, phần còn lại được đọc từ ảnh.")
-            OutlinedTextField(d.name, { d.name = it }, label = { Text("Tên trên biển hiệu") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(d.category, { d.category = it }, label = { Text("Loại hình") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (c in CATEGORIES) FilterChip(d.category == c, { d.category = if (d.category == c) "" else c }, { Text(c) })
+            var more by remember { mutableStateOf(d.fields().values.any { it.isNotBlank() }) }
+            androidx.compose.material3.TextButton(onClick = { more = !more }) {
+                Text(if (more) "▾ Ghi chú thêm" else "▸ Ghi chú thêm (không bắt buộc: biển bị che, không có biển…)")
             }
-            OutlinedTextField(d.house, { d.house = it }, label = { Text("Số nhà") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(d.phone, { d.phone = it }, label = { Text("Số điện thoại") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
-            OutlinedTextField(d.note, { d.note = it }, label = { Text("Ghi chú") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            if (more) {
+                OutlinedTextField(d.note, { d.note = it }, label = { Text("Ghi chú cho hệ thống") }, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("vd: biển hiệu bị cây che, quán không có biển") })
+                OutlinedTextField(d.name, { d.name = it }, label = { Text("Tên (nếu ảnh không thấy)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(d.phone, { d.phone = it }, label = { Text("Số điện thoại") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
+                OutlinedTextField(d.house, { d.house = it }, label = { Text("Số nhà") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (c in CATEGORIES) FilterChip(d.category == c, { d.category = if (d.category == c) "" else c }, { Text(c) })
+                }
+            }
           }
             Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(onClick = onMore, modifier = Modifier.height(48.dp)) { Text("Chụp thêm", maxLines = 1) }
