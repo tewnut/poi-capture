@@ -14,10 +14,10 @@ import java.util.zip.ZipFile
 class StoreExportTest {
     @get:Rule val tmp = TemporaryFolder()
 
-    private fun session() = Session(
+    private fun session(road: Road = Road.of(WAY, listOf(WAY)), kind: SessionKind = SessionKind.SWEEP) = Session(
         id = "s_test", createdAt = "2026-11-08T03:00:00Z", startedAt = "2026-11-08T03:01:00Z",
         contributor = "tester", note = "", vehicle = Vehicle.MOTORBIKE, mode = Mode.PHOTO_AUTO,
-        sideOfTravel = Side.RIGHT, road = Road.of(WAY, listOf(WAY)), settings = Settings(),
+        sideOfTravel = Side.RIGHT, road = road, settings = Settings(), kind = kind,
     )
 
     @Test fun sessionRoundTripsThroughJson() {
@@ -121,5 +121,7 @@ class StoreExportTest {
 
     @Test fun zipFileNameIsSafe() {
         assertEquals("poi-capture_Đường-Thử-Nghiệm_right_202611080301.zip", Exporter.fileName(session()))
+        assertEquals("poi-capture_place_202611080301.zip", Exporter.fileName(session(kind = SessionKind.POI)))
+        assertEquals("poi-capture_auto_right_202611080301.zip", Exporter.fileName(session(road = Road.auto())))
     }
 }

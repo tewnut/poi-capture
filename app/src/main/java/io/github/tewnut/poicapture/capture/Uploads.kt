@@ -24,7 +24,7 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /**
- * Background upload of finished sessions to the VMAP capture server (tus). One unique work per session; Wi-Fi only
+ * Background upload of finished sessions to a capture server (tus). One unique work per session; Wi-Fi only
  * unless the contributor allowed mobile data. Each run sends for up to 8 minutes, then asks to be run again
  * (WorkManager stops a worker after 10 minutes), and the tus upload resumes from the server's offset.
  */

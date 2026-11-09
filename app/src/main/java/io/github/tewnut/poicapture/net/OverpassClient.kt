@@ -41,8 +41,7 @@ object OverpassClient {
                 return ways
             } catch (e: Exception) { lastError = e }
         }
-        throw IllegalStateException("Không tải được dữ liệu đường (máy chủ OpenStreetMap quá tải hoặc mất mạng)." +
-            (lastError?.message?.let { " [$it]" } ?: ""))
+        throw RoadDataUnavailable(lastError)
     }
 
     private fun post(url: String, q: String): List<Way> {
@@ -60,3 +59,7 @@ object OverpassClient {
         } finally { c.disconnect() }
     }
 }
+
+/** No road data from any Overpass server (overloaded or offline); the UI says so in the user's language. */
+class RoadDataUnavailable(cause: Throwable?) :
+    IllegalStateException("No road data (OpenStreetMap server busy or offline)" + (cause?.message?.let { " [$it]" } ?: ""), cause)

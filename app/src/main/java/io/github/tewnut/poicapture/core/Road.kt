@@ -43,7 +43,7 @@ data class Way(
 /**
  * The road data of a session.
  * - Picked: the way the contributor tapped plus the rest of the same road nearby (OSM splits roads); primaryWayId set.
- * - Auto: label "Tự động theo GPS", primaryWayId null, ways = every way loaded around the ride.
+ * - Auto: label [AUTO_LABEL] (older sessions: "Tự động theo GPS"), primaryWayId null, ways = every way loaded around the ride.
  */
 data class Road(
     val label: String,
@@ -67,7 +67,7 @@ data class Road(
         .put("ways", JSONArray().apply { ways.forEach { put(it.toJson()) } })
 
     companion object {
-        const val AUTO_LABEL = "Tự động theo GPS"
+        const val AUTO_LABEL = "Auto (GPS)"   // stored / exported; the UI shows its own text for auto roads
 
         fun fromJson(o: JSONObject): Road {
             val w = o.optJSONArray("ways") ?: JSONArray()
@@ -87,8 +87,10 @@ data class Road(
     }
 }
 
-fun roadLabel(w: Way): String =
-    listOf(w.ref, w.name).filter { it.isNotBlank() }.joinToString(" · ").ifEmpty { "Đường không tên (${w.highway})" }
+fun roadLabel(w: Way): String = roadNameOf(w) ?: "Unnamed road (${w.highway})"
+
+/** "ref · name" of a way, null when it has neither (the UI then says "unnamed road" in its own language). */
+fun roadNameOf(w: Way): String? = listOf(w.ref, w.name).filter { it.isNotBlank() }.joinToString(" · ").ifEmpty { null }
 
 data class RoadMatch(val wayId: Long, val point: LatLon, val distanceM: Double, val segmentBearing: Double)
 

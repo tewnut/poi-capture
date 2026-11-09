@@ -22,6 +22,15 @@ data class Fix(
         .put("en", elapsedNanos.orNull())
 }
 
+/** An on-screen warning while capturing; the UI turns it into text in the user's language. */
+sealed interface CaptureWarning {
+    data class TooFast(val kmh: Int, val maxKmh: Int) : CaptureWarning
+    data class WeakGps(val accuracyM: Int) : CaptureWarning
+    data class OffRoad(val distanceM: Int) : CaptureWarning
+    /** Turned back on the picked road: the photographed side is now the other row of buildings. */
+    data object UTurn : CaptureWarning
+}
+
 /**
  * Turns raw fixes into what the capture needs: travel bearing, speed, the matched road segment (heading-aware),
  * the travel direction along the road, U-turn detection and on-screen warnings. Pure logic, unit-tested on the JVM.
@@ -85,10 +94,13 @@ class FixProcessor(
     }
 
     /** The matched road's name when the rider is on it (≤ 30 m), else null. */
-    fun roadName(): String? {
+    fun roadName(): String? = roadWay()?.let { roadLabel(it) }
+
+    /** The matched way when the rider is on it (≤ 30 m), else null. */
+    fun roadWay(): Way? {
         val m = match ?: return null
         if (m.distanceM > 30) return null
-        return byId[m.wayId]?.let { roadLabel(it) }
+        return byId[m.wayId]
     }
 
     /** Feed one fix. Returns true when the session's travel direction was decided on this fix (save the session). */
@@ -146,13 +158,13 @@ class FixProcessor(
         return if (m != null && tb != null) directionOn(tb, m.segmentBearing) else travel
     }
 
-    fun warnings(): List<String> {
-        val w = mutableListOf<String>()
-        speedKmh?.let { if (it > maxSpeedKmh) w += "Chậm lại: ${it.roundToInt()} km/h (tối đa $maxSpeedKmh)" }
-        fix?.let { if (it.accuracyM > maxAccuracyM) w += "GPS yếu: ±${it.accuracyM.roundToInt()} m" }
+    fun warnings(): List<CaptureWarning> {
+        val w = mutableListOf<CaptureWarning>()
+        speedKmh?.let { if (it > maxSpeedKmh) w += CaptureWarning.TooFast(it.roundToInt(), maxSpeedKmh) }
+        fix?.let { if (it.accuracyM > maxAccuracyM) w += CaptureWarning.WeakGps(it.accuracyM.roundToInt()) }
         if (fixedRoad) {
-            match?.let { if (it.distanceM > offRoadWarnM) w += "Cách đường đã chọn ${it.distanceM.roundToInt()} m" }
-            if (travelOk == false) w += "Đã quay đầu: bên chụp đã đổi sang dãy nhà bên kia"
+            match?.let { if (it.distanceM > offRoadWarnM) w += CaptureWarning.OffRoad(it.distanceM.roundToInt()) }
+            if (travelOk == false) w += CaptureWarning.UTurn
         }
         return w
     }

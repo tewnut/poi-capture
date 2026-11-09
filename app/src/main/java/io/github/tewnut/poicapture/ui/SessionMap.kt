@@ -40,6 +40,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import io.github.tewnut.poicapture.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,7 +72,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** XYZ tile URL template ({z}/{x}/{y}), e.g. OSM or VMAP tiles. */
+/** XYZ tile URL template ({z}/{x}/{y}), e.g. OpenStreetMap or any other XYZ tile server. */
 internal class TemplateTileSource(private val template: String) :
     OnlineTileSourceBase("tiles-${template.hashCode()}", 0, 19, 256, "", arrayOf(template), "© OpenStreetMap contributors") {
     override fun getTileURLString(index: Long): String = template
@@ -139,10 +141,10 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
             modifier = Modifier.fillMaxSize().clipToBounds())
 
         if (pins.isEmpty()) {
-            Pill(if (live) "Chưa có ảnh. Ảnh sẽ hiện trên bản đồ ngay khi chụp." else "Phiên này không có ảnh.",
+            Pill(stringResource(if (live) R.string.sessionmap_no_photos_live else R.string.sessionmap_no_photos),
                 Modifier.align(Alignment.BottomCenter).padding(16.dp))
         } else if (sel == null) {
-            Pill("${pins.size} ảnh · ${pins.count { it.fixed != null }} đã sửa vị trí · chạm vào chấm để xem ảnh",
+            Pill(LocalContext.current.resources.getQuantityString(R.plurals.sessionmap_summary, pins.size, pins.size, pins.count { it.fixed != null }),
                 Modifier.align(Alignment.BottomCenter).padding(16.dp), size = 13.sp)
         }
 
@@ -176,33 +178,34 @@ private fun PhotoPanel(sessionId: String, p: PhotoPin, idx: Int, count: Int, rel
     if (big) androidx.compose.ui.window.Dialog(onDismissRequest = { big = false },
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         Box(Modifier.fillMaxSize().background(Color.Black).clickable { big = false }) {
-            thumb?.let { Image(it, "Ảnh ${idx + 1}", Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
-            Pill("Chạm để đóng", Modifier.align(Alignment.TopCenter).padding(16.dp))
+            thumb?.let { Image(it, stringResource(R.string.sessionmap_photo_desc, idx + 1), Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
+            Pill(stringResource(R.string.sessionmap_tap_close), Modifier.align(Alignment.TopCenter).padding(16.dp))
         }
     }
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 10.dp) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
                 Box(Modifier.size(112.dp, 63.dp).border(1.dp, Color(0xFFD0D5DD), RoundedCornerShape(8.dp)).clickable { big = true }) {
-                    thumb?.let { Image(it, "Ảnh ${idx + 1}, chạm để xem lớn", Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                    thumb?.let { Image(it, stringResource(R.string.sessionmap_photo_thumb_desc, idx + 1), Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                 }
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Ảnh ${idx + 1}/$count · ${time(p.tMs)}", fontWeight = FontWeight.Bold, color = Palette.Ink)
-                    Text(p.roadName ?: "Chưa nhận ra đường", color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Hint(if (p.fixed != null) "Vị trí đã sửa tay (GPS gốc vẫn được giữ)" else "Vị trí GPS" + (p.accuracyM?.let { " ±$it m" } ?: ""),
+                    Text(stringResource(R.string.sessionmap_photo_title, idx + 1, count, time(p.tMs)), fontWeight = FontWeight.Bold, color = Palette.Ink)
+                    Text(p.roadName ?: stringResource(R.string.sessionmap_no_road), color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Hint(if (p.fixed != null) stringResource(R.string.sessionmap_moved)
+                        else p.accuracyM?.let { stringResource(R.string.sessionmap_gps_accuracy, it) } ?: stringResource(R.string.sessionmap_gps),
                         color = if (p.fixed != null) Palette.Amber else Palette.Muted)
-                    p.facadeDistanceM?.let { Hint("■ điểm mặt tiền ước tính, cách ${it.toInt()} m", color = Palette.Muted) }
+                    p.facadeDistanceM?.let { Hint(stringResource(R.string.sessionmap_facade, it.toInt()), color = Palette.Muted) }
                 }
                 androidx.compose.material3.IconButton(onClick = onClose) { Text("✕", fontSize = 18.sp, color = Palette.Muted) }
             }
-            if (relocating) Hint("Chạm vào đúng vị trí trên bản đồ (hoặc giữ và kéo chấm xanh).", color = Palette.Blue)
+            if (relocating) Hint(stringResource(R.string.sessionmap_relocate_hint), color = Palette.Blue)
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onPrev, enabled = idx > 0, modifier = Modifier.size(56.dp, 48.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("◀", fontSize = 18.sp) }
                 OutlinedButton(onClick = onNext, enabled = idx < count - 1, modifier = Modifier.size(56.dp, 48.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("▶", fontSize = 18.sp) }
-                Button(onClick = onRelocate, modifier = Modifier.height(48.dp)) { Text(if (relocating) "Huỷ sửa" else "Sửa vị trí", maxLines = 1) }
-                if (p.fixed != null && !relocating) TextButton(onClick = onReset, modifier = Modifier.height(48.dp)) { Text("Về vị trí GPS", maxLines = 1) }
+                Button(onClick = onRelocate, modifier = Modifier.height(48.dp)) { Text(stringResource(if (relocating) R.string.sessionmap_cancel_move else R.string.sessionmap_move), maxLines = 1) }
+                if (p.fixed != null && !relocating) TextButton(onClick = onReset, modifier = Modifier.height(48.dp)) { Text(stringResource(R.string.sessionmap_back_gps), maxLines = 1) }
             }
         }
     }

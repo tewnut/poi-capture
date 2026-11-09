@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: plain HTTP to the development machine (emulator 10.0.2.2, adb reverse localhost), to test road
+     packs and the capture server locally. Release builds keep Android's default (HTTPS only). -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">10.0.2.2</domain>

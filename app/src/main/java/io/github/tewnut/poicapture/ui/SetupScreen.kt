@@ -50,6 +50,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,6 +66,7 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polygon
 import io.github.tewnut.poicapture.Prefs
+import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.core.CapturePlan
 import io.github.tewnut.poicapture.core.Coverage
@@ -84,7 +86,6 @@ import io.github.tewnut.poicapture.core.Vehicle
 import io.github.tewnut.poicapture.core.Way
 import io.github.tewnut.poicapture.core.iso
 import io.github.tewnut.poicapture.core.matchRoad
-import io.github.tewnut.poicapture.core.roadLabel
 import io.github.tewnut.poicapture.core.uid
 import io.github.tewnut.poicapture.net.OverpassClient
 import io.github.tewnut.poicapture.net.RoadSource
@@ -120,7 +121,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
     val live = loc.live   // a current fix: road, suggestions; the map may show a remembered one
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
         if (res.values.any { !it }) {
-            Toast.makeText(ctx, "Cần quyền camera và vị trí chính xác. Mở Cài đặt → Quyền để bật.", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, ctx.getString(R.string.setup_need_permissions), Toast.LENGTH_LONG).show()
             ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                 android.net.Uri.fromParts("package", ctx.packageName, null)))
         }
@@ -148,15 +149,17 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
     val plan = CapturePlan.of(facade)
     var recenter by remember { mutableIntStateOf(0) }
     var nearWays by remember { mutableStateOf<List<Way>?>(null) }
-    var roadStatus by remember { mutableStateOf("") }
+    var roadStatus by remember { mutableStateOf<Int?>(null) }   // string resource of the road data status, null = fine
     var roadSource by remember { mutableStateOf("") }
     var packSuggestion by remember { mutableStateOf<RoadSource.Entry?>(null) }
+    var roadReload by remember { mutableIntStateOf(0) }   // a pack was just installed: look the road up again
 
     // load the road data around the rider (shared cache: the capture service reuses it) to show the current road
     val cell = live?.let { RoadCells.cellOf(LatLon(it.lat, it.lon)) }
-    LaunchedEffect(cell) {
+    LaunchedEffect(cell, roadReload) {
         if (cell == null) return@LaunchedEffect
-        if (nearWays == null) roadStatus = "Đang tải dữ liệu đường quanh bạn…"
+        roadSource = ""   // a new cell: the label of the previous source must not stay while this one loads
+        if (nearWays == null) roadStatus = R.string.setup_roads_loading
         try {
             // offline pack (the cells around), then the disk cache, then Overpass (cached for next time)
             val hit = withContext(Dispatchers.IO) { RoadSource.local(ctx, cell) }
@@ -172,9 +175,9 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                 nearWays = w
                 roadSource = "overpass"
             }
-            roadStatus = ""
+            roadStatus = null
         } catch (e: Exception) {
-            roadStatus = "Chưa tải được dữ liệu đường (mạng hoặc máy chủ bận). Vẫn ghi bình thường, tên đường được nhận sau."
+            roadStatus = R.string.setup_roads_failed
         }
     }
     LaunchedEffect(cell) {
@@ -185,7 +188,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
         }
     }
     val currentRoad = live?.let { l -> nearWays?.let { ways ->
-        matchRoad(ways, LatLon(l.lat, l.lon))?.takeIf { it.distanceM <= 30 }?.let { m -> ways.firstOrNull { it.id == m.wayId }?.let { roadLabel(it) } }
+        matchRoad(ways, LatLon(l.lat, l.lon))?.takeIf { it.distanceM <= 30 }?.let { m -> ways.firstOrNull { it.id == m.wayId }?.let { wayLabel(ctx, it) } }
     } }
 
     val ready = Onboarding.isEmail(email)
@@ -197,30 +200,30 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                 Modifier.fillMaxSize().clipToBounds())
             if (mine.lines.isNotEmpty() || mine.points.isNotEmpty() || team.lines.isNotEmpty()) {
                 androidx.compose.material3.FilterChip(showCoverage, { showCoverage = !showCoverage },
-                    { Text(if (team.lines.isNotEmpty()) "Đã quét · tím = nhóm" else "Đã quét", fontSize = 12.sp) },
+                    { Text(stringResource(if (team.lines.isNotEmpty()) R.string.setup_coverage_team else R.string.setup_coverage), fontSize = 12.sp) },
                     modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
                     colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(containerColor = Color.White, selectedContainerColor = Palette.GreenLight))
             }
             Column(Modifier.align(Alignment.TopStart).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 when (loc.status) {
-                    LocStatus.NO_PERMISSION -> Pill("Chưa cho phép vị trí", dot = Palette.Red)
-                    LocStatus.APPROXIMATE_ONLY -> Pill("Chỉ có vị trí gần đúng", dot = Palette.Red)
-                    LocStatus.DISABLED -> Pill("Vị trí của máy đang tắt", dot = Palette.Red)
-                    LocStatus.SEARCHING -> Pill("Đang tìm vị trí" + (if (loc.satsSeen > 0) " · ${loc.satsUsed}/${loc.satsSeen} vệ tinh" else "…"),
-                        dot = Color(0xFFFEC84B))
+                    LocStatus.NO_PERMISSION -> Pill(stringResource(R.string.setup_loc_no_permission), dot = Palette.Red)
+                    LocStatus.APPROXIMATE_ONLY -> Pill(stringResource(R.string.setup_loc_approximate), dot = Palette.Red)
+                    LocStatus.DISABLED -> Pill(stringResource(R.string.setup_loc_disabled), dot = Palette.Red)
+                    LocStatus.SEARCHING -> Pill(if (loc.satsSeen > 0) stringResource(R.string.setup_loc_searching_sats, loc.satsUsed, loc.satsSeen)
+                        else stringResource(R.string.setup_loc_searching), dot = Color(0xFFFEC84B))
                     LocStatus.OK -> live!!.let { l ->
-                        if (!l.gps) Pill("Vị trí từ Wi-Fi / sóng · ±${l.accuracyM.roundToInt()} m, đang chờ GPS", dot = Color(0xFFFEC84B))
-                        else if (l.accuracyM <= settings.maxAccuracyM) Pill("GPS tốt · ±${l.accuracyM.roundToInt()} m", dot = Color(0xFF47CD89))
-                        else Pill("GPS yếu · ±${l.accuracyM.roundToInt()} m", dot = Color(0xFFFEC84B))
+                        if (!l.gps) Pill(stringResource(R.string.setup_loc_network, l.accuracyM.roundToInt()), dot = Color(0xFFFEC84B))
+                        else if (l.accuracyM <= settings.maxAccuracyM) Pill(stringResource(R.string.setup_gps_good, l.accuracyM.roundToInt()), dot = Color(0xFF47CD89))
+                        else Pill(stringResource(R.string.setup_gps_weak, l.accuracyM.roundToInt()), dot = Color(0xFFFEC84B))
                     }
                 }
                 if (live?.simulated == true) {
-                    Pill("Máy ảo: vị trí giả lập, không phải GPS thật", bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp)
+                    Pill(stringResource(R.string.setup_simulated), bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp)
                 }
             }
             SmallFloatingActionButton(onClick = { recenter++ }, modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
                 containerColor = Color.White) {
-                Icon(Icons.Filled.LocationOn, "Về vị trí của tôi", tint = Palette.Blue)
+                Icon(Icons.Filled.LocationOn, stringResource(R.string.setup_recenter), tint = Palette.Blue)
             }
         }
 
@@ -231,59 +234,57 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     LocationHelp(loc)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KindCard("Quét đường", "Chạy xe, app tự chụp dãy nhà", kind == SessionKind.SWEEP, Modifier.weight(1f)) { kind = SessionKind.SWEEP }
-                        KindCard("Chụp địa điểm", "Dừng lại, chụp kỹ từng cửa hàng", kind == SessionKind.POI, Modifier.weight(1f)) { kind = SessionKind.POI }
+                        KindCard(stringResource(R.string.setup_sweep_title), stringResource(R.string.setup_sweep_sub),
+                            kind == SessionKind.SWEEP, Modifier.weight(1f)) { kind = SessionKind.SWEEP }
+                        KindCard(stringResource(R.string.setup_place_title), stringResource(R.string.setup_place_sub),
+                            kind == SessionKind.POI, Modifier.weight(1f)) { kind = SessionKind.POI }
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Hint("Bạn đang ở")
-                        Text(currentRoad ?: if (live == null) "Chờ vị trí…" else "Chưa nhận ra đường",
+                        Hint(stringResource(R.string.setup_you_are_on))
+                        Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
                             fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink)
-                        Hint(roadStatus.ifEmpty { "Tên đường được tự nhận khi bạn chạy, rẽ sang đường khác cũng được." } +
-                            when {
-                                roadSource.startsWith("pack:") -> " (dữ liệu offline)"
-                                roadSource == "cache" -> " (dữ liệu đã lưu trên máy)"
-                                else -> ""
-                            })
+                        val status = stringResource(roadStatus ?: R.string.setup_road_auto_hint)
+                        Hint(when {
+                            roadSource.startsWith("pack:") -> stringResource(R.string.setup_source_offline, status)
+                            roadSource == "cache" -> stringResource(R.string.setup_source_cache, status)
+                            else -> status
+                        })
                         // outside every installed pack, but the catalogue has one here: suggest it (computed off the UI thread)
                         val suggest = packSuggestion
                         if (suggest != null) {
-                            Hint("Tải dữ liệu đường của vùng này để nhận tên đường cả khi mất mạng:", color = Palette.Blue)
-                            PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null })
+                            Hint(stringResource(R.string.setup_pack_suggest), color = Palette.Blue)
+                            PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null; roadReload++ })
                         }
                     }
                     if (kind == SessionKind.POI) {
-                        Hint("Với mỗi cửa hàng: chụp ★ mặt tiền trực diện (ảnh bìa), biển hiệu, rồi bên hông / bên trong / " +
-                            "thông tin (giờ mở cửa, SĐT, menu) nếu có. Sau đó ghim địa điểm lên đúng tòa nhà trên bản đồ. " +
-                            "Ảnh đã được gắn sẵn với địa điểm, không cần xử lý tách ảnh sau.")
+                        Hint(stringResource(R.string.setup_poi_hint))
                     } else {
-                    Text("Mặt tiền cách camera khoảng", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
+                    Text(stringResource(R.string.setup_facade_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (d in (listOf(4, 6, 8, 12) + settings.facadeDistanceM.roundToInt()).distinct().sorted()) {
-                            FilterChip(facade.roundToInt() == d, { facade = d.toDouble() }, { Text("$d m") })
+                            FilterChip(facade.roundToInt() == d, { facade = d.toDouble() }, { Text(stringResource(R.string.setup_distance_m, d)) })
                         }
                     }
-                    Hint("Phố hẹp, đi sát lề: 4 m · phố thường: 6 m · vỉa hè rộng: 8 m · đại lộ: 12 m. " +
-                        "Giúp đặt địa điểm đúng vào tòa nhà.")
-                    Text("Cách ghi", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
+                    Hint(stringResource(R.string.setup_facade_hint))
+                    Text(stringResource(R.string.setup_mode_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(mode == Mode.PHOTO_AUTO, { mode = Mode.PHOTO_AUTO }, { Text("Ảnh tự động") })
-                        FilterChip(mode == Mode.PHOTO_MANUAL, { mode = Mode.PHOTO_MANUAL }, { Text("Bấm tay") })
-                        FilterChip(mode == Mode.VIDEO, { mode = Mode.VIDEO }, { Text("Video") })
+                        FilterChip(mode == Mode.PHOTO_AUTO, { mode = Mode.PHOTO_AUTO }, { Text(stringResource(R.string.setup_mode_auto)) })
+                        FilterChip(mode == Mode.PHOTO_MANUAL, { mode = Mode.PHOTO_MANUAL }, { Text(stringResource(R.string.setup_mode_manual)) })
+                        FilterChip(mode == Mode.VIDEO, { mode = Mode.VIDEO }, { Text(stringResource(R.string.setup_mode_video)) })
                     }
                     Hint(when (mode) {
-                        Mode.PHOTO_AUTO -> "1 ảnh mỗi ${String.format(Locale.ROOT, "%.1f", plan.photoEveryM)} m (mỗi biển hiệu có trong ≥ 2 ảnh) · chạy tối đa ${plan.maxSpeedKmh} km/h"
-                        Mode.PHOTO_MANUAL -> "Chụp bằng nút âm lượng hoặc nút bấm Bluetooth trên tay lái, không cần chạm màn hình · chạy tối đa ${plan.maxSpeedKmh} km/h"
-                        Mode.VIDEO -> "Quay liên tục · chạy tối đa ${plan.maxSpeedKmh} km/h"
+                        Mode.PHOTO_AUTO -> stringResource(R.string.setup_mode_auto_hint, String.format(Locale.ROOT, "%.1f", plan.photoEveryM), plan.maxSpeedKmh)
+                        Mode.PHOTO_MANUAL -> stringResource(R.string.setup_mode_manual_hint, plan.maxSpeedKmh)
+                        Mode.VIDEO -> stringResource(R.string.setup_mode_video_hint, plan.maxSpeedKmh)
                     })
-                    Hint("Gắn máy chắc, nằm ngang, camera nhìn sang dãy nhà cần ghi. App tự nhận bên (phải/trái) khi bạn chạy. " +
-                        "Bấm ★ Đánh dấu khi đi qua cửa hàng đáng chú ý.")
+                    Hint(stringResource(R.string.setup_mount_hint))
                     }
                 }
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     if (!ready) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Hint("Cần email người ghi trước khi bắt đầu.", Modifier.weight(1f), Palette.Amber)
-                            TextButton(onClick = onOpenProfile) { Text("Nhập email") }
+                            Hint(stringResource(R.string.setup_need_email), Modifier.weight(1f), Palette.Amber)
+                            TextButton(onClick = onOpenProfile) { Text(stringResource(R.string.setup_enter_email)) }
                         }
                     }
                     Button(
@@ -297,7 +298,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                                 return@Button
                             }
                             if (CaptureService.activeSession.value != null) {
-                                Toast.makeText(ctx, "Đang có một phiên ghi chưa kết thúc.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(ctx, ctx.getString(R.string.setup_session_running), Toast.LENGTH_LONG).show()
                                 return@Button
                             }
                             val now = System.currentTimeMillis()
@@ -309,7 +310,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                             CaptureService.store(ctx).create(s)
                             onStart(s.id)
                         },
-                    ) { Text("Bắt đầu", fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                    ) { Text(stringResource(R.string.setup_start), fontSize = 18.sp, fontWeight = FontWeight.Bold) }
                 }
             }
         }

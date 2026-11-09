@@ -45,7 +45,7 @@ object Exporter {
     }
 
     fun manifest(store: SessionStore, sessionId: String, nowMs: Long = System.currentTimeMillis()): JSONObject {
-        val session = store.load(sessionId) ?: error("Không tìm thấy phiên $sessionId")
+        val session = store.load(sessionId) ?: error("Session $sessionId not found")
         // auto road mode: the ways loaded during the ride live in ways.jsonl; the manifest carries them in road.ways
         if (session.road.auto) session.road = Road.auto((session.road.ways + store.loadedWays(sessionId)).distinctBy { it.key }, session.road.sources)
         val items = usableItems(store, sessionId).map { o ->
@@ -99,7 +99,7 @@ object Exporter {
         }
 
     fun fileName(s: Session): String {
-        val label = (if (s.kind == SessionKind.POI) "dia-diem" else s.road.label).replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-').take(40).ifEmpty { "road" }
+        val label = (if (s.kind == SessionKind.POI) "place" else if (s.road.auto) "auto" else s.road.label).replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-').take(40).ifEmpty { "road" }
         val start = (s.startedAt ?: s.createdAt).let {
             try { DateTimeFormatter.ofPattern("yyyyMMddHHmm").withZone(ZoneOffset.UTC).format(Instant.parse(it)) } catch (e: Exception) { "start" }
         }

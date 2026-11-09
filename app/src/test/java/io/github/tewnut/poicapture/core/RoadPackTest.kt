@@ -20,13 +20,14 @@ class CatalogueErrorTest {
     private val other = "https://example.org/packs/index.json"
 
     @Test fun githubMissingReleaseIsNotATimeout() {
-        assertTrue(CatalogueError.forHttp(504, gh).contains("chưa phát hành"))
-        assertTrue(CatalogueError.forHttp(404, other).contains("chưa phát hành"))
+        assertEquals(CatalogueError.NOT_PUBLISHED, CatalogueError.forHttp(504, gh))
+        assertEquals(CatalogueError.NOT_PUBLISHED, CatalogueError.forHttp(404, other))
     }
 
     @Test fun otherServersKeepTheGatewayMeaning() {
-        assertTrue(CatalogueError.forHttp(504, other).contains("thử lại sau"))
-        assertTrue(CatalogueError.forHttp(403, gh).contains("không cho truy cập"))
+        assertEquals(CatalogueError.SERVER, CatalogueError.forHttp(504, other))
+        assertEquals(CatalogueError.FORBIDDEN, CatalogueError.forHttp(403, gh))
+        assertEquals(CatalogueError.OTHER, CatalogueError.forHttp(418, other))
     }
 }
 

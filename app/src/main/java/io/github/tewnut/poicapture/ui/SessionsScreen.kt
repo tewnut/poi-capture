@@ -41,6 +41,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import android.content.Context
+import io.github.tewnut.poicapture.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -82,6 +85,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
     val active by CaptureService.activeSession.collectAsState()
     var rows by remember { mutableStateOf<List<SessionRow>?>(null) }
     var msg by remember { mutableStateOf("") }
+    var msgError by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf<String?>(null) }
     var confirmDel by remember { mutableStateOf<Session?>(null) }
     var saving by remember { mutableStateOf<Session?>(null) }
@@ -98,9 +102,9 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
                 val pois = if (s.kind == SessionKind.POI) store.pois(s.id) else emptyList()
                 val names = pois.mapNotNull { it.optJSONObject("fields")?.optString("name")?.takeIf { n -> n.isNotBlank() } }
                 val title = when {
-                    s.kind == SessionKind.POI -> names.take(2).joinToString(", ").ifEmpty { "${pois.size} địa điểm" }
-                    s.road.auto -> TrackStats.mainRoads(items).joinToString(", ").ifEmpty { "Tự động theo GPS" }
-                    else -> s.road.label
+                    s.kind == SessionKind.POI -> names.take(2).joinToString(", ").ifEmpty { ctx.plural(R.plurals.sessions_places, pois.size) }
+                    s.road.auto -> TrackStats.mainRoads(items).joinToString(", ").ifEmpty { ctx.getString(R.string.road_auto) }
+                    else -> roadText(ctx, s.road)
                 }
                 SessionRow(s, title,
                     items.count { it.optString("kind") == "photo" },
@@ -144,20 +148,20 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
         saving = null
         if (uri == null) return@rememberLauncherForActivityResult
         busy = s.id
-        msg = "Đang đóng gói…"
+        msg = ctx.getString(R.string.sessions_packing); msgError = false
         scope.launch {
             msg = try {
                 withContext(Dispatchers.IO) { ctx.contentResolver.openOutputStream(uri)!!.use { Exporter.writeZip(store, s.id, it) } }
                 markExported(s)
-                "Đã lưu ${Exporter.fileName(s)}."
-            } catch (e: Exception) { "Lưu không được: ${e.message}" }
+                ctx.getString(R.string.sessions_saved, Exporter.fileName(s))
+            } catch (e: Exception) { msgError = true; ctx.getString(R.string.sessions_save_failed, errorText(ctx, e)) }
             busy = null
         }
     }
 
     fun send(s: Session) {
         busy = s.id
-        msg = "Đang đóng gói…"
+        msg = ctx.getString(R.string.sessions_packing); msgError = false
         scope.launch {
             try {
                 val f = withContext(Dispatchers.IO) {
@@ -167,10 +171,10 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
                 val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
                 val send = Intent(Intent.ACTION_SEND).setType("application/zip").putExtra(Intent.EXTRA_STREAM, uri)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                ctx.startActivity(Intent.createChooser(send, "Gửi ${f.name}"))
+                ctx.startActivity(Intent.createChooser(send, ctx.getString(R.string.sessions_send_chooser, f.name)))
                 markExported(s)
-                msg = "Đã đóng gói ${mb(f.length())}. Chọn Zalo, Drive, email… để gửi."
-            } catch (e: Exception) { msg = "Không đóng gói được: ${e.message}" }
+                msg = ctx.getString(R.string.sessions_packed, mb(f.length()))
+            } catch (e: Exception) { msgError = true; msg = ctx.getString(R.string.sessions_pack_failed, errorText(ctx, e)) }
             busy = null
         }
     }
@@ -179,47 +183,47 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
     LazyColumn(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Đã ghi", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
+                Text(stringResource(R.string.sessions_title), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
                 if (list != null && configured) {
                     val pending = list.filter { it.photos + it.videos > 0 && active != it.s.id &&
                         uploads[it.s.id]?.let { (u, changed) -> u.state != "uploaded" || changed } != false }
                     Text(
-                        if (pending.isEmpty()) "Mọi phiên đã được tải lên máy chủ."
-                        else "${pending.size} phiên chưa tải lên · ${mb(pending.sumOf { it.bytes })}",
+                        if (pending.isEmpty()) stringResource(R.string.sessions_all_uploaded)
+                        else ctx.plural(R.plurals.sessions_not_uploaded, pending.size, pending.size, mb(pending.sumOf { it.bytes })),
                         color = if (pending.isEmpty()) Palette.Green else Palette.Amber, fontWeight = FontWeight.SemiBold,
                     )
-                    Hint((if (wifiOnly) "Tự tải lên khi có Wi-Fi" else "Tự tải lên khi có mạng (cả 4G)") +
-                        ", tiếp tục được nếu mất mạng giữa chừng. Còn trống ${mb(store.root.apply { mkdirs() }.usableSpace)}.")
+                    Hint(stringResource(if (wifiOnly) R.string.sessions_auto_upload_wifi else R.string.sessions_auto_upload_any,
+                        mb(store.root.apply { mkdirs() }.usableSpace)))
                 } else if (list != null) {
                     val unsent = list.filter { it.s.exportedAt == null && it.photos + it.videos > 0 && active != it.s.id }
                     Text(
-                        if (unsent.isEmpty()) "Không có phiên nào chờ gửi."
-                        else "${unsent.size} phiên chưa gửi · ${km(unsent.sumOf { it.stats.distanceM })} · ${mb(unsent.sumOf { it.bytes })}",
+                        if (unsent.isEmpty()) stringResource(R.string.sessions_none_unsent)
+                        else ctx.plural(R.plurals.sessions_unsent, unsent.size, unsent.size, km(unsent.sumOf { it.stats.distanceM }), mb(unsent.sumOf { it.bytes })),
                         color = if (unsent.isEmpty()) Palette.Muted else Palette.Amber, fontWeight = FontWeight.SemiBold,
                     )
-                    Hint("Dữ liệu chỉ nằm trong máy tới khi bạn gửi. Còn trống ${mb(store.root.apply { mkdirs() }.usableSpace)}.")
+                    Hint(stringResource(R.string.sessions_local_only, mb(store.root.apply { mkdirs() }.usableSpace)))
                 }
-                if (msg.isNotEmpty()) Hint(msg, color = if (msg.startsWith("Lưu không được") || msg.startsWith("Không đóng gói")) Palette.Red else Palette.Green)
+                if (msg.isNotEmpty()) Hint(msg, color = if (msgError) Palette.Red else Palette.Green)
             }
         }
         if (list == null) item {
             Row(Modifier.padding(vertical = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                Hint("Đang đọc các phiên đã ghi…")
+                Hint(stringResource(R.string.sessions_loading))
             }
         }
         if (list != null && list.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Chưa có phiên ghi nào.", color = Palette.Muted)
-                    Button(onClick = onNew) { Text("Ghi phiên đầu tiên") }
+                    Text(stringResource(R.string.sessions_empty), color = Palette.Muted)
+                    Button(onClick = onNew) { Text(stringResource(R.string.sessions_first)) }
                 }
             }
         }
         items(list ?: emptyList(), key = { it.s.id }) { r ->
             SessionCard(r, active == r.s.id, busy == r.s.id, if (configured) uploads[r.s.id] else null, agent[r.s.id], wifiOnly,
-                onUpload = { scope.launch { withContext(Dispatchers.IO) { Uploads.enqueue(ctx, r.s.id) }; msg = "Đã đưa vào hàng chờ tải lên." } },
+                onUpload = { scope.launch { withContext(Dispatchers.IO) { Uploads.enqueue(ctx, r.s.id) }; msgError = false; msg = ctx.getString(R.string.sessions_queued) } },
                 onSend = { send(r.s) },
                 onMap = { onOpenMap(r.s.id) },
                 onSave = { saving = r.s; saveLauncher.launch(Exporter.fileName(r.s)) },
@@ -231,26 +235,26 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
     confirmDel?.let { s ->
         AlertDialog(
             onDismissRequest = { confirmDel = null },
-            title = { Text("Xoá phiên này?") },
+            title = { Text(stringResource(R.string.sessions_delete_title)) },
             text = {
                 val up = uploads[s.id]
-                Text(when {
-                    up != null && up.first.state == "uploaded" && !up.second -> "Phiên đã tải lên máy chủ. Chỉ xoá bản trong máy."
-                    up != null && up.first.state == "uploaded" -> "Phiên đã tải lên, nhưng các sửa đổi sau đó CHƯA được tải lại. Xoá thì mất các sửa đổi này."
-                    s.exportedAt != null -> "Phiên đã được gửi. Ảnh và video trong máy sẽ bị xoá."
-                    else -> "Phiên CHƯA được gửi hay tải lên. Ảnh và video sẽ mất hẳn."
-                })
+                Text(stringResource(when {
+                    up != null && up.first.state == "uploaded" && !up.second -> R.string.sessions_delete_uploaded
+                    up != null && up.first.state == "uploaded" -> R.string.sessions_delete_changed
+                    s.exportedAt != null -> R.string.sessions_delete_sent
+                    else -> R.string.sessions_delete_unsent
+                }))
             },
             confirmButton = { TextButton(onClick = {
                 confirmDel = null
-                msg = "Đang xoá…"
+                msgError = false; msg = ctx.getString(R.string.sessions_deleting)
                 scope.launch {
                     withContext(Dispatchers.IO) { store.delete(s.id); Uploads.forget(ctx, s.id) }
-                    msg = "Đã xoá phiên."
+                    msg = ctx.getString(R.string.sessions_deleted)
                     reload++
                 }
-            }) { Text("Xoá", color = Palette.Red) } },
-            dismissButton = { TextButton(onClick = { confirmDel = null }) { Text("Không") } },
+            }) { Text(stringResource(R.string.sessions_delete), color = Palette.Red) } },
+            dismissButton = { TextButton(onClick = { confirmDel = null }) { Text(stringResource(R.string.sessions_keep)) } },
         )
     }
 }
@@ -259,6 +263,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
 private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload: Pair<UploadState, Boolean>?, agentStatus: JSONObject?,
                         wifiOnly: Boolean, onUpload: () -> Unit,
                         onSend: () -> Unit, onMap: () -> Unit, onSave: () -> Unit, onDelete: () -> Unit) {
+    val ctx = LocalContext.current
     val s = r.s
     val empty = r.photos + r.videos == 0
     var menu by remember { mutableStateOf(false) }
@@ -268,44 +273,46 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                 Text(r.title, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.Ink, maxLines = 2,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Box {
-                    IconButton(onClick = { menu = true }, enabled = !recording && !busy) { Icon(Icons.Filled.MoreVert, "Thêm") }
+                    IconButton(onClick = { menu = true }, enabled = !recording && !busy) { Icon(Icons.Filled.MoreVert, stringResource(R.string.sessions_more)) }
                     DropdownMenu(menu, { menu = false }) {
-                        if (!empty && upload != null) DropdownMenuItem({ Text("Gửi qua ứng dụng khác") }, { menu = false; onSend() })
-                        if (!empty) DropdownMenuItem({ Text("Lưu file zip vào máy") }, { menu = false; onSave() })
-                        DropdownMenuItem({ Text("Xoá phiên", color = Palette.Red) }, { menu = false; onDelete() })
+                        if (!empty && upload != null) DropdownMenuItem({ Text(stringResource(R.string.sessions_send_other_app)) }, { menu = false; onSend() })
+                        if (!empty) DropdownMenuItem({ Text(stringResource(R.string.sessions_save_zip)) }, { menu = false; onSave() })
+                        DropdownMenuItem({ Text(stringResource(R.string.sessions_delete_session), color = Palette.Red) }, { menu = false; onDelete() })
                     }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val u = upload?.first
                 when {
-                    recording -> Badge("Đang ghi", Palette.Blue, Color(0xFFD1E9FF))
-                    empty -> Badge("Trống", Palette.Muted, Color(0xFFF2F4F7))
-                    upload != null && upload.second -> Badge("Cần tải lại", Palette.Amber, Palette.AmberLight)
-                    u?.state == "uploaded" -> Badge("Đã tải lên", Palette.Green, Palette.GreenLight)
-                    u?.state == "uploading" -> Badge("Đang tải ${(u.progress * 100).toInt()}%", Palette.Blue, Color(0xFFD1E9FF))
-                    u?.state == "queued" -> Badge(if (wifiOnly) "Chờ Wi-Fi" else "Chờ mạng", Palette.Amber, Palette.AmberLight)
-                    u?.state == "failed" -> Badge("Lỗi tải, sẽ thử lại", Palette.Red, Color(0xFFFEE4E2))
-                    upload != null -> Badge("Chưa tải lên", Palette.Amber, Palette.AmberLight)
-                    s.exportedAt != null -> Badge("Đã gửi", Palette.Green, Palette.GreenLight)
-                    else -> Badge("Chưa gửi", Palette.Amber, Palette.AmberLight)
+                    recording -> Badge(stringResource(R.string.sessions_badge_recording), Palette.Blue, Color(0xFFD1E9FF))
+                    empty -> Badge(stringResource(R.string.sessions_badge_empty), Palette.Muted, Color(0xFFF2F4F7))
+                    upload != null && upload.second -> Badge(stringResource(R.string.sessions_badge_reupload), Palette.Amber, Palette.AmberLight)
+                    u?.state == "uploaded" -> Badge(stringResource(R.string.sessions_badge_uploaded), Palette.Green, Palette.GreenLight)
+                    u?.state == "uploading" -> Badge(stringResource(R.string.sessions_badge_uploading, (u.progress * 100).toInt()), Palette.Blue, Color(0xFFD1E9FF))
+                    u?.state == "queued" -> Badge(stringResource(if (wifiOnly) R.string.sessions_badge_wait_wifi else R.string.sessions_badge_wait_network), Palette.Amber, Palette.AmberLight)
+                    u?.state == "failed" -> Badge(stringResource(R.string.sessions_badge_failed), Palette.Red, Color(0xFFFEE4E2))
+                    upload != null -> Badge(stringResource(R.string.sessions_badge_not_uploaded), Palette.Amber, Palette.AmberLight)
+                    s.exportedAt != null -> Badge(stringResource(R.string.sessions_badge_sent), Palette.Green, Palette.GreenLight)
+                    else -> Badge(stringResource(R.string.sessions_badge_not_sent), Palette.Amber, Palette.AmberLight)
                 }
             }
             Hint(listOfNotNull(
                 fmt(s.startedAt ?: s.createdAt),
-                duration(r.stats.durationMs).takeIf { r.stats.durationMs > 0 },
+                duration(ctx, r.stats.durationMs).takeIf { r.stats.durationMs > 0 },
                 km(r.stats.distanceM).takeIf { r.stats.distanceM > 0 },
-                if (s.kind == SessionKind.POI) "${r.pois} địa điểm" else null,
-                if (s.mode == Mode.VIDEO) "${r.videos} đoạn video" else "${r.photos} ảnh",
-                if (r.marks > 0) "${r.marks} đánh dấu" else null,
+                if (s.kind == SessionKind.POI) ctx.plural(R.plurals.sessions_places, r.pois) else null,
+                if (s.mode == Mode.VIDEO) ctx.plural(R.plurals.sessions_videos, r.videos) else ctx.plural(R.plurals.sessions_photos, r.photos),
+                if (r.marks > 0) ctx.plural(R.plurals.sessions_marks, r.marks) else null,
             ).joinToString(" · "))
             Hint(listOfNotNull(
-                if (s.kind == SessionKind.POI) "Chụp địa điểm" else "Quét đường",
-                if (s.kind == SessionKind.POI) null else (if (s.sideOfTravel == Side.RIGHT) "Bên phải" else "Bên trái") + (if (s.mount != null) " (đã đo)" else ""),
-                when (s.vehicle) { Vehicle.CAR -> "Ô tô"; Vehicle.MOTORBIKE -> "Xe máy"; else -> null },
-                if (s.kind == SessionKind.POI) null else when (s.mode) { Mode.PHOTO_AUTO -> "ảnh tự động"; Mode.PHOTO_MANUAL -> "ảnh bấm tay"; Mode.VIDEO -> "video" },
-                if (r.relocated > 0) "${r.relocated} ảnh đã sửa vị trí" else null,
-                if (s.endedAt == null && !recording) "bị gián đoạn (vẫn gửi được)" else null,
+                ctx.getString(if (s.kind == SessionKind.POI) R.string.sessions_kind_poi else R.string.sessions_kind_sweep),
+                if (s.kind == SessionKind.POI) null else ctx.getString(if (s.sideOfTravel == Side.RIGHT) R.string.sessions_side_right else R.string.sessions_side_left)
+                    .let { if (s.mount != null) ctx.getString(R.string.sessions_side_measured, it) else it },
+                when (s.vehicle) { Vehicle.CAR -> ctx.getString(R.string.sessions_vehicle_car); Vehicle.MOTORBIKE -> ctx.getString(R.string.sessions_vehicle_motorbike); else -> null },
+                if (s.kind == SessionKind.POI) null else ctx.getString(when (s.mode) {
+                    Mode.PHOTO_AUTO -> R.string.sessions_mode_auto; Mode.PHOTO_MANUAL -> R.string.sessions_mode_manual; Mode.VIDEO -> R.string.sessions_mode_video }),
+                if (r.relocated > 0) ctx.plural(R.plurals.sessions_relocated, r.relocated) else null,
+                if (s.endedAt == null && !recording) ctx.getString(R.string.sessions_interrupted) else null,
             ).joinToString(" · "), color = if (s.endedAt == null && !recording) Palette.Amber else Palette.Muted)
             upload?.first?.let { u ->
                 when {
@@ -313,15 +320,17 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                         LinearProgressIndicator(progress = { u.progress.toFloat() }, modifier = Modifier.fillMaxWidth().padding(end = 12.dp, top = 4.dp))
                     else -> {}
                 }
-                if (u.state == "failed" && u.error != null) Hint("Lỗi: ${u.error}", color = Palette.Red)
+                if (u.state == "failed" && u.error != null) Hint(stringResource(R.string.sessions_upload_error, u.error), color = Palette.Red)
             }
             agentStatus?.let { a ->
                 Hint(when (a.optString("state")) {
-                    "done" -> "Hệ thống đã xử lý" + (if (a.has("poisFound")) " · tìm thấy ${a.optInt("poisFound")} địa điểm" else "") +
-                        (a.optJSONArray("recapture")?.length()?.takeIf { it > 0 }?.let { " · $it chỗ cần chụp lại (xem trên Bản đồ)" } ?: "")
-                    "processing" -> "Hệ thống đang xử lý…"
-                    "failed" -> "Hệ thống chưa xử lý được phiên này, quản lý sẽ kiểm tra."
-                    else -> "Máy chủ đã nhận"
+                    "done" -> listOfNotNull(ctx.getString(R.string.sessions_agent_done),
+                        if (a.has("poisFound")) a.optInt("poisFound").let { ctx.plural(R.plurals.sessions_agent_found, it) } else null,
+                        a.optJSONArray("recapture")?.length()?.takeIf { it > 0 }?.let { ctx.plural(R.plurals.sessions_agent_recapture, it) },
+                    ).joinToString(" · ")
+                    "processing" -> stringResource(R.string.sessions_agent_processing)
+                    "failed" -> stringResource(R.string.sessions_agent_failed)
+                    else -> stringResource(R.string.sessions_agent_received)
                 }, color = Palette.Blue)
             }
             if (!empty && !recording) {
@@ -329,14 +338,14 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                     if (upload != null) {
                         val (u, changed) = upload
                         if (u.state == "none" || u.state == "failed" || changed) {
-                            Button(onClick = onUpload, modifier = Modifier.weight(1f)) { Text(if (changed) "Tải lại" else "Tải lên ngay", maxLines = 1) }
+                            Button(onClick = onUpload, modifier = Modifier.weight(1f)) { Text(stringResource(if (changed) R.string.sessions_reupload else R.string.sessions_upload_now), maxLines = 1) }
                         }
                     } else if (s.exportedAt == null) {
-                        Button(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(if (busy) "Đang đóng gói…" else "Gửi", maxLines = 1) }
+                        Button(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(stringResource(if (busy) R.string.sessions_packing else R.string.sessions_send), maxLines = 1) }
                     } else {
-                        OutlinedButton(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(if (busy) "Đang đóng gói…" else "Gửi lại", maxLines = 1) }
+                        OutlinedButton(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(stringResource(if (busy) R.string.sessions_packing else R.string.sessions_send_again), maxLines = 1) }
                     }
-                    if (r.photos > 0) OutlinedButton(onClick = onMap, modifier = Modifier.weight(1f)) { Text("Bản đồ", maxLines = 1) }
+                    if (r.photos > 0) OutlinedButton(onClick = onMap, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.sessions_map), maxLines = 1) }
                 }
             }
         }
@@ -351,10 +360,15 @@ private fun Badge(text: String, fg: Color, bg: Color) =
 private fun mb(b: Long) = if (b >= 1L shl 30) String.format(Locale.ROOT, "%.1f GB", b / 1073741824.0)
     else String.format(Locale.ROOT, "%.0f MB", b / 1048576.0)
 private fun km(m: Double) = if (m < 1000) "${m.toInt()} m" else String.format(Locale.ROOT, "%.1f km", m / 1000)
-private fun duration(ms: Long): String {
-    val min = ms / 60_000
-    return if (min < 1) "${ms / 1000} giây" else if (min < 60) "$min phút" else "${min / 60} giờ ${min % 60} phút"
+private fun duration(ctx: Context, ms: Long): String {
+    val min = (ms / 60_000).toInt()
+    return if (min < 1) ctx.getString(R.string.sessions_duration_s, (ms / 1000).toInt())
+    else if (min < 60) ctx.getString(R.string.sessions_duration_min, min)
+    else ctx.getString(R.string.sessions_duration_h, min / 60, min % 60)
 }
+/** A quantity string: [n] picks the plural form; the format arguments default to [n] alone. */
+private fun Context.plural(id: Int, n: Int, vararg args: Any): String =
+    resources.getQuantityString(id, n, *(if (args.isEmpty()) arrayOf<Any>(n) else args))
 private fun fmt(isoTime: String?): String = isoTime?.let {
     runCatching { DateTimeFormatter.ofPattern("dd/MM HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(it)) }.getOrNull()
 } ?: "–"

@@ -21,7 +21,7 @@ data class PhotoRoles(val roles: List<PhotoRole>, val source: String = "default"
     val cover: PhotoRole get() = roles.firstOrNull { it.cover } ?: roles.first()
 
     fun label(id: String?): String = roles.firstOrNull { it.id == id }?.label
-        ?: DEFAULT.roles.firstOrNull { it.id == id }?.label ?: id ?: "Ảnh"
+        ?: DEFAULT.roles.firstOrNull { it.id == id }?.label ?: id ?: "Photo"
 
     /**
      * The role to select after a photo of [shot]: when that role is an "advance" one, the next role in order that has
@@ -57,13 +57,26 @@ data class PhotoRoles(val roles: List<PhotoRole>, val source: String = "default"
         const val CONTEXT = "context"
 
         val DEFAULT = PhotoRoles(listOf(
-            PhotoRole(FACADE, "Mặt tiền", "Chụp thẳng, thấy cả cửa hàng (ảnh bìa)", cover = true, advance = true),
-            PhotoRole(SIGN, "Biển hiệu", "Gần, đọc được tên và số điện thoại", advance = true),
-            PhotoRole(SIDE, "Bên hông"),
-            PhotoRole(INSIDE, "Bên trong"),
-            PhotoRole(INFO, "Thông tin", "Giờ mở cửa, menu, bảng giá, SĐT trên cửa"),
-            PhotoRole(CONTEXT, "Toàn cảnh", "Cửa hàng giữa các nhà bên cạnh"),
+            PhotoRole(FACADE, "Front", "Straight on, the whole shop in frame (cover photo)", cover = true, advance = true),
+            PhotoRole(SIGN, "Sign", "Close up, name and phone number readable", advance = true),
+            PhotoRole(SIDE, "Side"),
+            PhotoRole(INSIDE, "Inside"),
+            PhotoRole(INFO, "Info", "Opening hours, menu, prices, phone number on the door"),
+            PhotoRole(CONTEXT, "Context", "The shop between its neighbours"),
         ))
+
+        /** Labels of the built-in kinds before the app was translated (still in older saved lists and sessions). */
+        private val LEGACY_LABELS = mapOf(FACADE to "Mặt tiền", SIGN to "Biển hiệu", SIDE to "Bên hông",
+            INSIDE to "Bên trong", INFO to "Thông tin", CONTEXT to "Toàn cảnh")
+
+        /**
+         * True when [role] is a built-in kind whose label nobody changed (the default list, or a list a contributor only
+         * reordered / trimmed in Profile): the UI then shows its own translated label and hint. Server lists keep their text.
+         */
+        fun isBuiltIn(role: PhotoRole, source: String): Boolean {
+            val d = DEFAULT.roles.firstOrNull { it.id == role.id } ?: return false
+            return source == "default" || (source != "server" && (role.label == d.label || role.label == LEGACY_LABELS[role.id]))
+        }
 
         private val ID = Regex("^[a-z0-9][a-z0-9_-]{0,31}$")
 

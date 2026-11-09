@@ -49,6 +49,8 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import io.github.tewnut.poicapture.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -182,16 +184,16 @@ fun LocationHelp(state: LocationState, modifier: Modifier = Modifier) {
     LaunchedEffect(state.status) { while (state.status == LocStatus.SEARCHING) { kotlinx.coroutines.delay(1000); now = System.currentTimeMillis() } }
     val (text, action, onAction) = when (state.status) {
         LocStatus.OK -> return
-        LocStatus.NO_PERMISSION -> Triple("App chưa được phép dùng vị trí, nên không biết ảnh chụp ở đâu.", "Cho phép", {
+        LocStatus.NO_PERMISSION -> Triple(stringResource(R.string.common_loc_no_permission), stringResource(R.string.common_allow), {
             request.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) })
-        LocStatus.APPROXIMATE_ONLY -> Triple("App chỉ có vị trí gần đúng (sai vài trăm mét). Hãy bật “Vị trí chính xác”.", "Bật", {
+        LocStatus.APPROXIMATE_ONLY -> Triple(stringResource(R.string.common_loc_approximate), stringResource(R.string.common_turn_on), {
             request.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) })
-        LocStatus.DISABLED -> Triple("Vị trí của điện thoại đang tắt.", "Bật vị trí", {
+        LocStatus.DISABLED -> Triple(stringResource(R.string.common_loc_disabled), stringResource(R.string.common_turn_on_location), {
             ctx.startActivity(Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)) })
         LocStatus.SEARCHING -> {
             val s = ((now - state.searchingSinceMs) / 1000).coerceAtLeast(0)
-            val sats = if (state.satsSeen > 0) "Thấy ${state.satsSeen} vệ tinh, dùng được ${state.satsUsed}. " else ""
-            Triple(sats + (if (s < 20) "Đang tìm vị trí…" else "Ra chỗ thoáng, xa mái che và nhà cao tầng. Lần đầu bật GPS có thể mất 1–2 phút."),
+            val sats = if (state.satsSeen > 0) stringResource(R.string.common_sats, state.satsSeen, state.satsUsed) + " " else ""
+            Triple(sats + stringResource(if (s < 20) R.string.common_searching else R.string.common_searching_long),
                 null, {})
         }
     }
@@ -201,7 +203,7 @@ fun LocationHelp(state: LocationState, modifier: Modifier = Modifier) {
         Text(text, Modifier.weight(1f), color = if (state.status == LocStatus.SEARCHING) Palette.Amber else Palette.Red, fontSize = 14.sp)
         if (action != null) androidx.compose.material3.TextButton(onClick = onAction) { Text(action, fontWeight = FontWeight.Bold) }
         if (state.status == LocStatus.NO_PERMISSION || state.status == LocStatus.APPROXIMATE_ONLY) {
-            androidx.compose.material3.TextButton(onClick = { appSettings() }) { Text("Cài đặt") }
+            androidx.compose.material3.TextButton(onClick = { appSettings() }) { Text(stringResource(R.string.common_settings)) }
         }
     }
 }

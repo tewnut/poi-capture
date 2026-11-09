@@ -42,7 +42,7 @@ data class Settings(
     val videoSegmentSec: Int = 30,      // a killed app loses at most the current segment
     val mountOffsetDeg: Double = 0.0,   // manual fallback when the app could not measure the camera direction
     val facadeDistanceM: Double = 6.0,  // expected camera -> shop front distance (profile default, adjustable per session)
-    val uploadUrl: String = "",         // tus endpoint of the VMAP capture server ("" = no background upload)
+    val uploadUrl: String = "",         // tus endpoint of the capture server ("" = no background upload)
     val uploadToken: String = "",       // bearer token for the server
     val apiUrl: String = "",            // optional server API: processing status, team coverage
     val uploadOnMobileData: Boolean = false,

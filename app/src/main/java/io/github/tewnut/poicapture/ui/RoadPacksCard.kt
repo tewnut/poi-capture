@@ -26,6 +26,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.work.WorkInfo
@@ -33,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import io.github.tewnut.poicapture.Prefs
+import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.capture.RoadPackCatalogue
 import io.github.tewnut.poicapture.capture.RoadPackDownloads
 import io.github.tewnut.poicapture.net.RoadSource
@@ -51,6 +54,7 @@ fun RoadPacksCard() {
     var catalogue by remember { mutableStateOf(RoadSource.cachedCatalogue(ctx)) }
     var installed by remember { mutableStateOf(RoadSource.packs(ctx).installed().map { Triple(it.id, it.name, it.version) to it.file.length() }) }
     var msg by remember { mutableStateOf("") }
+    var msgError by remember { mutableStateOf(false) }
     var refresh by remember { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf<Triple<String, String, Long>?>(null) }
     fun reloadInstalled() { installed = RoadSource.packs(ctx).installed().map { Triple(it.id, it.name, it.version) to it.file.length() } }
@@ -58,7 +62,8 @@ fun RoadPacksCard() {
 
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        msg = "Đang nhập gói…"
+        msg = ctx.getString(R.string.packs_importing)
+        msgError = false
         scope.launch {
             msg = try {
                 val p = withContext(Dispatchers.IO) {
@@ -67,59 +72,59 @@ fun RoadPacksCard() {
                     RoadSource.packs(ctx).install(tmp)
                 }
                 reloadInstalled()
-                "Đã cài ${p.name} (${p.version})."
-            } catch (e: Exception) { "Không nhập được: ${e.message}" }
+                ctx.getString(R.string.packs_import_done, p.name, p.version)
+            } catch (e: Exception) { msgError = true; ctx.getString(R.string.packs_import_failed, errorText(ctx, e)) }
         }
     }
 
-    Hint("Tải trước dữ liệu đường theo vùng để app nhận tên đường ngay cả khi không có mạng. " +
-        "Ngoài vùng đã tải, app vẫn lấy từ OpenStreetMap khi có mạng và nhớ lại trên máy.")
+    Hint(stringResource(R.string.packs_intro))
 
     // installed
-    if (installed.isEmpty()) Hint("Chưa có gói nào trên máy.", color = Palette.Amber)
+    if (installed.isEmpty()) Hint(stringResource(R.string.packs_none), color = Palette.Amber)
     for ((info, bytes) in installed) {
         val (id, name, version) = info
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(name, fontWeight = FontWeight.SemiBold, color = Palette.Ink)
-                Hint("Đã cài · ${sizeMb(bytes)} · dữ liệu ngày $version")
+                Hint(stringResource(R.string.packs_installed_line, sizeMb(bytes), version))
             }
-            TextButton(onClick = { confirmDelete = Triple(id, name, bytes) }) { Text("Xoá", color = Palette.Red) }
+            TextButton(onClick = { confirmDelete = Triple(id, name, bytes) }) { Text(stringResource(R.string.packs_delete), color = Palette.Red) }
         }
     }
 
     // catalogue
     OutlinedTextField(url, { url = it.trim(); Prefs.saveSettings(ctx, Prefs.settings(ctx).copy(roadPackIndexUrl = url)) },
-        label = { Text("Nguồn gói (địa chỉ index.json)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        label = { Text(stringResource(R.string.packs_source_label)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
     Column {
         OutlinedButton(enabled = url.isNotBlank(), modifier = Modifier.fillMaxWidth(), onClick = {
-            msg = "Đang tải danh sách…"
+            msg = ctx.getString(R.string.packs_loading_list)
+            msgError = false
             scope.launch {
                 msg = try {
                     catalogue = withContext(Dispatchers.IO) { RoadPackCatalogue.fetch(ctx, url) }
-                    "Có ${catalogue.size} gói."
-                } catch (e: Exception) { "Không tải được danh sách: ${e.message}" }
+                    ctx.resources.getQuantityString(R.plurals.packs_count, catalogue.size, catalogue.size)
+                } catch (e: Exception) { msgError = true; ctx.getString(R.string.packs_list_failed, errorText(ctx, e)) }
             }
-        }) { Text("Tải danh sách") }
-        TextButton(onClick = { importer.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }) { Text("Nhập file gói (Zalo, Drive…)") }
+        }) { Text(stringResource(R.string.packs_load_list)) }
+        TextButton(onClick = { importer.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }) { Text(stringResource(R.string.packs_import_file)) }
     }
-    if (msg.isNotEmpty()) Hint(msg, color = if (msg.startsWith("Không")) Palette.Red else Palette.Blue)
+    if (msg.isNotEmpty()) Hint(msg, color = if (msgError) Palette.Red else Palette.Blue)
     for (e in catalogue) {
         val have = installed.firstOrNull { it.first.first == e.id }?.first?.third
         PackRow(e, have, anyNetwork = true, onInstalled = { refresh++ })   // asked for now, size shown: 4G is fine
     }
-    Hint("Dữ liệu đường © OpenStreetMap contributors (ODbL), qua Geofabrik.")
+    Hint(stringResource(R.string.packs_attribution))
 
     confirmDelete?.let { (id, name, bytes) ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmDelete = null },
-            title = { Text("Xoá gói “$name”?") },
-            text = { Text("Giải phóng ${sizeMb(bytes)}. Muốn dùng lại phải tải lại gói.") },
+            title = { Text(stringResource(R.string.packs_delete_title, name)) },
+            text = { Text(stringResource(R.string.packs_delete_text, sizeMb(bytes))) },
             confirmButton = { TextButton(onClick = {
                 confirmDelete = null
                 scope.launch { withContext(Dispatchers.IO) { RoadSource.packs(ctx).delete(id) }; refresh++ }
-            }) { Text("Xoá", color = Palette.Red) } },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Không") } },
+            }) { Text(stringResource(R.string.packs_delete), color = Palette.Red) } },
+            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text(stringResource(R.string.packs_keep)) } },
         )
     }
 }
@@ -138,25 +143,27 @@ fun PackRow(e: RoadSource.Entry, have: String?, anyNetwork: Boolean, onInstalled
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(e.name, fontWeight = FontWeight.SemiBold, color = Palette.Ink)
-                Hint("${sizeMb(e.bytes)} · dữ liệu ngày ${e.version}" + when {
-                    have == null -> ""
-                    have == e.version -> " · đã có ✓"
-                    else -> " · máy đang có bản $have"
+                Hint(when {
+                    have == null -> stringResource(R.string.packs_entry_line, sizeMb(e.bytes), e.version)
+                    have == e.version -> stringResource(R.string.packs_entry_line_current, sizeMb(e.bytes), e.version)
+                    else -> stringResource(R.string.packs_entry_line_older, sizeMb(e.bytes), e.version, have)
                 })
             }
             when {
-                running != null -> TextButton(onClick = { RoadPackDownloads.cancel(ctx, e.id) }) { Text("Huỷ") }
+                running != null -> TextButton(onClick = { RoadPackDownloads.cancel(ctx, e.id) }) { Text(stringResource(R.string.packs_cancel)) }
                 have == e.version -> {}
-                else -> Button(onClick = { RoadPackDownloads.enqueue(ctx, e, anyNetwork) }) { Text(if (have == null) "Tải" else "Cập nhật") }
+                else -> Button(onClick = { RoadPackDownloads.enqueue(ctx, e, anyNetwork) }) {
+                    Text(stringResource(if (have == null) R.string.packs_download else R.string.packs_update))
+                }
             }
         }
         if (running != null) {
             val done = running.progress.getLong("done", 0)
-            if (running.state == WorkInfo.State.ENQUEUED && done == 0L) Hint(if (anyNetwork) "Đang chờ mạng…" else "Đang chờ Wi-Fi…")
+            if (running.state == WorkInfo.State.ENQUEUED && done == 0L) Hint(stringResource(if (anyNetwork) R.string.packs_waiting_network else R.string.packs_waiting_wifi))
             else LinearProgressIndicator(progress = { if (e.bytes > 0) (done.toFloat() / e.bytes).coerceIn(0f, 1f) else 0f },
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
         }
-        work.firstOrNull { it.state == WorkInfo.State.FAILED }?.let { Hint("Tải lỗi: ${it.outputData.getString("error")}", color = Palette.Red) }
+        work.firstOrNull { it.state == WorkInfo.State.FAILED }?.let { Hint(stringResource(R.string.packs_download_failed, it.outputData.getString("error").orEmpty()), color = Palette.Red) }
     }
 }
 

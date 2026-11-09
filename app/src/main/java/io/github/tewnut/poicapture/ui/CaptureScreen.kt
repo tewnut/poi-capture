@@ -54,6 +54,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import io.github.tewnut.poicapture.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -137,7 +140,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     val marks = svc?.state?.collectAsState()?.value?.marks ?: 0
     var lastMarks by remember { mutableStateOf(-1) }
     LaunchedEffect(marks) {
-        if (lastMarks >= 0 && marks > lastMarks) saved = "★ Đã đánh dấu"
+        if (lastMarks >= 0 && marks > lastMarks) saved = ctx.getString(R.string.capture_marked)
         lastMarks = marks
     }
 
@@ -167,7 +170,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             onSave = { pin, moved, fields, status ->
                 svc?.finishPoi(pin, moved, fields, status)
                 reviewing = false
-                saved = "✓ Đã lưu địa điểm ${ui.poiNumber}. Chụp địa điểm tiếp theo."
+                saved = ctx.getString(R.string.capture_place_saved, ui.poiNumber)
                 draft = PoiDraft()
                 role = photoRoles.roles.first().id
                 thumb = null
@@ -210,18 +213,18 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 StatusText(ui, session, poiMode)
                 val alert = when {
-                    ui.camera == "lost" -> "Camera đang bị app khác dùng (cuộc gọi…). Sẽ tự ghi tiếp khi camera trở lại."
-                    ui.error.isNotEmpty() -> ui.error
-                    else -> ui.warnings.firstOrNull()
+                    ui.camera == "lost" -> stringResource(R.string.capture_camera_busy)
+                    ui.error != null -> ui.error.text()
+                    else -> ui.warnings.firstOrNull()?.text()
                 }
                 if (alert != null) {
                     Text(alert, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp,
                         modifier = Modifier.widthIn(max = 520.dp)
-                            .background(if (ui.camera == "lost" || ui.error.isNotEmpty()) Palette.Red else Palette.Amber, RoundedCornerShape(10.dp))
+                            .background(if (ui.camera == "lost" || ui.error != null) Palette.Red else Palette.Amber, RoundedCornerShape(10.dp))
                             .padding(horizontal = 12.dp, vertical = 8.dp))
                 }
             }
-            if (!notStarted) DarkButton("Kết thúc") { confirmEnd = true }
+            if (!notStarted) DarkButton(stringResource(R.string.capture_end)) { confirmEnd = true }
         }
 
         // ---------- right rail, under the thumb: the main actions ----------
@@ -229,31 +232,33 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when {
                 poiMode -> {
-                    if (ui.poiId != null) thumb?.let { Image(it, "Ảnh vừa chụp", Modifier.size(84.dp, 47.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
-                    Shutter("Chụp", enabled = svc != null && ui.camera == "on", onClick = { shoot() })
+                    if (ui.poiId != null) thumb?.let { Image(it, stringResource(R.string.capture_last_photo), Modifier.size(84.dp, 47.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
+                    Shutter(stringResource(R.string.capture_shoot), enabled = svc != null && ui.camera == "on", onClick = { shoot() })
                     Button(onClick = {
                         svc?.finishPoi(draft.pin, draft.moved, draft.fields(), draft.status)
-                        saved = "✓ Đã lưu địa điểm ${ui.poiNumber}. Chụp địa điểm tiếp theo."
+                        saved = ctx.getString(R.string.capture_place_saved, ui.poiNumber)
                         draft = PoiDraft()
                         role = photoRoles.roles.first().id
                         thumb = null
                     }, enabled = ui.poiId != null, modifier = Modifier.height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Palette.Blue)) { Text("Xong địa điểm", fontWeight = FontWeight.Bold) }
+                        colors = ButtonDefaults.buttonColors(containerColor = Palette.Blue)) { Text(stringResource(R.string.capture_done_place), fontWeight = FontWeight.Bold) }
                     // optional, when needed: pin on the right building, closed / moved, a note
-                    if (ui.poiId != null) DarkButton("Ghim, tình trạng…") { reviewing = true }
+                    if (ui.poiId != null) DarkButton(stringResource(R.string.capture_pin_status)) { reviewing = true }
                 }
                 manual -> {
-                    RoundButton(if (ui.running) "Dừng" else "Tiếp", if (ui.running) Palette.Red else Palette.Green, 56.dp, svc != null) {
+                    RoundButton(stringResource(if (ui.running) R.string.capture_pause else R.string.capture_resume),
+                        if (ui.running) Palette.Red else Palette.Green, 56.dp, svc != null) {
                         if (ui.running) svc?.pause() else svc?.start()
                     }
-                    Shutter("Chụp", enabled = ui.camera == "on", onClick = { svc?.takePhoto("manual") })
+                    Shutter(stringResource(R.string.capture_shoot), enabled = ui.camera == "on", onClick = { svc?.takePhoto("manual") })
                     RoundButton("★", Color(0xCC000000), 56.dp, ui.running) { svc?.addMark() }
                 }
                 else -> {
                     // riding: "Đánh dấu" is the frequent touch (biggest); stopping is rare
-                    RoundButton(if (ui.running) "Dừng" else "Tiếp", if (ui.running) Palette.Red else Palette.Green, 64.dp,
+                    RoundButton(stringResource(if (ui.running) R.string.capture_pause else R.string.capture_resume),
+                        if (ui.running) Palette.Red else Palette.Green, 64.dp,
                         svc != null && ui.camera == "on") { if (ui.running) svc?.pause() else svc?.start() }
-                    RoundButton("★\nĐánh dấu", Color(0xCC000000), 96.dp, ui.running) { svc?.addMark() }
+                    RoundButton(stringResource(R.string.capture_mark), Color(0xCC000000), 96.dp, ui.running) { svc?.addMark() }
                 }
             }
         }
@@ -265,7 +270,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 for (r in photoRoles.roles) {
                     val n = ui.poiRoles[r.id] ?: 0
                     FilterChip(role == r.id, { role = r.id },
-                        { Text((if (r.id == photoRoles.cover.id) "★ " else "") + r.label + (if (n > 0) "  ✓$n" else ""),
+                        { Text((if (r.id == photoRoles.cover.id) "★ " else "") + roleLabel(photoRoles, r) + (if (n > 0) "  ✓$n" else ""),
                             color = Color.White, fontWeight = if (role == r.id) FontWeight.Bold else FontWeight.Normal) },
                         colors = FilterChipDefaults.filterChipColors(containerColor = Color(0x99000000), selectedContainerColor = Palette.Green))
                 }
@@ -278,7 +283,8 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                         modifier = Modifier.background(Palette.Green, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
                 }
                 if (saved == null) ReadLine(ui)
-                if (askRole && current != null) Text(current.label + if (current.hint.isNotBlank()) ": ${current.hint}" else "",
+                if (askRole && current != null) Text(roleLabel(photoRoles, current) +
+                    roleHint(photoRoles, current).let { h -> if (h.isNotBlank()) ": $h" else "" },
                     color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.background(Color(0xB3000000), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
             }
@@ -287,7 +293,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!poiMode && !notStarted) {
                 Speed(ui)
-                ShadowText(if (ui.running) "● Đang ghi" else "Ⅱ Tạm dừng", color = if (ui.running) Color(0xFFFF6B6B) else Palette.AmberLight,
+                ShadowText(stringResource(if (ui.running) R.string.capture_recording else R.string.capture_paused), color = if (ui.running) Color(0xFFFF6B6B) else Palette.AmberLight,
                     size = 16.sp, modifier = Modifier.padding(bottom = 6.dp))
             }
         }
@@ -301,7 +307,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
 
         // ---------- riding: which side is filmed ----------
         session?.takeIf { !poiMode && (ui.mount == "right" || ui.mount == "left") }?.let {
-            Text(if (it.sideOfTravel == Side.RIGHT) "GHI BÊN PHẢI →" else "← GHI BÊN TRÁI",
+            Text(stringResource(if (it.sideOfTravel == Side.RIGHT) R.string.capture_side_right else R.string.capture_side_left),
                 color = Color.White, fontWeight = FontWeight.ExtraBold,
                 modifier = Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp)
                     .background(Color(0xCC0B6B4C), RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp))
@@ -319,11 +325,15 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
 private fun EndDialog(ui: CaptureUi, video: Boolean, onDismiss: () -> Unit, onEnd: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Kết thúc phiên ghi?") },
-        text = { Text("Đã ghi ${if (video) "${ui.videos + if (ui.recording) 1 else 0} đoạn video" else "${ui.photos} ảnh"}. " +
-            "Phiên được lưu trong máy, bạn xem lại vị trí ảnh và gửi ở mục “Đã ghi”.") },
-        confirmButton = { TextButton(onClick = onEnd) { Text("Kết thúc và lưu") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Ghi tiếp") } },
+        title = { Text(stringResource(R.string.capture_end_title)) },
+        text = {
+            val clips = ui.videos + if (ui.recording) 1 else 0
+            val count = if (video) pluralStringResource(R.plurals.capture_end_videos, clips, clips)
+                else pluralStringResource(R.plurals.capture_end_photos, ui.photos, ui.photos)
+            Text(count + " " + stringResource(R.string.capture_end_body))
+        },
+        confirmButton = { TextButton(onClick = onEnd) { Text(stringResource(R.string.capture_end_save)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.capture_keep_going)) } },
     )
 }
 
@@ -340,10 +350,10 @@ private fun ShadowText(text: String, color: Color = Color.White, size: androidx.
 @Composable
 private fun StatusText(ui: CaptureUi, session: Session?, poiMode: Boolean) {
     val gps = when (ui.gps) {
-        "good" -> "● GPS ±${ui.accuracyM ?: "?"} m"
-        "weak" -> "● GPS yếu ±${ui.accuracyM ?: "?"} m"
-        "error" -> "● Lỗi GPS"
-        else -> "● Đang chờ GPS…"
+        "good" -> stringResource(R.string.capture_gps_good, ui.accuracyM?.toString() ?: "?")
+        "weak" -> stringResource(R.string.capture_gps_weak, ui.accuracyM?.toString() ?: "?")
+        "error" -> stringResource(R.string.capture_gps_error)
+        else -> stringResource(R.string.capture_gps_waiting)
     }
     val dot = when (ui.gps) { "good" -> Color(0xFF47CD89); "error" -> Palette.Red; else -> Color(0xFFFEC84B) }
     val road = when {
@@ -353,42 +363,14 @@ private fun StatusText(ui: CaptureUi, session: Session?, poiMode: Boolean) {
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         ShadowText(gps.take(1), color = dot)
-        ShadowText(gps.drop(1) + (road?.let { " · $it" } ?: "") + (if (ui.simulated) " · vị trí giả lập" else ""))
+        ShadowText(gps.drop(1) + (road?.let { " · $it" } ?: "") + (if (ui.simulated) " · " + stringResource(R.string.capture_simulated) else ""))
     }
     if (!poiMode) when (ui.mount) {
         "right", "left" -> {}
-        "front", "back" -> ShadowText("Camera đang nhìn về phía ${if (ui.mount == "front") "trước" else "sau"}: xoay sang dãy nhà!", color = Color(0xFFFF6B6B))
-        else -> ShadowText("Đang nhận hướng camera… (tăng tốc / phanh vài lần)", color = Palette.AmberLight, size = 13.sp, bold = false)
+        "front", "back" -> ShadowText(stringResource(if (ui.mount == "front") R.string.capture_mount_front else R.string.capture_mount_back),
+            color = Color(0xFFFF6B6B))
+        else -> ShadowText(stringResource(R.string.capture_mount_measuring), color = Palette.AmberLight, size = 13.sp, bold = false)
     }
-}
-
-@Composable
-private fun GpsPill(ui: CaptureUi) = when (ui.gps) {
-    "good" -> Pill("GPS ±${ui.accuracyM ?: "?"} m", dot = Color(0xFF47CD89))
-    "weak" -> Pill("GPS yếu ±${ui.accuracyM ?: "?"} m", dot = Color(0xFFFEC84B))
-    "error" -> Pill("Lỗi GPS", dot = Palette.Red)
-    else -> Pill("Đang chờ GPS…", dot = Color(0xFFFEC84B))
-}
-
-@Composable
-private fun RoadPill(ui: CaptureUi, session: Session?) {
-    val text = when {
-        ui.roadName != null -> ui.roadName
-        session?.road?.auto == true && ui.roadData == "loading" -> "Đang tải dữ liệu đường…"
-        session?.road?.auto == true && ui.roadData == "offline" -> "Chưa có dữ liệu đường (vẫn ghi)"
-        else -> "Chưa nhận ra đường"
-    }
-    Text(text, color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.widthIn(max = 300.dp).background(Color(0xB3000000), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 6.dp))
-}
-
-@Composable
-private fun MountPill(ui: CaptureUi) = when (ui.mount) {
-    "right", "left" -> Pill("Camera " + (if (ui.mount == "right") "→ PHẢI" else "← TRÁI") + " ✓" +
-        (ui.mountOffsetFrontDeg?.takeIf { kotlin.math.abs(it) >= 3 }?.let { " (chếch ${kotlin.math.abs(it)}° về ${if (it > 0) "trước" else "sau"})" } ?: ""),
-        dot = Color(0xFF47CD89), size = 13.sp)
-    "front", "back" -> Pill("Camera nhìn về phía ${if (ui.mount == "front") "TRƯỚC" else "SAU"}!", dot = Palette.Red, size = 13.sp)
-    else -> Pill("Đang nhận hướng camera…", dot = Color(0xFFFEC84B), size = 13.sp)
 }
 
 @Composable
@@ -398,7 +380,7 @@ private fun Speed(ui: CaptureUi) {
     Column(Modifier.background(if (over) Palette.Red else Color(0xB3000000), RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Text(v?.toString() ?: "–", color = Color.White, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-        Text("km/h · tối đa ${ui.maxSpeedKmh}", color = Color.White, fontSize = 11.sp)
+        Text(stringResource(R.string.capture_speed_max, ui.maxSpeedKmh), color = Color.White, fontSize = 11.sp)
     }
 }
 
@@ -410,37 +392,46 @@ private fun ReadyCard(ui: CaptureUi, s: Session, roles: PhotoRoles, modifier: Mo
       Column(Modifier.padding(20.dp)) {
         Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val poi = s.kind == SessionKind.POI
-            Text(if (poi) "Sẵn sàng chụp địa điểm?" else "Sẵn sàng ghi?", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink)
-            Check(ui.gps == "good", if (ui.gps == "good") "GPS tốt (±${ui.accuracyM} m)" else if (ui.gps == "weak") "GPS còn yếu, đợi thêm chút" else "Đang chờ GPS…")
-            Check(ui.camera == "on", if (ui.camera == "on") "Camera sẵn sàng" else if (ui.camera == "error") "Không mở được camera" else "Đang mở camera…")
+            Text(stringResource(if (poi) R.string.capture_ready_poi else R.string.capture_ready), fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink)
+            Check(ui.gps == "good", when (ui.gps) {
+                "good" -> stringResource(R.string.capture_check_gps_good, ui.accuracyM?.toString() ?: "?")
+                "weak" -> stringResource(R.string.capture_check_gps_weak)
+                else -> stringResource(R.string.capture_check_gps_waiting)
+            })
+            Check(ui.camera == "on", stringResource(when (ui.camera) {
+                "on" -> R.string.capture_check_camera_ready
+                "error" -> R.string.capture_check_camera_error
+                else -> R.string.capture_check_camera_opening
+            }))
             when {
-                !s.road.auto -> Check(true, "Đường: ${s.road.label}")
-                ui.roadName != null -> Check(true, "Đang ở: ${ui.roadName}")
-                else -> Check(null, "Chưa có dữ liệu đường: vẫn ghi được, đường được nhận sau")
+                !s.road.auto -> Check(true, stringResource(R.string.capture_check_road, roadText(s.road)))
+                ui.roadName != null -> Check(true, stringResource(R.string.capture_check_on_road, ui.roadName))
+                else -> Check(null, stringResource(R.string.capture_check_no_road))
             }
             if (poi) {
-                if (s.photoRoles != null) Check(null, "Mỗi địa điểm: chụp ★ ${roles.cover.label.lowercase()}, rồi " +
-                    roles.roles.filter { it.id != roles.cover.id }.joinToString(", ") { it.label.lowercase() } + " nếu có. App tự chọn loại ảnh tiếp theo.")
-                else Check(null, "Mỗi địa điểm: chụp mặt tiền thấy cả cửa hàng, biển hiệu đọc được chữ, thêm bên trong / bảng giá nếu có. " +
-                    "Hệ thống tự nhận ra ảnh nào là gì.")
-                Check(null, "Chụp xong một địa điểm thì bấm “Xong địa điểm” và chụp tiếp địa điểm sau, không cần nhập gì. " +
-                    "Vị trí theo GPS; cần thì “Ghim, tình trạng…” để đặt lên đúng tòa nhà hoặc báo đã đóng cửa.")
-                Check(null, "Nút âm lượng cũng là nút chụp.")
+                if (s.photoRoles != null) {
+                    val ctx = LocalContext.current
+                    val others = roles.roles.filter { it.id != roles.cover.id }.joinToString(", ") { roleLabel(ctx, roles, it).lowercase() }
+                    Check(null, stringResource(R.string.capture_check_roles, roleLabel(roles, roles.cover).lowercase(), others))
+                }
+                else Check(null, stringResource(R.string.capture_check_poi_default))
+                Check(null, stringResource(R.string.capture_check_poi_flow))
+                Check(null, stringResource(R.string.capture_check_volume_shoot))
             } else {
-                Check(null, "Máy gắn chắc, nằm ngang, camera nhìn sang dãy nhà cần ghi. App tự nhận bên sau vài lần tăng tốc / phanh.")
-                Check(null, if (s.mode == Mode.PHOTO_MANUAL) "Nút âm lượng (hoặc nút bấm Bluetooth trên tay lái) là nút chụp."
-                    else "Nút âm lượng (hoặc nút bấm Bluetooth trên tay lái) = ★ Đánh dấu, không cần chạm màn hình.")
-                Check(null, "Mặt tiền cách ~${s.settings.facadeDistanceM.toInt()} m: " +
-                    (if (s.mode == Mode.PHOTO_AUTO) "1 ảnh mỗi ${String.format(java.util.Locale.ROOT, "%.1f", ui.photoEveryM)} m, " else "") +
-                    "chạy tối đa ${ui.maxSpeedKmh} km/h")
+                Check(null, stringResource(R.string.capture_check_mount))
+                Check(null, stringResource(if (s.mode == Mode.PHOTO_MANUAL) R.string.capture_check_keys_shoot else R.string.capture_check_keys_mark))
+                Check(null, if (s.mode == Mode.PHOTO_AUTO) stringResource(R.string.capture_check_plan_auto, s.settings.facadeDistanceM.toInt(),
+                        String.format(java.util.Locale.ROOT, "%.1f", ui.photoEveryM), ui.maxSpeedKmh)
+                    else stringResource(R.string.capture_check_plan, s.settings.facadeDistanceM.toInt(), ui.maxSpeedKmh))
             }
-            if (ui.simulated) Hint("Máy ảo: vị trí đang là vị trí giả lập.", color = Palette.Amber)
+            if (ui.simulated) Hint(stringResource(R.string.capture_simulated_hint), color = Palette.Amber)
         }
             Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onCancel) { Text("Huỷ") }
+                TextButton(onClick = onCancel) { Text(stringResource(R.string.capture_cancel)) }
                 Button(onClick = onStart, enabled = ui.camera == "on", modifier = Modifier.weight(1f).height(52.dp)) {
-                    Text(if (s.kind == SessionKind.POI) "Bắt đầu chụp" else if (s.mode == Mode.VIDEO) "Bắt đầu quay" else "Bắt đầu ghi",
+                    Text(stringResource(if (s.kind == SessionKind.POI) R.string.capture_start_poi else if (s.mode == Mode.VIDEO) R.string.capture_start_video
+                        else R.string.capture_start),
                         fontSize = 17.sp, fontWeight = FontWeight.Bold)
                 }
             }
@@ -462,11 +453,13 @@ private fun Check(ok: Boolean?, text: String) {
 @Composable
 private fun ReadLine(ui: CaptureUi) {
     val r = ui.poiRead
+    val ctx = LocalContext.current
     val (text, warn) = when {
-        ui.readNote != null -> ui.readNote to true
-        ui.reading > 0 -> "Đang đọc chữ trên ảnh…" to false
+        ui.readNote != null -> ui.readNote.get(ctx) to true
+        ui.reading > 0 -> ctx.getString(R.string.capture_reading) to false
         r != null && (r.name != null || r.phones.isNotEmpty() || r.category != null) ->
-            ("Đọc được: " + listOfNotNull(r.name, r.phones.firstOrNull(), r.category).joinToString(" · ")) to false
+            ctx.getString(R.string.capture_read, listOfNotNull(r.name, r.phones.firstOrNull(), r.category?.let { categoryLabel(ctx, it) })
+                .joinToString(" · ")) to false
         else -> return
     }
     Text(text, color = if (warn) Palette.Amber else Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,

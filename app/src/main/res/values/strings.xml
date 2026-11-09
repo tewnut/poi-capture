@@ -1,0 +1,518 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">POI Capture</string>
+
+    <!-- Navigation -->
+    <string name="nav_new">New</string>
+    <string name="nav_sessions">Sessions</string>
+    <string name="nav_profile">Profile</string>
+    <string name="map_back">← Sessions</string>
+    <string name="map_title">Photo locations</string>
+
+    <!-- Language (Profile) -->
+    <string name="language_title">Language</string>
+    <string name="language_system">System</string>
+    <string name="language_en" translatable="false">English</string>
+    <string name="language_vi" translatable="false">Tiếng Việt</string>
+
+    <!-- Foreground service notification -->
+    <string name="notif_channel_recording">Recording</string>
+    <string name="notif_recording">Recording: %1$s</string>
+
+    <!-- Place status (core PoiStatus) -->
+    <string name="status_new">New</string>
+    <string name="status_exists">Already on the map</string>
+    <string name="status_closed">Closed</string>
+    <string name="status_moved">Moved</string>
+
+    <!-- Place categories (core SignText ids) -->
+    <string name="category_restaurant">Food</string>
+    <string name="category_cafe">Café</string>
+    <string name="category_drinks">Drinks, bubble tea</string>
+    <string name="category_grocery">Grocery</string>
+    <string name="category_pharmacy">Pharmacy</string>
+    <string name="category_vehicle_repair">Vehicle repair</string>
+    <string name="category_phone_shop">Phones</string>
+    <string name="category_beauty">Beauty</string>
+    <string name="category_fashion">Fashion</string>
+    <string name="category_hotel">Hotel</string>
+    <string name="category_bank">Bank</string>
+    <string name="category_education">Education</string>
+    <string name="category_health">Health</string>
+    <string name="category_electronics">Electronics</string>
+    <string name="category_hardware">Hardware, building supplies</string>
+    <string name="category_services">Services</string>
+
+    <!-- Built-in photo kinds (core PhotoRoles.DEFAULT) -->
+    <string name="photo_generic">Photo</string>
+    <string name="role_facade">Front</string>
+    <string name="role_facade_hint">Straight on, the whole shop in frame (cover photo)</string>
+    <string name="role_sign">Sign</string>
+    <string name="role_sign_hint">Close up, name and phone number readable</string>
+    <string name="role_side">Side</string>
+    <string name="role_inside">Inside</string>
+    <string name="role_info">Info</string>
+    <string name="role_info_hint">Opening hours, menu, prices, phone number on the door</string>
+    <string name="role_context">Context</string>
+    <string name="role_context_hint">The shop between its neighbours</string>
+
+    <!-- Roads -->
+    <string name="road_auto">Auto (GPS)</string>
+    <string name="road_unnamed">Unnamed road (%1$s)</string>
+    <string name="road_data_unavailable">Couldn\'t load road data (OpenStreetMap server busy, or no network).</string>
+
+    <!-- Capture warnings (core CaptureWarning) -->
+    <string name="warn_too_fast">Slow down: %1$d km/h (max %2$d)</string>
+    <string name="warn_weak_gps">Weak GPS: ±%1$d m</string>
+    <string name="warn_off_road">%1$d m from the chosen road</string>
+    <string name="warn_u_turn">U-turn: now shooting the other side of the street</string>
+
+    <!-- Road pack catalogue errors (core CatalogueError) -->
+    <string name="catalogue_not_published">nothing published here yet (HTTP %1$d). With the default source, packs appear once an admin runs the “roadpacks” workflow; meanwhile use “Import pack file…”.</string>
+    <string name="catalogue_forbidden">the pack source refuses access (HTTP %1$d); check the address or your access rights.</string>
+    <string name="catalogue_server">the pack server has an error (HTTP %1$d); try again later.</string>
+    <string name="catalogue_offline">no network, or wrong address.</string>
+    <string name="catalogue_timeout">the pack server is not answering; try again later.</string>
+    <string name="catalogue_http">the server answered HTTP %1$d.</string>
+
+    <!-- ==== Onboarding, new session ==== -->
+    <!-- Onboarding (first run) -->
+    <string name="onboarding_back">← Back</string>
+    <string name="onboarding_continue">Continue</string>
+    <string name="onboarding_welcome_lead">Record shops and places along the street and put them on the map.</string>
+    <string name="onboarding_welcome_button">Set up</string>
+    <string name="onboarding_welcome_time">One-time setup, about a minute.</string>
+    <string name="onboarding_sweep_title">Street sweep</string>
+    <string name="onboarding_sweep_text">Mount the phone on your bike and ride along the street: the app photographs the buildings on your right, no tapping needed.</string>
+    <string name="onboarding_place_title">Place capture</string>
+    <string name="onboarding_place_text">Stop at each shop: photograph the front, the sign, the inside, then pin it on the right building.</string>
+    <string name="onboarding_position_title">Pinned to the building</string>
+    <string name="onboarding_position_text">The app works out where the shopfront is from GPS and the camera direction. If it\'s off, drag it on the map.</string>
+    <string name="onboarding_offline_title">No network needed while recording</string>
+    <string name="onboarding_offline_text">Photos stay on the phone and upload on Wi-Fi, or send the file via Zalo / Drive.</string>
+
+    <string name="onboarding_email_title">Your email</string>
+    <string name="onboarding_email_lead">Used to credit you and group your sessions on the server. No verification, the app sends no mail.</string>
+    <string name="onboarding_email_label">Email</string>
+    <string name="onboarding_email_placeholder">name@gmail.com</string>
+    <string name="onboarding_email_invalid">That doesn\'t look like an email, e.g. name@gmail.com</string>
+    <string name="onboarding_name_label">Display name (optional)</string>
+    <string name="onboarding_name_placeholder">Jane Doe</string>
+    <string name="onboarding_name_help">Shown on your sessions. Leave empty to use the part of your email before @.</string>
+
+    <string name="onboarding_perm_camera">Camera</string>
+    <string name="onboarding_perm_camera_why">Take photos and video of shopfronts.</string>
+    <string name="onboarding_perm_location">Precise location</string>
+    <string name="onboarding_perm_location_why">Know where each photo was taken and which street you\'re on.</string>
+    <string name="onboarding_perm_notifications">Notifications</string>
+    <string name="onboarding_perm_notifications_why">Show that recording is on while the screen is off.</string>
+    <string name="onboarding_perms_title">Permissions</string>
+    <string name="onboarding_perms_lead">The app only uses these while you\'re recording.</string>
+    <string name="onboarding_perms_grant">Allow</string>
+    <string name="onboarding_perms_later">Later</string>
+    <string name="onboarding_perm_missing">Not yet</string>
+    <string name="onboarding_and">%1$s and %2$s</string>
+    <string name="onboarding_perms_required">Without %1$s you can\'t record yet. If Android doesn\'t ask again, turn it on in Settings → Permissions.</string>
+    <string name="onboarding_open_settings">Open app settings</string>
+
+    <string name="onboarding_roads_title">Road data</string>
+    <string name="onboarding_roads_lead">Road data for your province / city lets the app know street names even offline.</string>
+    <string name="onboarding_roads_loading">Loading the list of provinces / cities…</string>
+    <string name="onboarding_roads_error">Couldn\'t load the list: %1$s</string>
+    <string name="onboarding_retry">Retry</string>
+    <string name="onboarding_roads_skip">or skip, and download later in Profile.</string>
+    <string name="onboarding_roads_here">You\'re in %1$s</string>
+    <string name="onboarding_roads_installed">Road data ready, you can record.</string>
+    <string name="onboarding_roads_downloading">Downloading now (also on mobile data). It continues in the background, you can go on.</string>
+    <string name="onboarding_roads_waiting">Waiting for your location to find your province / city… or pick one below.</string>
+    <string name="onboarding_roads_no_pack">No pack covers where you are: pick one below.</string>
+    <plurals name="onboarding_roads_other_count">
+        <item quantity="one">Pick another province / city (%1$d)</item>
+        <item quantity="other">Pick another province / city (%1$d)</item>
+    </plurals>
+    <string name="onboarding_roads_others">Other provinces / cities</string>
+    <string name="onboarding_roads_all">Provinces / cities</string>
+    <string name="onboarding_roads_credit">Road data © OpenStreetMap contributors (ODbL), via Geofabrik. Manage packs in Profile.</string>
+
+    <string name="onboarding_ready_title">Ready</string>
+    <string name="onboarding_ready_button">Start recording</string>
+    <string name="onboarding_facade_title">Shopfronts are usually this far from the camera</string>
+    <string name="setup_distance_m">%1$d m</string>
+    <string name="onboarding_facade_hint">Narrow street, riding close to the kerb: 4 m · normal street: 6 m · wide pavement: 8 m · boulevard: 12 m. → 1 photo every %1$s m, max %2$d km/h. You can change it for each session.</string>
+    <string name="onboarding_mount_title">Mounting the phone</string>
+    <string name="onboarding_mount_text">• Phone in landscape, clamped firmly to the holder.\n• Back camera facing the buildings on your right.\n• During the first few accelerations / brakes, the app measures the camera direction.</string>
+    <string name="onboarding_summary_name">Recorded by: %1$s</string>
+    <string name="onboarding_summary_perms_ok">Camera and location allowed</string>
+    <string name="onboarding_summary_perms_missing">Missing permission: %1$s</string>
+    <string name="onboarding_summary_perms_fix">Turn it on in Settings before recording.</string>
+    <string name="onboarding_summary_roads">Road data: %1$s</string>
+    <string name="onboarding_summary_roads_online">Road data: fetched online while recording</string>
+    <string name="onboarding_summary_roads_pending">A pack you picked can be used once it has downloaded.</string>
+    <string name="onboarding_ready_after">When done, open “Sessions” to review on the map and send (Zalo, Drive, email…).</string>
+
+    <!-- New (setup) screen -->
+    <string name="setup_need_permissions">Camera and precise location are needed. Open Settings → Permissions to turn them on.</string>
+    <string name="setup_roads_loading">Loading road data around you…</string>
+    <string name="setup_roads_failed">Road data not loaded yet (network or busy server). Recording works anyway, street names come later.</string>
+    <string name="setup_coverage">Covered</string>
+    <string name="setup_coverage_team">Covered · purple = team</string>
+    <string name="setup_loc_no_permission">Location not allowed</string>
+    <string name="setup_loc_approximate">Approximate location only</string>
+    <string name="setup_loc_disabled">Phone location is off</string>
+    <string name="setup_loc_searching">Finding your location…</string>
+    <string name="setup_loc_searching_sats">Finding your location · %1$d/%2$d satellites</string>
+    <string name="setup_loc_network">Wi-Fi / cell location · ±%1$d m, waiting for GPS</string>
+    <string name="setup_gps_good">Good GPS · ±%1$d m</string>
+    <string name="setup_gps_weak">Weak GPS · ±%1$d m</string>
+    <string name="setup_simulated">Emulator: simulated location, not real GPS</string>
+    <string name="setup_recenter">Back to my location</string>
+    <string name="setup_sweep_title">Street sweep</string>
+    <string name="setup_sweep_sub">Ride, the app photographs the buildings</string>
+    <string name="setup_place_title">Place capture</string>
+    <string name="setup_place_sub">Stop and photograph each shop properly</string>
+    <string name="setup_you_are_on">You\'re on</string>
+    <string name="setup_waiting_location">Waiting for location…</string>
+    <string name="setup_road_unknown">Street not recognised yet</string>
+    <string name="setup_road_auto_hint">The street is recognised as you ride; turning into other streets is fine.</string>
+    <string name="setup_source_offline">%1$s (offline data)</string>
+    <string name="setup_source_cache">%1$s (data saved on the phone)</string>
+    <string name="setup_pack_suggest">Download road data for this area to know street names even offline:</string>
+    <string name="setup_poi_hint">At each shop: shoot ★ the front straight on (cover photo), the sign, then side / inside / info (opening hours, phone, menu) if there are any. Then pin the place on the right building on the map. Photos are already grouped by place, nothing to sort out later.</string>
+    <string name="setup_facade_title">Shopfront distance from the camera</string>
+    <string name="setup_facade_hint">Narrow street, riding close to the kerb: 4 m · normal street: 6 m · wide pavement: 8 m · boulevard: 12 m. Helps put places on the right building.</string>
+    <string name="setup_mode_title">How to record</string>
+    <string name="setup_mode_auto">Auto photos</string>
+    <string name="setup_mode_manual">Manual</string>
+    <string name="setup_mode_video">Video</string>
+    <string name="setup_mode_auto_hint">1 photo every %1$s m (each sign in ≥ 2 photos) · max %2$d km/h</string>
+    <string name="setup_mode_manual_hint">Shoot with the volume keys or a Bluetooth button on the handlebar, no need to touch the screen · max %1$d km/h</string>
+    <string name="setup_mode_video_hint">Continuous video · max %1$d km/h</string>
+    <string name="setup_mount_hint">Mount the phone firmly, in landscape, camera facing the buildings to record. The app detects the side (right/left) as you ride. Tap ★ Mark when you pass a shop worth noting.</string>
+    <string name="setup_need_email">Enter your email before you start.</string>
+    <string name="setup_enter_email">Enter email</string>
+    <string name="setup_session_running">A session is still recording.</string>
+    <string name="setup_start">Start</string>
+
+    <!-- ==== Capture screen, place sheet, capture service ==== -->
+    <!-- Capture screen -->
+    <string name="capture_marked">★ Marked</string>
+    <string name="capture_place_saved">✓ Place %1$d saved. On to the next one.</string>
+    <string name="capture_camera_busy">Camera taken by another app (a call…). Recording resumes when it\'s back.</string>
+    <string name="capture_end">End</string>
+    <string name="capture_last_photo">Last photo</string>
+    <string name="capture_shoot">Shoot</string>
+    <string name="capture_done_place">Done with place</string>
+    <string name="capture_pin_status">Pin &amp; status…</string>
+    <string name="capture_pause">Pause</string>
+    <string name="capture_resume">Resume</string>
+    <string name="capture_mark">★\nMark</string>
+    <string name="capture_recording">● Recording</string>
+    <string name="capture_paused">Ⅱ Paused</string>
+    <string name="capture_side_right">SHOOTING RIGHT →</string>
+    <string name="capture_side_left">← SHOOTING LEFT</string>
+    <string name="capture_end_title">End this session?</string>
+    <plurals name="capture_end_videos">
+        <item quantity="one">%1$d video clip recorded.</item>
+        <item quantity="other">%1$d video clips recorded.</item>
+    </plurals>
+    <plurals name="capture_end_photos">
+        <item quantity="one">%1$d photo taken.</item>
+        <item quantity="other">%1$d photos taken.</item>
+    </plurals>
+    <string name="capture_end_body">The session stays on the phone; check the photo locations and send it from “Sessions”.</string>
+    <string name="capture_end_save">End and save</string>
+    <string name="capture_keep_going">Keep recording</string>
+    <string name="capture_gps_good">● GPS ±%1$s m</string>
+    <string name="capture_gps_weak">● Weak GPS ±%1$s m</string>
+    <string name="capture_gps_error">● GPS error</string>
+    <string name="capture_gps_waiting">● Waiting for GPS…</string>
+    <string name="capture_simulated">simulated location</string>
+    <string name="capture_mount_front">Camera faces forward: turn it to the buildings!</string>
+    <string name="capture_mount_back">Camera faces backward: turn it to the buildings!</string>
+    <string name="capture_mount_measuring">Finding the camera direction… (speed up / brake a few times)</string>
+    <string name="capture_speed_max">km/h · max %1$d</string>
+    <string name="capture_ready_poi">Ready to shoot places?</string>
+    <string name="capture_ready">Ready to record?</string>
+    <string name="capture_check_gps_good">Good GPS (±%1$s m)</string>
+    <string name="capture_check_gps_weak">GPS still weak, give it a moment</string>
+    <string name="capture_check_gps_waiting">Waiting for GPS…</string>
+    <string name="capture_check_camera_ready">Camera ready</string>
+    <string name="capture_check_camera_error">Couldn\'t open the camera</string>
+    <string name="capture_check_camera_opening">Opening the camera…</string>
+    <string name="capture_check_road">Road: %1$s</string>
+    <string name="capture_check_on_road">On: %1$s</string>
+    <string name="capture_check_no_road">No road data yet: you can still record, the road is matched later</string>
+    <string name="capture_check_roles">Each place: shoot ★ %1$s, then %2$s if there is one. The app picks the next photo kind.</string>
+    <string name="capture_check_poi_default">Each place: the front with the whole shop, the sign readable, plus inside / price board if there is one. The system works out which photo is which.</string>
+    <string name="capture_check_poi_flow">Finished a place? Tap “Done with place” and go to the next one, nothing to type. The location comes from GPS; if needed, “Pin &amp; status…” puts it on the right building or marks it closed.</string>
+    <string name="capture_check_volume_shoot">The volume buttons shoot too.</string>
+    <string name="capture_check_mount">Phone mounted firmly, landscape, camera facing the buildings. The app finds the side after a few speed-ups / brakes.</string>
+    <string name="capture_check_keys_shoot">The volume buttons (or a Bluetooth remote on the handlebar) shoot.</string>
+    <string name="capture_check_keys_mark">The volume buttons (or a Bluetooth remote on the handlebar) = ★ Mark, no need to touch the screen.</string>
+    <string name="capture_check_plan_auto">Buildings ~%1$d m away: 1 photo every %2$s m, ride at %3$d km/h max</string>
+    <string name="capture_check_plan">Buildings ~%1$d m away: ride at %2$d km/h max</string>
+    <string name="capture_simulated_hint">Emulator: the location is simulated.</string>
+    <string name="capture_cancel">Cancel</string>
+    <string name="capture_start_poi">Start shooting</string>
+    <string name="capture_start_video">Start filming</string>
+    <string name="capture_start">Start recording</string>
+    <string name="capture_reading">Reading the text on the photos…</string>
+    <string name="capture_read">Read on the sign: %1$s</string>
+
+    <!-- Place sheet ("Pin & status…") -->
+    <string name="poi_pin_set">Pin is on the building ✓</string>
+    <string name="poi_pin_no_gps">No GPS yet: tap the building to drop the pin</string>
+    <string name="poi_pin_move">Tap or drag the pin onto the right building</string>
+    <string name="poi_title">Place %1$d</string>
+    <string name="poi_no_photos">No photos yet</string>
+    <plurals name="poi_photos">
+        <item quantity="one">%1$d photo</item>
+        <item quantity="other">%1$d photos</item>
+    </plurals>
+    <string name="poi_no_cover">No “%1$s” photo yet (the cover photo). Better take one more.</string>
+    <string name="poi_nothing_to_type">Nothing to type: just put the pin on the right building.</string>
+    <string name="poi_read_title">Read from the photos</string>
+    <string name="poi_read_name">Name: %1$s</string>
+    <string name="poi_read_phone">Phone: %1$s</string>
+    <string name="poi_read_house">House number: %1$s</string>
+    <string name="poi_read_category">Type: %1$s</string>
+    <string name="poi_reading">Reading the text on the photos…</string>
+    <string name="poi_read_nothing">Nothing read on the phone yet. The server will read the photos again.</string>
+    <string name="poi_read_hint">Hints for the system; name, address and type are checked against the photos and the map.</string>
+    <string name="poi_status">Status</string>
+    <string name="poi_more_open">▾ More notes</string>
+    <string name="poi_more_closed">▸ More notes (optional: sign hidden, no sign…)</string>
+    <string name="poi_note">Note for the system</string>
+    <string name="poi_note_placeholder">e.g. sign hidden by a tree, shop has no sign</string>
+    <string name="poi_name">Name (if not on the photos)</string>
+    <string name="poi_phone">Phone number</string>
+    <string name="poi_house">House number</string>
+    <string name="poi_shoot_more">Shoot more</string>
+    <string name="poi_save_next">Save &amp; next</string>
+
+    <!-- Capture service messages -->
+    <string name="service_gps_permission">GPS: precise location not allowed</string>
+    <string name="service_hot">Phone is overheating: shade it or take a break</string>
+    <string name="service_missed_shot">Camera can\'t keep up: slow down so no shopfront is missed</string>
+    <string name="service_mount_front">Camera is facing FORWARD: turn it to the buildings you\'re recording</string>
+    <string name="service_mount_back">Camera is facing BACKWARD: turn it to the buildings you\'re recording</string>
+    <string name="service_camera_failed">Couldn\'t open the camera: %1$s</string>
+    <string name="service_camera_interrupted">Camera interrupted (code %1$d), waiting for it to reopen…</string>
+    <string name="service_shot_failed">Photo failed: %1$s</string>
+    <string name="service_no_text_photo">No text read on that photo. Try closer, straighter, without glare.</string>
+    <string name="service_no_text_place">No text read on this place\'s photos yet. Shoot the sign closer and straighter.</string>
+
+    <!-- ==== Sessions, session map, shared components ==== -->
+    <!-- Sessions tab (ui/SessionsScreen.kt) -->
+    <string name="sessions_title">Sessions</string>
+    <plurals name="sessions_places">
+        <item quantity="one">%1$d place</item>
+        <item quantity="other">%1$d places</item>
+    </plurals>
+    <string name="sessions_packing">Packing…</string>
+    <string name="sessions_saved">Saved %1$s.</string>
+    <string name="sessions_save_failed">Couldn\'t save: %1$s</string>
+    <string name="sessions_send_chooser">Send %1$s</string>
+    <string name="sessions_packed">Packed (%1$s). Pick Zalo, Drive, email… to send it.</string>
+    <string name="sessions_pack_failed">Couldn\'t pack: %1$s</string>
+    <string name="sessions_all_uploaded">All sessions are on the server.</string>
+    <plurals name="sessions_not_uploaded">
+        <item quantity="one">%1$d session not uploaded · %2$s</item>
+        <item quantity="other">%1$d sessions not uploaded · %2$s</item>
+    </plurals>
+    <string name="sessions_auto_upload_wifi">Uploads by itself on Wi-Fi and picks up again if the connection drops. %1$s free.</string>
+    <string name="sessions_auto_upload_any">Uploads by itself on any network (4G too) and picks up again if the connection drops. %1$s free.</string>
+    <string name="sessions_none_unsent">Nothing waiting to be sent.</string>
+    <plurals name="sessions_unsent">
+        <item quantity="one">%1$d session not sent · %2$s · %3$s</item>
+        <item quantity="other">%1$d sessions not sent · %2$s · %3$s</item>
+    </plurals>
+    <string name="sessions_local_only">Data stays on this phone until you send it. %1$s free.</string>
+    <string name="sessions_loading">Reading your sessions…</string>
+    <string name="sessions_empty">No sessions yet.</string>
+    <string name="sessions_first">Record your first session</string>
+    <string name="sessions_queued">Queued for upload.</string>
+    <string name="sessions_delete_title">Delete this session?</string>
+    <string name="sessions_delete_uploaded">This session is on the server. Only the copy on this phone is deleted.</string>
+    <string name="sessions_delete_changed">Uploaded, but changes made since are NOT uploaded yet. Deleting loses them.</string>
+    <string name="sessions_delete_sent">This session was sent. Its photos and videos on this phone will be deleted.</string>
+    <string name="sessions_delete_unsent">This session was NOT sent or uploaded. Its photos and videos will be lost for good.</string>
+    <string name="sessions_deleting">Deleting…</string>
+    <string name="sessions_deleted">Session deleted.</string>
+    <string name="sessions_delete">Delete</string>
+    <string name="sessions_keep">Cancel</string>
+    <string name="sessions_more">More</string>
+    <string name="sessions_send_other_app">Send with another app</string>
+    <string name="sessions_save_zip">Save zip file to phone</string>
+    <string name="sessions_delete_session">Delete session</string>
+    <string name="sessions_badge_recording">Recording</string>
+    <string name="sessions_badge_empty">Empty</string>
+    <string name="sessions_badge_reupload">Needs re-upload</string>
+    <string name="sessions_badge_uploaded">Uploaded</string>
+    <string name="sessions_badge_uploading">Uploading %1$d%%</string>
+    <string name="sessions_badge_wait_wifi">Waiting for Wi-Fi</string>
+    <string name="sessions_badge_wait_network">Waiting for network</string>
+    <string name="sessions_badge_failed">Upload failed, will retry</string>
+    <string name="sessions_badge_not_uploaded">Not uploaded</string>
+    <string name="sessions_badge_sent">Sent</string>
+    <string name="sessions_badge_not_sent">Not sent</string>
+    <plurals name="sessions_videos">
+        <item quantity="one">%1$d video clip</item>
+        <item quantity="other">%1$d video clips</item>
+    </plurals>
+    <plurals name="sessions_photos">
+        <item quantity="one">%1$d photo</item>
+        <item quantity="other">%1$d photos</item>
+    </plurals>
+    <plurals name="sessions_marks">
+        <item quantity="one">%1$d mark</item>
+        <item quantity="other">%1$d marks</item>
+    </plurals>
+    <string name="sessions_kind_poi">Place capture</string>
+    <string name="sessions_kind_sweep">Street sweep</string>
+    <string name="sessions_side_right">Right side</string>
+    <string name="sessions_side_left">Left side</string>
+    <string name="sessions_side_measured">%1$s (measured)</string>
+    <string name="sessions_vehicle_car">Car</string>
+    <string name="sessions_vehicle_motorbike">Motorbike</string>
+    <string name="sessions_mode_auto">auto photos</string>
+    <string name="sessions_mode_manual">manual photos</string>
+    <string name="sessions_mode_video">video</string>
+    <plurals name="sessions_relocated">
+        <item quantity="one">%1$d photo moved</item>
+        <item quantity="other">%1$d photos moved</item>
+    </plurals>
+    <string name="sessions_interrupted">interrupted (can still be sent)</string>
+    <string name="sessions_upload_error">Error: %1$s</string>
+    <string name="sessions_agent_done">Processed</string>
+    <plurals name="sessions_agent_found">
+        <item quantity="one">%1$d place found</item>
+        <item quantity="other">%1$d places found</item>
+    </plurals>
+    <plurals name="sessions_agent_recapture">
+        <item quantity="one">%1$d spot to reshoot (see Map)</item>
+        <item quantity="other">%1$d spots to reshoot (see Map)</item>
+    </plurals>
+    <string name="sessions_agent_processing">Processing…</string>
+    <string name="sessions_agent_failed">Couldn\'t process this session yet; a manager will check it.</string>
+    <string name="sessions_agent_received">Received by the server</string>
+    <string name="sessions_reupload">Upload again</string>
+    <string name="sessions_upload_now">Upload now</string>
+    <string name="sessions_send">Send</string>
+    <string name="sessions_send_again">Send again</string>
+    <string name="sessions_map">Map</string>
+    <string name="sessions_duration_s">%1$d s</string>
+    <string name="sessions_duration_min">%1$d min</string>
+    <string name="sessions_duration_h">%1$d h %2$d min</string>
+
+    <!-- Photo map (ui/SessionMap.kt) -->
+    <string name="sessionmap_no_photos_live">No photos yet. They show up on the map as soon as you shoot.</string>
+    <string name="sessionmap_no_photos">This session has no photos.</string>
+    <plurals name="sessionmap_summary">
+        <item quantity="one">%1$d photo · %2$d moved · tap a dot to see it</item>
+        <item quantity="other">%1$d photos · %2$d moved · tap a dot to see the photo</item>
+    </plurals>
+    <string name="sessionmap_photo_desc">Photo %1$d</string>
+    <string name="sessionmap_tap_close">Tap to close</string>
+    <string name="sessionmap_photo_thumb_desc">Photo %1$d, tap to enlarge</string>
+    <string name="sessionmap_photo_title">Photo %1$d/%2$d · %3$s</string>
+    <string name="sessionmap_no_road">Road not recognised</string>
+    <string name="sessionmap_moved">Moved by hand (original GPS kept)</string>
+    <string name="sessionmap_gps">GPS position</string>
+    <string name="sessionmap_gps_accuracy">GPS position ±%1$d m</string>
+    <string name="sessionmap_facade">■ estimated front, %1$d m away</string>
+    <string name="sessionmap_relocate_hint">Tap the right spot on the map (or hold and drag the blue dot).</string>
+    <string name="sessionmap_cancel_move">Cancel move</string>
+    <string name="sessionmap_move">Move</string>
+    <string name="sessionmap_back_gps">Back to GPS</string>
+
+    <!-- Shared components (ui/Components.kt) -->
+    <string name="common_loc_no_permission">The app isn\'t allowed to use your location, so it can\'t tell where photos were taken.</string>
+    <string name="common_allow">Allow</string>
+    <string name="common_loc_approximate">The app only has approximate location (off by a few hundred metres). Turn on “Precise location”.</string>
+    <string name="common_turn_on">Turn on</string>
+    <string name="common_loc_disabled">The phone\'s location is off.</string>
+    <string name="common_turn_on_location">Turn on location</string>
+    <string name="common_sats">%1$d satellites seen, %2$d in use.</string>
+    <string name="common_searching">Looking for your position…</string>
+    <string name="common_searching_long">Move to open sky, away from roofs and tall buildings. The first GPS fix can take 1–2 minutes.</string>
+    <string name="common_settings">Settings</string>
+
+    <!-- ==== Profile, offline road data, photo kinds ==== -->
+    <!-- Offline road data (RoadPacksCard) -->
+    <string name="packs_importing">Importing pack…</string>
+    <string name="packs_import_done">Installed %1$s (%2$s).</string>
+    <string name="packs_import_failed">Couldn\'t import: %1$s</string>
+    <string name="packs_intro">Download road data for your area ahead of time, so the app knows street names even without network. Outside the downloaded areas it still gets them from OpenStreetMap when online, and keeps them on the phone.</string>
+    <string name="packs_none">No road data on this phone yet.</string>
+    <string name="packs_installed_line">Installed · %1$s · data from %2$s</string>
+    <string name="packs_delete">Delete</string>
+    <string name="packs_keep">Keep</string>
+    <string name="packs_source_label">Pack source (index.json address)</string>
+    <string name="packs_loading_list">Loading list…</string>
+    <plurals name="packs_count">
+        <item quantity="one">%d pack available.</item>
+        <item quantity="other">%d packs available.</item>
+    </plurals>
+    <string name="packs_list_failed">Couldn\'t load the list: %1$s</string>
+    <string name="packs_load_list">Load list</string>
+    <string name="packs_import_file">Import pack file (Zalo, Drive…)</string>
+    <string name="packs_attribution">Road data © OpenStreetMap contributors (ODbL), via Geofabrik.</string>
+    <string name="packs_delete_title">Delete “%1$s”?</string>
+    <string name="packs_delete_text">Frees %1$s. To use it again, you\'ll have to download it again.</string>
+    <string name="packs_entry_line">%1$s · data from %2$s</string>
+    <string name="packs_entry_line_current">%1$s · data from %2$s · installed ✓</string>
+    <string name="packs_entry_line_older">%1$s · data from %2$s · phone has %3$s</string>
+    <string name="packs_cancel">Cancel</string>
+    <string name="packs_download">Download</string>
+    <string name="packs_update">Update</string>
+    <string name="packs_waiting_network">Waiting for network…</string>
+    <string name="packs_waiting_wifi">Waiting for Wi-Fi…</string>
+    <string name="packs_download_failed">Download failed: %1$s</string>
+
+    <!-- Photo kinds of Place capture (PhotoRolesCard) -->
+    <string name="roles_intro">The buttons for picking the photo kind at a place, in shooting order. ★ = cover photo. After a photo of a kind marked ↻, the app moves on to the next kind that has no photo yet.</string>
+    <string name="roles_from_server">Set by your team on the server; can\'t be changed on the phone.</string>
+    <string name="roles_move_up">Move up</string>
+    <string name="roles_move_down">Move down</string>
+    <string name="roles_make_cover">Make cover photo ★</string>
+    <string name="roles_advance_off">Don\'t move on after this photo</string>
+    <string name="roles_advance_on">Move on after 1 photo ↻</string>
+    <string name="roles_remove">Remove this kind</string>
+    <string name="roles_add">+ Add photo kind</string>
+    <string name="roles_reset">Restore defaults</string>
+    <string name="roles_fetching">Getting the team settings…</string>
+    <string name="roles_updated">Updated from the server.</string>
+    <string name="roles_no_server_config">The server has no team settings yet; using the list on this phone.</string>
+    <string name="roles_fetch">Get from server</string>
+    <string name="roles_add_title">Add photo kind</string>
+    <string name="roles_add_name">Button name, e.g. Parking</string>
+    <string name="roles_add_hint">Hint while shooting (optional)</string>
+    <string name="roles_add_code">Photos of this kind are exported with the code “%1$s”.</string>
+    <string name="roles_add_confirm">Add</string>
+    <string name="roles_cancel">Cancel</string>
+
+    <!-- Profile -->
+    <string name="profile_title">Profile</string>
+    <string name="profile_contributor">You</string>
+    <string name="profile_email">Email</string>
+    <string name="profile_email_ok">No verification needed. Used to credit you and group your sessions.</string>
+    <string name="profile_email_bad">That doesn\'t look like an email, e.g. name@gmail.com</string>
+    <string name="profile_display_name">Display name (optional)</string>
+    <string name="profile_facade_title">Distance to the shopfronts (default)</string>
+    <string name="profile_facade_hint">From the camera to the building fronts (not to the edge of the road), as usual when you ride in the lane next to the kerb. Used for the photo spacing, the top speed and putting places on the right building. You can change it for each recording.</string>
+    <string name="profile_facade_caption">1 photo every %1$s m · max %2$d km/h</string>
+    <string name="profile_road_data">Offline road data</string>
+    <string name="profile_advanced_hide">▾ Hide advanced settings</string>
+    <string name="profile_advanced_show">▸ Advanced settings (mount angle, photo kinds)</string>
+    <string name="profile_mount_title">Mount angle (manual)</string>
+    <string name="profile_mount_hint">The app measures where the camera points by itself when you speed up or brake a few times. Only set it here if the app says it couldn\'t measure it: how many degrees the camera is turned toward the front or the back.</string>
+    <string name="profile_mount_forward">turned toward the front</string>
+    <string name="profile_mount_backward">turned toward the back</string>
+    <string name="profile_mount_square">square to the road</string>
+    <string name="profile_roles_title">Photo kinds in Place capture</string>
+    <string name="profile_roles_ask">Ask the kind of each photo (front, sign…)</string>
+    <string name="profile_roles_hint">Not needed: the system tells fronts, signs and insides apart by itself. Only turn on if your team asks.</string>
+    <string name="profile_done">Done</string>
+    <string name="profile_replay_onboarding">Show the intro again</string>
+</resources>

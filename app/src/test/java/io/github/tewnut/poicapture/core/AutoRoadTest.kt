@@ -47,7 +47,7 @@ class AutoRoadTest {
         assertEquals(true, p.travelOk)
         p.onFix(step(2, 105.8060, 180.0, lat = START.lat + 0.00005))    // turns back: U-turn
         assertEquals(false, p.travelOk)
-        assertTrue(p.warnings().any { it.startsWith("Đã quay đầu") })
+        assertTrue(CaptureWarning.UTurn in p.warnings())
         p.onFix(step(3, 105.8060, 0.0, lat = START.lat + 0.0001))       // and back again
         assertEquals(true, p.travelOk)
     }

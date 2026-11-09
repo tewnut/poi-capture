@@ -42,8 +42,8 @@ class TusClient(
             c.setFixedLengthStreamingMode(0)
             c.outputStream.close()
             val code = c.responseCode
-            if (code != 201) throw TusException(code, "tạo upload: HTTP $code")
-            val loc = c.getHeaderField("Location") ?: throw TusException(code, "tạo upload: thiếu Location")
+            if (code != 201) throw TusException(code, "create upload: HTTP $code")
+            val loc = c.getHeaderField("Location") ?: throw TusException(code, "create upload: no Location header")
             return URL(URL(endpoint), loc).toString()
         } finally { c.disconnect() }
     }
@@ -55,7 +55,7 @@ class TusClient(
             val code = c.responseCode
             if (code == 404 || code == 410) return null
             if (code !in 200..299) throw TusException(code, "HEAD: HTTP $code")
-            return c.getHeaderField("Upload-Offset")?.toLongOrNull() ?: throw TusException(code, "HEAD: thiếu Upload-Offset")
+            return c.getHeaderField("Upload-Offset")?.toLongOrNull() ?: throw TusException(code, "HEAD: no Upload-Offset header")
         } finally { c.disconnect() }
     }
 
@@ -81,13 +81,13 @@ class TusClient(
                     c.outputStream.use { it.write(buf, 0, n) }
                     when (val code = c.responseCode) {
                         204, 200 -> offset = c.getHeaderField("Upload-Offset")?.toLongOrNull() ?: (offset + n)
-                        409 -> offset = offset(uploadUrl) ?: throw TusException(code, "upload đã hết hạn")
-                        404, 410 -> throw TusException(code, "upload đã hết hạn")
+                        409 -> offset = offset(uploadUrl) ?: throw TusException(code, "upload expired")
+                        404, 410 -> throw TusException(code, "upload expired")
                         else -> throw TusException(code, "PATCH: HTTP $code")
                     }
                 } finally { c.disconnect() }
                 // the server holds more than this file: the upload is not ours / corrupted, never call it complete
-                if (offset > total) throw TusException(410, "máy chủ báo nhận $offset byte, file chỉ có $total: tạo upload mới")
+                if (offset > total) throw TusException(410, "server has $offset bytes, the file only $total: new upload")
                 onProgress(offset)
             }
         }
@@ -142,14 +142,14 @@ object UploadJob {
                 uploadsDir.mkdirs()
                 val need = store.dir(sessionId).walkTopDown().filter { it.isFile }.sumOf { it.length() }
                 if (uploadsDir.usableSpace < need + 50L * 1024 * 1024) {
-                    save(st.copy(state = "failed", error = "Không đủ dung lượng để đóng gói (cần ~${need / 1048576} MB)"))
+                    save(st.copy(state = "failed", error = "Not enough free space to pack the session (needs ~${need / 1048576} MB)"))
                     return Result.RETRY
                 }
                 st.zip?.let { File(it).delete() }
                 val tmp = File(uploadsDir, "$sessionId.zip.tmp")
                 tmp.outputStream().use { Exporter.writeZip(store, sessionId, it) }
                 val dst = File(uploadsDir, "$sessionId.zip").also { it.delete() }
-                if (!tmp.renameTo(dst)) throw IOException("không đổi tên được file zip")
+                if (!tmp.renameTo(dst)) throw IOException("could not rename the zip file")
                 zip = dst
                 save(UploadState(state = "queued", zip = dst.path, zipBytes = dst.length(), sha256 = sha256(dst), uploadedVersion = version))
             }

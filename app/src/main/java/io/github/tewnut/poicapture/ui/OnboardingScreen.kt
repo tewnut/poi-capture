@@ -10,6 +10,7 @@ import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -48,6 +49,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -57,6 +60,7 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import io.github.tewnut.poicapture.Prefs
+import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.capture.RoadPackCatalogue
 import io.github.tewnut.poicapture.capture.RoadPackDownloads
 import io.github.tewnut.poicapture.core.CapturePlan
@@ -80,7 +84,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
         // top bar: back + progress
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (step != Step.WELCOME) TextButton(onClick = { step = Step.entries[step.ordinal - 1] }) { Text("← Quay lại") }
+            if (step != Step.WELCOME) TextButton(onClick = { step = Step.entries[step.ordinal - 1] }) { Text(stringResource(R.string.onboarding_back)) }
             Spacer(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(end = 12.dp)) {
                 for (s in Step.entries) {
@@ -144,13 +148,14 @@ private fun WhiteCard(content: @Composable () -> Unit) {
 
 @Composable
 private fun WelcomeStep(onNext: () -> Unit) {
-    StepFrame("POI Capture", "Ghi lại cửa hàng, quán xá trên phố để đưa lên bản đồ.", "Bắt đầu thiết lập", onNext = onNext,
-        secondary = { Hint("Thiết lập một lần, khoảng 1 phút.", Modifier.padding(bottom = 8.dp)) }) {
+    StepFrame(stringResource(R.string.app_name), stringResource(R.string.onboarding_welcome_lead),
+        stringResource(R.string.onboarding_welcome_button), onNext = onNext,
+        secondary = { Hint(stringResource(R.string.onboarding_welcome_time), Modifier.padding(bottom = 8.dp)) }) {
         Spacer(Modifier.height(4.dp))
-        IconRow("🛵", "Quét đường", "Gắn điện thoại lên xe, chạy dọc phố: app tự chụp dãy nhà bên phải, bạn không phải chạm máy.")
-        IconRow("🏪", "Chụp địa điểm", "Dừng ở từng cửa hàng: chụp mặt tiền, biển hiệu, bên trong, rồi ghim lên đúng tòa nhà.")
-        IconRow("📍", "Vị trí đặt vào tòa nhà", "App tính vị trí mặt tiền từ GPS và hướng camera. Sai chỗ nào, kéo lại trên bản đồ.")
-        IconRow("📶", "Không cần mạng khi ghi", "Ảnh lưu trên máy, tự tải lên khi có Wi-Fi hoặc gửi file qua Zalo / Drive.")
+        IconRow("🛵", stringResource(R.string.onboarding_sweep_title), stringResource(R.string.onboarding_sweep_text))
+        IconRow("🏪", stringResource(R.string.onboarding_place_title), stringResource(R.string.onboarding_place_text))
+        IconRow("📍", stringResource(R.string.onboarding_position_title), stringResource(R.string.onboarding_position_text))
+        IconRow("📶", stringResource(R.string.onboarding_offline_title), stringResource(R.string.onboarding_offline_text))
     }
 }
 
@@ -168,18 +173,19 @@ private fun EmailStep(ctx: Context, onNext: () -> Unit) {
         Prefs.saveContributor(ctx, name.trim())
         onNext()
     }
-    StepFrame("Email của bạn", "Dùng để ghi công và gộp các phiên ghi của bạn trên máy chủ. Không cần xác minh, app không gửi thư.",
-        "Tiếp tục", enabled = email.isNotBlank(), onNext = ::next) {
+    StepFrame(stringResource(R.string.onboarding_email_title), stringResource(R.string.onboarding_email_lead),
+        stringResource(R.string.onboarding_continue), enabled = email.isNotBlank(), onNext = ::next) {
         OutlinedTextField(email, { email = it.trim(); if (touched && Onboarding.isEmail(email)) touched = false },
-            label = { Text("Email") }, placeholder = { Text("ten@gmail.com") }, singleLine = true,
+            label = { Text(stringResource(R.string.onboarding_email_label)) },
+            placeholder = { Text(stringResource(R.string.onboarding_email_placeholder)) }, singleLine = true,
             isError = touched && !valid,
-            supportingText = { if (touched && !valid) Text("Email chưa đúng dạng, ví dụ ten@gmail.com") },
+            supportingText = { if (touched && !valid) Text(stringResource(R.string.onboarding_email_invalid)) },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
             modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(name, { name = it }, label = { Text("Tên hiển thị (không bắt buộc)") },
-            placeholder = { Text(email.substringBefore('@').ifBlank { "Nguyễn Văn A" }) }, singleLine = true,
+        OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.onboarding_name_label)) },
+            placeholder = { val ph = stringResource(R.string.onboarding_name_placeholder); Text(email.substringBefore('@').ifBlank { ph }) }, singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            supportingText = { Text("Hiện trên các phiên ghi. Để trống thì dùng phần trước @ của email.") },
+            supportingText = { Text(stringResource(R.string.onboarding_name_help)) },
             modifier = Modifier.fillMaxWidth())
     }
 }
@@ -188,15 +194,22 @@ private fun EmailStep(ctx: Context, onNext: () -> Unit) {
 
 private fun granted(ctx: Context, p: String) = ContextCompat.checkSelfPermission(ctx, p) == PackageManager.PERMISSION_GRANTED
 
-private data class Perm(val icon: String, val title: String, val why: String, val names: List<String>)
+private data class Perm(val icon: String, @StringRes val title: Int, @StringRes val why: Int, val names: List<String>)
 
 private fun perms(): List<Perm> = buildList {
-    add(Perm("📷", "Camera", "Chụp ảnh và quay video mặt tiền.", listOf(Manifest.permission.CAMERA)))
-    add(Perm("📍", "Vị trí chính xác", "Biết mỗi ảnh chụp ở đâu và bạn đang ở đường nào.",
+    add(Perm("📷", R.string.onboarding_perm_camera, R.string.onboarding_perm_camera_why, listOf(Manifest.permission.CAMERA)))
+    add(Perm("📍", R.string.onboarding_perm_location, R.string.onboarding_perm_location_why,
         listOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)))
     if (Build.VERSION.SDK_INT >= 33) {
-        add(Perm("🔔", "Thông báo", "Hiện trạng thái đang ghi khi màn hình tắt.", listOf(Manifest.permission.POST_NOTIFICATIONS)))
+        add(Perm("🔔", R.string.onboarding_perm_notifications, R.string.onboarding_perm_notifications_why,
+            listOf(Manifest.permission.POST_NOTIFICATIONS)))
     }
+}
+
+/** "a", "a and b", "a, b and c" (permission names, lower case) in the UI's language. */
+private fun joinTitles(ctx: Context, list: List<Perm>): String {
+    val t = list.map { ctx.getString(it.title).lowercase(Locale.ROOT) }
+    return if (t.size <= 1) t.joinToString() else ctx.getString(R.string.onboarding_and, t.dropLast(1).joinToString(", "), t.last())
 }
 
 @Composable
@@ -210,25 +223,24 @@ private fun PermissionsStep(ctx: Context, onNext: () -> Unit) {
     val missing = remember(tick) { list.filter { p -> !granted(ctx, p.names.first()) } }
     val required = missing.filter { it.icon != "🔔" }
 
-    StepFrame("Cho phép app dùng", "App chỉ dùng những quyền này khi bạn đang ghi.",
-        if (missing.isEmpty()) "Tiếp tục" else "Cấp quyền",
+    StepFrame(stringResource(R.string.onboarding_perms_title), stringResource(R.string.onboarding_perms_lead),
+        stringResource(if (missing.isEmpty()) R.string.onboarding_continue else R.string.onboarding_perms_grant),
         onNext = { if (missing.isEmpty()) onNext() else request.launch(missing.flatMap { it.names }.toTypedArray()) },
-        secondary = { if (asked && missing.isNotEmpty()) TextButton(onClick = onNext) { Text("Để sau") } }) {
+        secondary = { if (asked && missing.isNotEmpty()) TextButton(onClick = onNext) { Text(stringResource(R.string.onboarding_perms_later)) } }) {
         WhiteCard {
             for (p in list) {
                 val ok = p !in missing
-                IconRow(p.icon, p.title, p.why) {
-                    Text(if (ok) "✓" else "Chưa cấp", color = if (ok) Palette.Green else Palette.Amber,
+                IconRow(p.icon, stringResource(p.title), stringResource(p.why)) {
+                    Text(if (ok) "✓" else stringResource(R.string.onboarding_perm_missing), color = if (ok) Palette.Green else Palette.Amber,
                         fontWeight = FontWeight.Bold, fontSize = if (ok) 20.sp else 13.sp)
                 }
             }
         }
         if (asked && required.isNotEmpty()) {
-            Hint("Chưa có ${required.joinToString(" và ") { it.title.lowercase(Locale.ROOT) }} thì chưa ghi được. " +
-                "Nếu Android không hỏi lại, mở Cài đặt → Quyền để bật.", color = Palette.Amber)
+            Hint(stringResource(R.string.onboarding_perms_required, joinTitles(ctx, required)), color = Palette.Amber)
             TextButton(onClick = {
                 settings.launch(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null)))
-            }) { Text("Mở Cài đặt của app") }
+            }) { Text(stringResource(R.string.onboarding_open_settings)) }
         }
     }
 }
@@ -251,7 +263,7 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
         if (url.isBlank()) { loading = false; return@LaunchedEffect }
         loading = true; error = null
         try { catalogue = withContext(Dispatchers.IO) { RoadPackCatalogue.fetch(ctx, url) } }
-        catch (e: Exception) { error = e.message ?: "lỗi mạng" }
+        catch (e: Exception) { error = errorText(ctx, e) }
         loading = false
     }
     val live = rememberLiveLocation()
@@ -267,42 +279,44 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     }
     var showAll by rememberSaveable { mutableStateOf(false) }
 
-    StepFrame("Dữ liệu đường", "Dữ liệu đường của tỉnh / thành bạn đang ở giúp app nhận tên đường ngay cả khi mất mạng.",
-        "Tiếp tục", onNext = onNext) {
+    StepFrame(stringResource(R.string.onboarding_roads_title), stringResource(R.string.onboarding_roads_lead),
+        stringResource(R.string.onboarding_continue), onNext = onNext) {
         when {
             loading && catalogue.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                Hint("Đang tải danh sách tỉnh / thành…")
+                Hint(stringResource(R.string.onboarding_roads_loading))
             }
             error != null && catalogue.isEmpty() -> {
-                Hint("Không tải được danh sách: $error", color = Palette.Red)
+                Hint(stringResource(R.string.onboarding_roads_error, error ?: ""), color = Palette.Red)
                 Row {
-                    TextButton(onClick = { attempt++ }) { Text("Thử lại") }
-                    Hint("hoặc bỏ qua, tải sau ở Hồ sơ.", Modifier.align(Alignment.CenterVertically))
+                    TextButton(onClick = { attempt++ }) { Text(stringResource(R.string.onboarding_retry)) }
+                    Hint(stringResource(R.string.onboarding_roads_skip), Modifier.align(Alignment.CenterVertically))
                 }
             }
         }
         if (suggestion != null) {
             WhiteCard {
-                Text("Bạn đang ở ${suggestion.name}", fontWeight = FontWeight.Bold, color = Palette.Green, fontSize = 17.sp)
+                Text(stringResource(R.string.onboarding_roads_here, suggestion.name), fontWeight = FontWeight.Bold, color = Palette.Green, fontSize = 17.sp)
                 PackRow(suggestion, installed[suggestion.id], anyNetwork = true, onInstalled = { refresh++ })
-                Hint(if (installed[suggestion.id] == suggestion.version) "Đã có dữ liệu đường, sẵn sàng ghi."
-                    else "Đang tự tải (cả khi dùng 4G). Gói tải tiếp ở nền, bạn có thể đi tiếp.")
+                Hint(stringResource(if (installed[suggestion.id] == suggestion.version) R.string.onboarding_roads_installed
+                    else R.string.onboarding_roads_downloading))
             }
         } else if (catalogue.isNotEmpty()) {
-            Hint(if (live == null) "Đang chờ vị trí để biết bạn ở tỉnh / thành nào… hoặc chọn bên dưới."
-                else "Vị trí hiện tại không thuộc tỉnh / thành nào có gói: chọn bên dưới.")
+            Hint(stringResource(if (live == null) R.string.onboarding_roads_waiting else R.string.onboarding_roads_no_pack))
         }
         val others = catalogue.filter { it.id != suggestion?.id }.sortedBy { it.name }
         if (others.isNotEmpty()) {
             if (suggestion != null && !showAll) {
-                TextButton(onClick = { showAll = true }) { Text("Chọn tỉnh / thành khác (${others.size})") }
+                TextButton(onClick = { showAll = true }) {
+                    Text(pluralStringResource(R.plurals.onboarding_roads_other_count, others.size, others.size))
+                }
             } else WhiteCard {
-                Text(if (suggestion != null) "Tỉnh / thành khác" else "Các tỉnh / thành", fontWeight = FontWeight.Bold, color = Palette.Ink)
+                Text(stringResource(if (suggestion != null) R.string.onboarding_roads_others else R.string.onboarding_roads_all),
+                    fontWeight = FontWeight.Bold, color = Palette.Ink)
                 for (e in others) PackRow(e, installed[e.id], anyNetwork = true, onInstalled = { refresh++ })
             }
         }
-        if (catalogue.isNotEmpty()) Hint("Dữ liệu đường © OpenStreetMap contributors (ODbL), qua Geofabrik. Quản lý gói ở Hồ sơ.")
+        if (catalogue.isNotEmpty()) Hint(stringResource(R.string.onboarding_roads_credit))
     }
 }
 
@@ -317,31 +331,32 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
     val packs = remember { RoadSource.packs(ctx).installed().map { it.name } }
     val plan = CapturePlan.of(settings.facadeDistanceM)
 
-    StepFrame("Sẵn sàng!", null, "Bắt đầu ghi", onNext = { Prefs.saveSettings(ctx, settings); onDone() }) {
+    StepFrame(stringResource(R.string.onboarding_ready_title), null, stringResource(R.string.onboarding_ready_button),
+        onNext = { Prefs.saveSettings(ctx, settings); onDone() }) {
         WhiteCard {
-            Text("Mặt tiền thường cách camera", fontWeight = FontWeight.Bold, color = Palette.Ink)
+            Text(stringResource(R.string.onboarding_facade_title), fontWeight = FontWeight.Bold, color = Palette.Ink)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (d in listOf(4.0, 6.0, 8.0, 12.0)) {
-                    FilterChip(settings.facadeDistanceM == d, { settings = settings.copy(facadeDistanceM = d) }, { Text("${d.roundToInt()} m") })
+                    FilterChip(settings.facadeDistanceM == d, { settings = settings.copy(facadeDistanceM = d) },
+                        { Text(stringResource(R.string.setup_distance_m, d.roundToInt())) })
                 }
             }
-            Hint("Phố hẹp, đi sát lề: 4 m · phố thường: 6 m · vỉa hè rộng: 8 m · đại lộ: 12 m. " +
-                "→ 1 ảnh mỗi ${String.format(Locale.ROOT, "%.1f", plan.photoEveryM)} m, chạy tối đa ${plan.maxSpeedKmh} km/h. Đổi được ở mỗi lần ghi.")
+            Hint(stringResource(R.string.onboarding_facade_hint, String.format(Locale.ROOT, "%.1f", plan.photoEveryM), plan.maxSpeedKmh))
         }
         WhiteCard {
-            Text("Gắn máy", fontWeight = FontWeight.Bold, color = Palette.Ink)
-            Hint("• Điện thoại nằm ngang, kẹp chắc trên giá xe.\n" +
-                "• Camera sau nhìn sang dãy nhà bên phải.\n" +
-                "• Vài lần tăng tốc / phanh đầu tiên, app tự đo hướng camera.")
+            Text(stringResource(R.string.onboarding_mount_title), fontWeight = FontWeight.Bold, color = Palette.Ink)
+            Hint(stringResource(R.string.onboarding_mount_text))
         }
         WhiteCard {
-            Summary(true, "Người ghi: $name", email)
-            Summary(missing.isEmpty(), if (missing.isEmpty()) "Đã cấp quyền camera và vị trí"
-                else "Còn thiếu quyền ${missing.joinToString(", ") { it.title.lowercase(Locale.ROOT) }}", if (missing.isEmpty()) null else "Bật ở Cài đặt trước khi ghi.")
-            Summary(packs.isNotEmpty(), if (packs.isNotEmpty()) "Dữ liệu đường: ${packs.joinToString(", ")}" else "Dữ liệu đường: lấy qua mạng khi ghi",
-                if (packs.isNotEmpty()) null else "Gói đang tải (nếu bạn đã chọn) sẽ dùng được khi tải xong.")
+            Summary(true, stringResource(R.string.onboarding_summary_name, name), email)
+            Summary(missing.isEmpty(), if (missing.isEmpty()) stringResource(R.string.onboarding_summary_perms_ok)
+                else stringResource(R.string.onboarding_summary_perms_missing, missing.joinToString(", ") { ctx.getString(it.title).lowercase(Locale.ROOT) }),
+                if (missing.isEmpty()) null else stringResource(R.string.onboarding_summary_perms_fix))
+            Summary(packs.isNotEmpty(), if (packs.isNotEmpty()) stringResource(R.string.onboarding_summary_roads, packs.joinToString(", "))
+                else stringResource(R.string.onboarding_summary_roads_online),
+                if (packs.isNotEmpty()) null else stringResource(R.string.onboarding_summary_roads_pending))
         }
-        Hint("Ghi xong, vào “Đã ghi” để xem lại trên bản đồ và gửi (Zalo, Drive, email…).")
+        Hint(stringResource(R.string.onboarding_ready_after))
     }
 }
 

@@ -28,11 +28,11 @@ class RoadPack(val file: File) : AutoCloseable {
 
     init {
         try {
-            header = JSONObject(zip.getInputStream(zip.getEntry("pack.json") ?: throw IOException("thiếu pack.json")).bufferedReader().readText())
-            if (header.optString("magic") != MAGIC) throw IOException("không phải gói dữ liệu đường")
-            if (header.optInt("format") !in 1..FORMAT) throw IOException("định dạng gói ${header.optInt("format")} không hỗ trợ (tối đa $FORMAT)")
-            if (header.optDouble("cellSize") != RoadCells.SIZE) throw IOException("kích thước ô của gói khác với app")
-            if (header.optString("skip") != Overpass.SKIP_AREA) throw IOException("gói dùng bộ lọc loại đường khác với app")
+            header = JSONObject(zip.getInputStream(zip.getEntry("pack.json") ?: throw IOException("pack.json missing")).bufferedReader().readText())
+            if (header.optString("magic") != MAGIC) throw IOException("not a road data pack")
+            if (header.optInt("format") !in 1..FORMAT) throw IOException("pack format ${header.optInt("format")} not supported (max $FORMAT)")
+            if (header.optDouble("cellSize") != RoadCells.SIZE) throw IOException("the pack's cell size differs from the app's")
+            if (header.optString("skip") != Overpass.SKIP_AREA) throw IOException("the pack uses a different road filter than the app")
             id = header.getString("id")
             name = header.optString("name", id)
             val b = header.getJSONArray("bbox")
@@ -47,7 +47,7 @@ class RoadPack(val file: File) : AutoCloseable {
             }
         } catch (e: Exception) {
             zip.close()
-            throw if (e is IOException) e else IOException("gói hỏng: ${e.message}")
+            throw if (e is IOException) e else IOException("broken pack: ${e.message}")
         }
     }
 
@@ -129,7 +129,7 @@ class RoadPacks(val dir: File) {
         dir.mkdirs()
         val dst = File(dir, "$id.zip")
         open.remove(dst.path)?.close()
-        if (dst.exists() && !dst.delete()) throw IOException("không thay được gói cũ")
+        if (dst.exists() && !dst.delete()) throw IOException("could not replace the old pack")
         if (!tmp.renameTo(dst)) { tmp.copyTo(dst, overwrite = true); tmp.delete() }
         return RoadPack(dst).also { open[dst.path] = it }
     }
@@ -179,21 +179,38 @@ object RoadData {
     }
 }
 
-/** What to tell the user when the pack catalogue (index.json) cannot be fetched. */
-object CatalogueError {
-    /**
-     * GitHub answers a missing release asset with 504, not 404, so on a GitHub release URL a 504 nearly always means
-     * "nothing published there yet" rather than a real gateway timeout.
-     */
-    fun forHttp(code: Int, url: String): String {
-        val githubRelease = url.contains("github.com/") && url.contains("/releases/download/")
-        return when {
-            code == 404 || code == 410 || (code == 504 && githubRelease) ->
-                "nguồn này chưa phát hành gói nào (HTTP $code). Với nguồn mặc định, gói có sau khi quản trị chạy " +
-                    "workflow “roadpacks”; trong lúc chờ có thể dùng “Nhập file gói…”."
-            code == 401 || code == 403 -> "nguồn gói không cho truy cập (HTTP $code), kiểm tra địa chỉ hoặc quyền xem."
-            code >= 500 -> "máy chủ nguồn gói đang lỗi (HTTP $code), thử lại sau."
-            else -> "máy chủ trả HTTP $code."
+/** Why the pack catalogue (index.json) could not be fetched; the UI words it in the user's language. */
+enum class CatalogueError {
+    /** nothing published at that address yet */
+    NOT_PUBLISHED,
+    /** 401 / 403: no access */
+    FORBIDDEN,
+    /** 5xx: the server is failing, try later */
+    SERVER,
+    /** no network or unknown host */
+    OFFLINE,
+    /** the server did not answer in time */
+    TIMEOUT,
+    /** any other HTTP status */
+    OTHER;
+
+    companion object {
+        /**
+         * GitHub answers a missing release asset with 504, not 404, so on a GitHub release URL a 504 nearly always means
+         * "nothing published there yet" rather than a real gateway timeout.
+         */
+        fun forHttp(code: Int, url: String): CatalogueError {
+            val githubRelease = url.contains("github.com/") && url.contains("/releases/download/")
+            return when {
+                code == 404 || code == 410 || (code == 504 && githubRelease) -> NOT_PUBLISHED
+                code == 401 || code == 403 -> FORBIDDEN
+                code >= 500 -> SERVER
+                else -> OTHER
+            }
         }
     }
 }
+
+/** The catalogue fetch failed because of [error]; [code] is the HTTP status when there was one. */
+class CatalogueException(val error: CatalogueError, val code: Int? = null, detail: String? = null) :
+    IOException("catalogue: $error${code?.let { " (HTTP $it)" } ?: ""}${detail?.let { ": $it" } ?: ""}")

@@ -3,7 +3,9 @@ package io.github.tewnut.poicapture.core
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -32,7 +34,7 @@ class PhotoRolesTest {
         assertEquals(listOf("front", "menu"), ok.roles.map { it.id })
         assertEquals("front", ok.cover.id)
         assertEquals("Thực đơn", ok.label("menu"))
-        assertEquals("Biển hiệu", ok.label("sign"))   // an id from the default list still has a label
+        assertEquals("Sign", ok.label("sign"))   // an id from the default list still has a label
         assertEquals("server", ok.source)
         // the cover defaults to the first kind
         assertEquals("x", PhotoRoles.fromJson(JSONArray("""[{"id":"x","label":"X"},{"id":"y","label":"Y"}]"""), "local")!!.cover.id)
@@ -65,6 +67,16 @@ class PhotoRolesTest {
         val poi = Exporter.poisWithPhotos(store, "s_n", photos).single()
         assertEquals("p_1", poi.getString("cover"))
         assertEquals(2, poi.getJSONArray("photos").length())
+    }
+
+    @Test fun builtInKindsAreTranslatedUnlessRenamedOrFromTheServer() {
+        val facade = PhotoRoles.DEFAULT.roles.first()
+        assertTrue(PhotoRoles.isBuiltIn(facade, "default"))
+        assertTrue(PhotoRoles.isBuiltIn(facade, "local"))                                  // only reordered / trimmed
+        assertTrue(PhotoRoles.isBuiltIn(PhotoRole("facade", "Mặt tiền"), "local"))  // saved before the translation
+        assertFalse(PhotoRoles.isBuiltIn(PhotoRole("facade", "Shopfront"), "local"))       // renamed by the contributor
+        assertFalse(PhotoRoles.isBuiltIn(facade, "server"))                                // the team's own wording
+        assertFalse(PhotoRoles.isBuiltIn(PhotoRole("menu", "Menu"), "default"))
     }
 
     @Test fun coverFollowsTheSessionConfig() {

@@ -51,7 +51,7 @@ class PoiModeTest {
         val p2 = pois.getJSONObject(1)
         assertTrue(p2.getBoolean("noPhotos"))
         assertEquals("gps", p2.getJSONObject("position").getString("source"))
-        assertTrue(Exporter.fileName(s).startsWith("poi-capture_dia-diem_"))
+        assertTrue(Exporter.fileName(s).startsWith("poi-capture_place_"))
     }
 
     @Test fun marksInASweepCollectThePhotosAroundThem() {

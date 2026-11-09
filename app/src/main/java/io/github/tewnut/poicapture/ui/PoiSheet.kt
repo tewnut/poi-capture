@@ -34,6 +34,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import io.github.tewnut.poicapture.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -53,7 +56,8 @@ import io.github.tewnut.poicapture.core.LatLon
 import io.github.tewnut.poicapture.core.PhotoRoles
 import io.github.tewnut.poicapture.core.PoiStatus
 
-private val CATEGORIES = listOf("Quán ăn", "Cà phê", "Tạp hoá", "Thời trang", "Điện thoại", "Sửa xe", "Thuốc", "Làm đẹp", "Dịch vụ")
+/** Category chips: the ids of SignText (exported as `fields.category`), shown with their translated labels. */
+private val CATEGORIES = listOf("restaurant", "cafe", "grocery", "fashion", "phone_shop", "vehicle_repair", "pharmacy", "beauty", "services")
 
 /**
  * What the contributor typed for the current place. Lives in the capture screen, so "Chụp thêm" (which closes the sheet
@@ -90,60 +94,63 @@ fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: P
     Row(Modifier.fillMaxSize().background(Color.White).safeDrawingPadding()) {
         Box(Modifier.weight(1f).fillMaxHeight()) {
             PinMap(d.pin, centre, onPin = { d.pin = it; d.moved = true }, modifier = Modifier.fillMaxSize().clipToBounds())
-            Pill(when {
-                    d.moved -> "Đã đặt ghim lên tòa nhà ✓"
-                    d.pin == null -> "Chưa có GPS: chạm vào tòa nhà để đặt ghim"
-                    else -> "Chạm hoặc kéo ghim lên đúng tòa nhà"
-                },
+            Pill(stringResource(when {
+                    d.moved -> R.string.poi_pin_set
+                    d.pin == null -> R.string.poi_pin_no_gps
+                    else -> R.string.poi_pin_move
+                }),
                 Modifier.align(Alignment.TopCenter).padding(10.dp), size = 13.sp,
                 dot = if (d.moved) Color(0xFF47CD89) else Color(0xFFFEC84B))
         }
         // everything scrolls (landscape screens are short, the keyboard takes half); the two actions stay pinned
         Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 16.dp, vertical = 8.dp)) {
           Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Địa điểm $number", fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Palette.Ink)
+            Text(stringResource(R.string.poi_title, number), fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Palette.Ink)
             val tagged = roles.keys.any { it.isNotEmpty() }
-            if (!tagged) Hint(roles.values.sum().let { if (it == 0) "Chưa có ảnh" else "$it ảnh" })
+            val noPhotos = stringResource(R.string.poi_no_photos)
+            if (!tagged) Hint(roles.values.sum().let { if (it == 0) noPhotos else pluralStringResource(R.plurals.poi_photos, it, it) })
             else Hint(roles.entries.sortedBy { e -> photoRoles.roles.indexOfFirst { it.id == e.key }.let { if (it < 0) 99 else it } }
-                .joinToString(" · ") { "${photoRoles.label(it.key)} ${it.value}" }.ifEmpty { "Chưa có ảnh" })
-            if (tagged && noFront) Hint("Chưa có ảnh “${photoRoles.cover.label}” (ảnh bìa). Nên chụp thêm một ảnh.", color = Palette.Amber)
-            Text("Không cần nhập gì: chỉ cần đặt ghim đúng tòa nhà.", color = Palette.Green, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                .joinToString(" · ") { "${roleLabel(ctx, photoRoles, it.key)} ${it.value}" }.ifEmpty { noPhotos })
+            if (tagged && noFront) Hint(stringResource(R.string.poi_no_cover, roleLabel(photoRoles, photoRoles.cover)), color = Palette.Amber)
+            Text(stringResource(R.string.poi_nothing_to_type), color = Palette.Green, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Column(Modifier.fillMaxWidth().background(Palette.GreenLight, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
                 .padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Đọc được từ ảnh", fontWeight = FontWeight.Bold, color = Palette.Ink)
-                val rows = listOfNotNull(read?.name?.let { "Tên: $it" }, read?.phones?.takeIf { it.isNotEmpty() }?.let { "Điện thoại: ${it.joinToString(", ")}" },
-                    read?.houseNumber?.let { "Số nhà: $it" }, read?.category?.let { "Loại hình: $it" })
+                Text(stringResource(R.string.poi_read_title), fontWeight = FontWeight.Bold, color = Palette.Ink)
+                val rows = listOfNotNull(read?.name?.let { ctx.getString(R.string.poi_read_name, it) },
+                    read?.phones?.takeIf { it.isNotEmpty() }?.let { ctx.getString(R.string.poi_read_phone, it.joinToString(", ")) },
+                    read?.houseNumber?.let { ctx.getString(R.string.poi_read_house, it) },
+                    read?.category?.let { ctx.getString(R.string.poi_read_category, categoryLabel(ctx, it)) })
                 when {
-                    reading -> Hint("Đang đọc chữ trên ảnh…")
-                    rows.isEmpty() -> Hint("Máy chưa đọc được gì. Hệ thống sẽ đọc lại ảnh trên máy chủ.")
+                    reading -> Hint(stringResource(R.string.poi_reading))
+                    rows.isEmpty() -> Hint(stringResource(R.string.poi_read_nothing))
                     else -> rows.forEach { Text(it, color = Palette.Ink) }
                 }
-                Hint("Gợi ý cho hệ thống; tên, địa chỉ, loại hình được kiểm tra lại với ảnh và bản đồ.")
+                Hint(stringResource(R.string.poi_read_hint))
             }
-            Text("Tình trạng", fontWeight = FontWeight.SemiBold, color = Palette.Ink)
+            Text(stringResource(R.string.poi_status), fontWeight = FontWeight.SemiBold, color = Palette.Ink)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (st in PoiStatus.entries) FilterChip(d.status == st, { d.status = st }, { Text(st.label) })
+                for (st in PoiStatus.entries) FilterChip(d.status == st, { d.status = st }, { Text(stringResource(st.labelRes())) })
             }
             var more by remember { mutableStateOf(d.fields().values.any { it.isNotBlank() }) }
             androidx.compose.material3.TextButton(onClick = { more = !more }) {
-                Text(if (more) "▾ Ghi chú thêm" else "▸ Ghi chú thêm (không bắt buộc: biển bị che, không có biển…)")
+                Text(stringResource(if (more) R.string.poi_more_open else R.string.poi_more_closed))
             }
             if (more) {
-                OutlinedTextField(d.note, { d.note = it }, label = { Text("Ghi chú cho hệ thống") }, modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("vd: biển hiệu bị cây che, quán không có biển") })
-                OutlinedTextField(d.name, { d.name = it }, label = { Text("Tên (nếu ảnh không thấy)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(d.phone, { d.phone = it }, label = { Text("Số điện thoại") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                OutlinedTextField(d.note, { d.note = it }, label = { Text(stringResource(R.string.poi_note)) }, modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(stringResource(R.string.poi_note_placeholder)) })
+                OutlinedTextField(d.name, { d.name = it }, label = { Text(stringResource(R.string.poi_name)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(d.phone, { d.phone = it }, label = { Text(stringResource(R.string.poi_phone)) }, singleLine = true, modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone))
-                OutlinedTextField(d.house, { d.house = it }, label = { Text("Số nhà") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(d.house, { d.house = it }, label = { Text(stringResource(R.string.poi_house)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (c in CATEGORIES) FilterChip(d.category == c, { d.category = if (d.category == c) "" else c }, { Text(c) })
+                    for (c in CATEGORIES) FilterChip(d.category == c, { d.category = if (d.category == c) "" else c }, { Text(categoryLabel(c)) })
                 }
             }
           }
             Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onMore, modifier = Modifier.height(48.dp)) { Text("Chụp thêm", maxLines = 1) }
+                OutlinedButton(onClick = onMore, modifier = Modifier.height(48.dp)) { Text(stringResource(R.string.poi_shoot_more), maxLines = 1) }
                 Button(onClick = { onSave(d.pin, d.moved, d.fields(), d.status) }, modifier = Modifier.weight(1f).height(48.dp)) {
-                    Text("Lưu & tiếp", fontWeight = FontWeight.Bold, maxLines = 1)
+                    Text(stringResource(R.string.poi_save_next), fontWeight = FontWeight.Bold, maxLines = 1)
                 }
             }
         }

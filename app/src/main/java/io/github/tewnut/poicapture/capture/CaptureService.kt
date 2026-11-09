@@ -58,7 +58,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import io.github.tewnut.poicapture.AppLanguage
 import io.github.tewnut.poicapture.MainActivity
+import io.github.tewnut.poicapture.R
+import io.github.tewnut.poicapture.core.CaptureWarning
+import io.github.tewnut.poicapture.ui.UiText
+import io.github.tewnut.poicapture.ui.roadText
+import io.github.tewnut.poicapture.ui.wayLabel
+import io.github.tewnut.poicapture.ui.toUiText
 import io.github.tewnut.poicapture.core.AutoShutter
 import io.github.tewnut.poicapture.core.Coverage
 import io.github.tewnut.poicapture.core.CameraSide
@@ -108,8 +115,8 @@ data class CaptureUi(
     val trackPoints: Int = 0,
     val running: Boolean = false,
     val recording: Boolean = false,
-    val warnings: List<String> = emptyList(),
-    val error: String = "",
+    val warnings: List<UiText> = emptyList(),
+    val error: UiText? = null,           // null = no error
     val lastPhoto: String? = null,
     val carrierPhase: Boolean? = null,   // null until raw GNSS arrives
     val hot: Boolean = false,
@@ -127,7 +134,7 @@ data class CaptureUi(
     val poiRoles: Map<String, Int> = emptyMap(),   // photos of the current place per role
     val poiRead: SignReading? = null,  // what the phone read on its photos (hint)
     val reading: Int = 0,                // photos waiting for / in on-device text reading
-    val readNote: String? = null,        // e.g. a sign photo with no readable text: shoot closer
+    val readNote: UiText? = null,        // e.g. a sign photo with no readable text: shoot closer
     // sweep mode: "Đánh dấu" taps
     val marks: Int = 0,
 )
@@ -206,6 +213,9 @@ class CaptureService : LifecycleService() {
 
     // ---------- lifecycle ----------
 
+    // Android 11-12: the language picked in Profile, for the notification (13+: the system applies it)
+    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(AppLanguage.wrap(newBase))
+
     override fun onBind(intent: Intent): IBinder {
         super.onBind(intent)
         return binder
@@ -251,12 +261,12 @@ class CaptureService : LifecycleService() {
 
     private fun goForeground() {
         val nm = getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(NotificationChannel(CHANNEL, "Đang ghi hình", NotificationManager.IMPORTANCE_LOW))
+        nm.createNotificationChannel(NotificationChannel(CHANNEL, getString(R.string.notif_channel_recording), NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
-            .setContentTitle("POI Capture")
-            .setContentText("Đang ghi: ${session.road.label}")
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.notif_recording, roadText(this, session.road)))
             .setOngoing(true)
             .setContentIntent(open)
             .build()
@@ -273,7 +283,7 @@ class CaptureService : LifecycleService() {
         val lm = getSystemService(LOCATION_SERVICE) as LocationManager
         this.lm = lm
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            _state.update { it.copy(gps = "error", error = "GPS: chưa cấp quyền vị trí chính xác") }
+            _state.update { it.copy(gps = "error", error = UiText(R.string.service_gps_permission)) }
         } else {
             lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener, Looper.getMainLooper())
             gnss = GnssRecorder(lm, store.gnssFile(session.id)).also { it.start(io) }
@@ -309,15 +319,17 @@ class CaptureService : LifecycleService() {
                 speedKmh = fp.speedKmh?.roundToInt(),
                 roadDistanceM = fp.match?.distanceM?.roundToInt(),
                 trackPoints = it.trackPoints + 1,
-                warnings = if (session.kind == SessionKind.POI) fp.warnings().filter { w -> w.startsWith("GPS") } + (if (hot) listOf("Máy đang nóng: che nắng hoặc nghỉ một lúc") else emptyList())
-                else mountWarning() + fp.warnings() +
-                    (if (System.currentTimeMillis() - lastMissedShotMs < 10_000) listOf("Máy chụp không kịp: chạy chậm lại để không bỏ sót mặt tiền") else emptyList()) + (if (hot) listOf("Máy đang nóng: che nắng hoặc nghỉ một lúc") else emptyList()),
-                error = if (it.error.startsWith("GPS")) "" else it.error,
+                warnings = if (session.kind == SessionKind.POI) fp.warnings().filter { w -> w is CaptureWarning.WeakGps }.map { w -> w.toUiText() } +
+                    (if (hot) listOf(UiText(R.string.service_hot)) else emptyList())
+                else mountWarning() + fp.warnings().map { w -> w.toUiText() } +
+                    (if (System.currentTimeMillis() - lastMissedShotMs < 10_000) listOf(UiText(R.string.service_missed_shot)) else emptyList()) +
+                    (if (hot) listOf(UiText(R.string.service_hot)) else emptyList()),
+                error = if (it.error?.res == R.string.service_gps_permission) null else it.error,
                 carrierPhase = g?.takeIf { r -> r.epochs.get() > 0 }?.let { r -> r.adrValid.get() > 0 },
                 hot = hot,
             )
         }
-        _state.update { it.copy(roadName = fp.roadName(), simulated = it.simulated || isSimulated(l)) }
+        _state.update { it.copy(roadName = fp.roadWay()?.let { w -> wayLabel(this, w) }, simulated = it.simulated || isSimulated(l)) }
         if (session.road.auto) {
             updateMatcher(f.ll, force = false)
             loadRoadsAround(f.ll)
@@ -332,9 +344,9 @@ class CaptureService : LifecycleService() {
         _state.update { it.copy(maxSpeedKmh = plan.maxSpeedKmh, photoEveryM = plan.photoEveryM) }
     }
 
-    private fun mountWarning(): List<String> = when (_state.value.mount) {
-        "front" -> listOf("Camera đang nhìn về phía TRƯỚC: xoay camera sang dãy nhà cần ghi")
-        "back" -> listOf("Camera đang nhìn về phía SAU: xoay camera sang dãy nhà cần ghi")
+    private fun mountWarning(): List<UiText> = when (_state.value.mount) {
+        "front" -> listOf(UiText(R.string.service_mount_front))
+        "back" -> listOf(UiText(R.string.service_mount_back))
         else -> emptyList()
     }
 
@@ -379,7 +391,7 @@ class CaptureService : LifecycleService() {
         matcherCell = c
         val near = (-1..1).flatMap { dx -> (-1..1).mapNotNull { dy -> cellWays[RoadCells.Cell(c.x + dx, c.y + dy)] } }.flatten()
         fp.setWays(near.distinctBy { it.key })
-        _state.update { it.copy(roadName = fp.roadName()) }
+        _state.update { it.copy(roadName = fp.roadWay()?.let { w -> wayLabel(this, w) }) }
     }
 
     /** Auto mode: load the road data of the grid cells around p that are not loaded yet (one at a time, with backoff). */
@@ -459,7 +471,7 @@ class CaptureService : LifecycleService() {
                 // CameraX reopens the camera by itself after a phone call / another app: follow its state
                 cam.cameraInfo.cameraState.observe(this) { cs -> onCameraState(cs) }
             } catch (e: Exception) {
-                _state.update { it.copy(camera = "error", error = "Không mở được camera: ${e.message}") }
+                _state.update { it.copy(camera = "error", error = UiText(R.string.service_camera_failed, e.message ?: e.javaClass.simpleName)) }
             }
         }, ContextCompat.getMainExecutor(this))
     }
@@ -468,7 +480,8 @@ class CaptureService : LifecycleService() {
         val open = cs.type == CameraState.Type.OPEN
         _state.update {
             it.copy(camera = if (open) "on" else if (it.camera == "off" || it.camera == "error") it.camera else "lost",
-                error = if (cs.error != null && !open) "Camera bị gián đoạn (mã ${cs.error?.code}), đang chờ mở lại…" else if (open && it.error.startsWith("Camera")) "" else it.error)
+                error = if (cs.error != null && !open) UiText(R.string.service_camera_interrupted, cs.error?.code ?: 0)
+                    else if (open && it.error?.res == R.string.service_camera_interrupted) null else it.error)
         }
         if (open && restartVideoWhenCameraOpens && _state.value.running) {
             restartVideoWhenCameraOpens = false
@@ -563,7 +576,7 @@ class CaptureService : LifecycleService() {
 
             override fun onError(e: ImageCaptureException) {
                 shooting = false
-                _state.update { it.copy(error = "Chụp lỗi: ${e.message}") }
+                _state.update { it.copy(error = UiText(R.string.service_shot_failed, e.message ?: e.javaClass.simpleName)) }
             }
         })
     }
@@ -590,10 +603,10 @@ class CaptureService : LifecycleService() {
                 else it.copy(reading = (it.reading - 1).coerceAtLeast(0), poiRead = merged,
                     readNote = when {
                         r == null -> null
-                        textRole && r.empty -> "Chưa đọc được chữ trên ảnh vừa chụp. Thử chụp gần hơn, thẳng hơn, không bị loá."
+                        textRole && r.empty -> UiText(R.string.service_no_text_photo)
                         // no kinds asked: warn when none of the place's photos has readable text (sign missing or blurred)
                         session.photoRoles == null && merged == null && photosOfPlace >= 2 ->
-                            "Chưa đọc được chữ nào trên ảnh của địa điểm này. Nên chụp biển hiệu gần hơn, thẳng hơn."
+                            UiText(R.string.service_no_text_place)
                         else -> null
                     })
             }

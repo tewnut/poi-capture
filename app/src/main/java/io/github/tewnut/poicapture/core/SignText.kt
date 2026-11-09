@@ -87,24 +87,28 @@ object SignText {
         return null
     }
 
-    /** Category keywords (folded); the first category whose keyword appears wins, in this order. */
+    /**
+     * Category keywords (folded; Vietnamese, as written on signs) per stable category id. The id is exported
+     * (`signRead.category`) and the UI shows a translated label for it. The first category whose keyword appears wins,
+     * in this order.
+     */
     val CATEGORY_KEYWORDS: List<Pair<String, List<String>>> = listOf(
-        "Nhà thuốc" to listOf("nha thuoc", "quay thuoc", "pharmacy", "duoc pham", "thuoc tay"),
-        "Cà phê" to listOf("ca phe", "cafe", "caphe", "coffee", "cofe"),
-        "Trà sữa, đồ uống" to listOf("tra sua", "milk tea", "tra chanh", "nuoc mia", "sinh to", "nuoc ep", "bubble tea"),
-        "Quán ăn" to listOf("pho", "bun", "com", "banh mi", "lau", "nuong", "quan an", "mi quang", "hu tieu", "chao", "mien",
+        "pharmacy" to listOf("nha thuoc", "quay thuoc", "pharmacy", "duoc pham", "thuoc tay"),
+        "cafe" to listOf("ca phe", "cafe", "caphe", "coffee", "cofe"),
+        "drinks" to listOf("tra sua", "milk tea", "tra chanh", "nuoc mia", "sinh to", "nuoc ep", "bubble tea"),
+        "restaurant" to listOf("pho", "bun", "com", "banh mi", "lau", "nuong", "quan an", "mi quang", "hu tieu", "chao", "mien",
             "banh cuon", "xoi", "oc", "ga ran", "bit tet", "an vat", "nha hang", "restaurant", "quan nhau", "bia hoi", "kitchen", "food"),
-        "Tạp hoá" to listOf("tap hoa", "bach hoa", "minimart", "mini mart", "sieu thi", "cua hang tien loi", "mart"),
-        "Sửa xe" to listOf("sua xe", "rua xe", "va lop", "va xe", "thay nhot", "phu tung", "garage", "gara"),
-        "Điện thoại" to listOf("dien thoai", "mobile", "phu kien", "sua dien thoai", "sim so", "smartphone"),
-        "Làm đẹp" to listOf("salon", "cat toc", "toc", "nail", "spa", "my pham", "lam dep", "barber", "goi dau", "massage"),
-        "Thời trang" to listOf("thoi trang", "fashion", "quan ao", "giay dep", "shop", "boutique", "may do", "tui xach"),
-        "Khách sạn" to listOf("khach san", "nha nghi", "hotel", "homestay", "motel", "hostel"),
-        "Ngân hàng" to listOf("ngan hang", "bank", "atm"),
-        "Giáo dục" to listOf("trung tam", "tieng anh", "english", "hoc", "truong", "mam non", "academy"),
-        "Y tế" to listOf("phong kham", "nha khoa", "benh vien", "clinic", "dental", "xet nghiem"),
-        "Điện máy, điện tử" to listOf("dien may", "dien tu", "dien lanh", "may tinh", "laptop", "camera"),
-        "Vật liệu, kim khí" to listOf("vat lieu", "kim khi", "son ", "gach", "thiet bi ve sinh", "dien nuoc"),
+        "grocery" to listOf("tap hoa", "bach hoa", "minimart", "mini mart", "sieu thi", "cua hang tien loi", "mart"),
+        "vehicle_repair" to listOf("sua xe", "rua xe", "va lop", "va xe", "thay nhot", "phu tung", "garage", "gara"),
+        "phone_shop" to listOf("dien thoai", "mobile", "phu kien", "sua dien thoai", "sim so", "smartphone"),
+        "beauty" to listOf("salon", "cat toc", "toc", "nail", "spa", "my pham", "lam dep", "barber", "goi dau", "massage"),
+        "fashion" to listOf("thoi trang", "fashion", "quan ao", "giay dep", "shop", "boutique", "may do", "tui xach"),
+        "hotel" to listOf("khach san", "nha nghi", "hotel", "homestay", "motel", "hostel"),
+        "bank" to listOf("ngan hang", "bank", "atm"),
+        "education" to listOf("trung tam", "tieng anh", "english", "hoc", "truong", "mam non", "academy"),
+        "health" to listOf("phong kham", "nha khoa", "benh vien", "clinic", "dental", "xet nghiem"),
+        "electronics" to listOf("dien may", "dien tu", "dien lanh", "may tinh", "laptop", "camera"),
+        "hardware" to listOf("vat lieu", "kim khi", "son ", "gach", "thiet bi ve sinh", "dien nuoc"),
     )
 
     fun category(text: String): String? {

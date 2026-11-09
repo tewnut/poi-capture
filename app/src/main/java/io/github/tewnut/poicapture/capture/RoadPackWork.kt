@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.core.CatalogueError
+import io.github.tewnut.poicapture.core.CatalogueException
 import io.github.tewnut.poicapture.core.UploadJob
 import io.github.tewnut.poicapture.net.RoadSource
 import java.io.File
@@ -61,11 +62,11 @@ class RoadPackWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 }
             }
             c.disconnect()
-            if (sha.isNotBlank() && UploadJob.sha256(part) != sha) { part.delete(); throw IOException("sai checksum, tải lại") }
+            if (sha.isNotBlank() && UploadJob.sha256(part) != sha) { part.delete(); throw IOException("checksum mismatch, downloading again") }
             packs.install(part)
             Result.success()
         } catch (e: Exception) {
-            if (runAttemptCount >= 5) { part.delete(); Result.failure(workDataOf("error" to (e.message ?: "lỗi"))) } else Result.retry()
+            if (runAttemptCount >= 5) { part.delete(); Result.failure(workDataOf("error" to (e.message ?: e.javaClass.simpleName))) } else Result.retry()
         }
     }
 }
@@ -101,11 +102,11 @@ object RoadPackCatalogue {
             c.connectTimeout = 15_000
             c.readTimeout = 30_000
             val code = try { c.responseCode } catch (e: java.net.UnknownHostException) {
-                throw IOException("không có mạng hoặc sai địa chỉ (${e.message}).")
+                throw CatalogueException(CatalogueError.OFFLINE, detail = e.message)
             } catch (e: java.net.SocketTimeoutException) {
-                throw IOException("máy chủ nguồn gói không phản hồi, thử lại sau.")
+                throw CatalogueException(CatalogueError.TIMEOUT)
             }
-            if (code != 200) throw IOException(CatalogueError.forHttp(code, url))
+            if (code != 200) throw CatalogueException(CatalogueError.forHttp(code, url), code)
             val body = c.inputStream.bufferedReader().readText()
             val list = RoadSource.parseCatalogue(body, url)
             RoadSource.saveCatalogue(ctx, url, body)

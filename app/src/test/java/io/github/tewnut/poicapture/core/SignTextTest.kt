@@ -25,12 +25,12 @@ class SignTextTest {
     }
 
     @Test fun categoriesSurviveLostDiacritics() {
-        assertEquals("Quán ăn", SignText.category("PHỞ BÒ GIA TRUYỀN"))
-        assertEquals("Quán ăn", SignText.category("PHO BO GIA TRUYEN"))
-        assertEquals("Cà phê", SignText.category("Cafe Giảng"))
-        assertEquals("Nhà thuốc", SignText.category("NHÀ THUỐC LONG CHÂU"))
-        assertEquals("Tạp hoá", SignText.category("Tạp Hoá Minh Anh"))
-        assertEquals("Sửa xe", SignText.category("SỬA XE - VÁ LỐP"))
+        assertEquals("restaurant", SignText.category("PHỞ BÒ GIA TRUYỀN"))
+        assertEquals("restaurant", SignText.category("PHO BO GIA TRUYEN"))
+        assertEquals("cafe", SignText.category("Cafe Giảng"))
+        assertEquals("pharmacy", SignText.category("NHÀ THUỐC LONG CHÂU"))
+        assertEquals("grocery", SignText.category("Tạp Hoá Minh Anh"))
+        assertEquals("vehicle_repair", SignText.category("SỬA XE - VÁ LỐP"))
         assertNull(SignText.category("Minh Anh"))
         // words, not substrings: "bun" is not in "bunny"
         assertNull(SignText.category("Bunny house"))
@@ -48,7 +48,7 @@ class SignTextTest {
         assertEquals("PHỞ THÌN", r.name)
         assertEquals(listOf("0912345678"), r.phones)
         assertEquals("13", r.houseNumber)
-        assertEquals("Quán ăn", r.category)
+        assertEquals("restaurant", r.category)
         // round trip through the export JSON
         val back = SignReading.fromJson(r.toJson())!!
         assertEquals(r.name, back.name)
@@ -62,7 +62,7 @@ class SignTextTest {
         val m = SignText.merge(listOf(front, SignText.read(emptyList()), info))!!
         assertEquals("TẠP HOÁ MINH ANH", m.name)
         assertEquals(listOf("0987654321"), m.phones)
-        assertEquals("Tạp hoá", m.category)
+        assertEquals("grocery", m.category)
         assertNull(SignText.merge(listOf(SignText.read(emptyList()))))
     }
 }

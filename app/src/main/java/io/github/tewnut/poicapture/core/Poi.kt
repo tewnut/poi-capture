@@ -15,8 +15,8 @@ enum class SessionKind(val json: String) {
 }
 
 /** Status of a place as seen on site. */
-enum class PoiStatus(val json: String, val label: String) {
-    NEW("new", "Mới"), EXISTS("exists", "Đã có trên bản đồ"), CLOSED("closed", "Đã đóng cửa"), MOVED("moved", "Đã chuyển đi");
+enum class PoiStatus(val json: String) {
+    NEW("new"), EXISTS("exists"), CLOSED("closed"), MOVED("moved");
 
     companion object {
         fun of(s: String?) = entries.firstOrNull { it.json == s } ?: NEW

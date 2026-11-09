@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import io.github.tewnut.poicapture.capture.CaptureService
@@ -62,6 +63,9 @@ import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
+    // Android 11-12: the language picked in Profile (13+: the system applies the per-app language itself)
+    override fun attachBaseContext(newBase: Context) = super.attachBaseContext(AppLanguage.wrap(newBase))
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()   // logo on green while starting; before super.onCreate
         // dark status-bar icons on the light app background (they were white on white before)
@@ -195,8 +199,8 @@ private fun App() {
         BackHandler { mapOf = null }
         Column(Modifier.fillMaxSize().safeDrawingPadding()) {
             Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { mapOf = null }) { Text("← Đã ghi") }
-                Text("Vị trí ảnh", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                TextButton(onClick = { mapOf = null }) { Text(stringResource(R.string.map_back)) }
+                Text(stringResource(R.string.map_title), fontWeight = FontWeight.Bold, fontSize = 18.sp)
             }
             SessionMap(ms, refresh = null, live = false, modifier = Modifier.weight(1f).fillMaxWidth())
         }
@@ -207,9 +211,9 @@ private fun App() {
             NavigationBar(containerColor = Color.White) {
                 val colors = NavigationBarItemDefaults.colors(indicatorColor = Palette.GreenLight, selectedIconColor = Palette.Green,
                     selectedTextColor = Palette.Green)
-                NavigationBarItem(tab == "new", { tab = "new" }, { Icon(Icons.Filled.Add, null) }, label = { Text("Ghi mới") }, colors = colors)
-                NavigationBarItem(tab == "sessions", { tab = "sessions" }, { Icon(Icons.AutoMirrored.Filled.List, null) }, label = { Text("Đã ghi") }, colors = colors)
-                NavigationBarItem(tab == "profile", { tab = "profile" }, { Icon(Icons.Filled.Person, null) }, label = { Text("Hồ sơ") }, colors = colors)
+                NavigationBarItem(tab == "new", { tab = "new" }, { Icon(Icons.Filled.Add, null) }, label = { Text(stringResource(R.string.nav_new)) }, colors = colors)
+                NavigationBarItem(tab == "sessions", { tab = "sessions" }, { Icon(Icons.AutoMirrored.Filled.List, null) }, label = { Text(stringResource(R.string.nav_sessions)) }, colors = colors)
+                NavigationBarItem(tab == "profile", { tab = "profile" }, { Icon(Icons.Filled.Person, null) }, label = { Text(stringResource(R.string.nav_profile)) }, colors = colors)
             }
         },
     ) { pad ->
