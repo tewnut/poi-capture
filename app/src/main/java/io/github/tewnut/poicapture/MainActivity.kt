@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,7 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -40,6 +41,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -52,18 +54,19 @@ import org.osmdroid.config.Configuration
 import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.core.Settings
 import io.github.tewnut.poicapture.core.PhotoRoles
-import io.github.tewnut.poicapture.core.Vehicle
 import io.github.tewnut.poicapture.ui.CaptureScreen
 import io.github.tewnut.poicapture.ui.Palette
-import io.github.tewnut.poicapture.ui.ProfileScreen
+import io.github.tewnut.poicapture.ui.SettingsScreen
 import io.github.tewnut.poicapture.ui.SessionsScreen
 import io.github.tewnut.poicapture.ui.SetupScreen
+import io.github.tewnut.poicapture.ui.AccessGate
+import io.github.tewnut.poicapture.ui.rememberRequiredAccess
 import io.github.tewnut.poicapture.ui.OnboardingScreen
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
-    // Android 11-12: the language picked in Profile (13+: the system applies the per-app language itself)
+    // Android 11-12: the language picked in Settings (13+: the system applies the per-app language itself)
     override fun attachBaseContext(newBase: Context) = super.attachBaseContext(AppLanguage.wrap(newBase))
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,35 +121,19 @@ object Prefs {
     fun onboarded(ctx: Context): Boolean = sp(ctx).getBoolean("onboarded", false)
     fun setOnboarded(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("onboarded", v).apply()
 
-    /** Photo kinds of POI mode: the team's (server), the contributor's own list (Hồ sơ), else the built-in default. */
+    /** Photo kinds of POI mode: the contributor's own list (Settings), else the built-in default. */
     fun photoRoles(ctx: Context): PhotoRoles = sp(ctx).getString("photoRoles", null)?.let { s ->
         runCatching { JSONObject(s).let { PhotoRoles.fromJson(it, it.optString("source", "local")) } }.getOrNull()
     } ?: PhotoRoles.DEFAULT
     /**
-     * Ask the kind of each photo while shooting a place? Off by default (the server's agent tells a front from a sign or a
-     * menu by itself); on when the contributor wants it or the team's server sends its own list.
+     * Ask the kind of each photo while shooting a place? Off by default (the agent tells a front from a sign or a menu
+     * by itself); on when the contributor wants it.
      */
-    fun askPhotoRole(ctx: Context): Boolean = sp(ctx).getBoolean("askPhotoRole", false) || photoRoles(ctx).source == "server"
+    fun askPhotoRole(ctx: Context): Boolean = sp(ctx).getBoolean("askPhotoRole", false)
     fun setAskPhotoRole(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("askPhotoRole", v).apply()
     fun savePhotoRoles(ctx: Context, r: PhotoRoles?) = sp(ctx).edit().apply {
         if (r == null || r.source == "default") remove("photoRoles") else putString("photoRoles", r.toJson().toString())
     }.apply()
-
-    /**
-     * Fetch the team's config when a server API is set ({apiUrl}/config). A config from the server replaces the
-     * contributor's own list; when the server no longer sends one, the phone goes back to its default.
-     */
-    fun refreshConfig(ctx: Context): Boolean {
-        if (settings(ctx).apiUrl.isBlank()) {
-            if (photoRoles(ctx).source == "server") savePhotoRoles(ctx, null)
-            return false
-        }
-        val roles = io.github.tewnut.poicapture.capture.ServerApi.config(ctx) ?: return false
-        savePhotoRoles(ctx, roles)
-        return true
-    }
-    fun vehicle(ctx: Context): Vehicle = Vehicle.of(sp(ctx).getString("vehicle", null))
-    fun saveVehicle(ctx: Context, v: Vehicle) = sp(ctx).edit().putString("vehicle", v.json).apply()
 }
 
 /**
@@ -162,67 +149,61 @@ private fun App() {
     val ctx = LocalContext.current
     // first run: the onboarding (email, permissions, road data) comes first
     var onboarded by rememberSaveable { mutableStateOf(Prefs.onboarded(ctx)) }
-    var tab by rememberSaveable { mutableStateOf("new") }
+    // home (the sessions list) is the root; New session and Settings open on top of it and go back to it
+    var screen by rememberSaveable { mutableStateOf("home") }   // home | new | settings
     var capturing by rememberSaveable { mutableStateOf<String?>(null) }
     var mapOf by rememberSaveable { mutableStateOf<String?>(null) }
+    var mapTitle by rememberSaveable { mutableStateOf("") }   // the session's name, as in the list
 
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     LaunchedEffect(Unit) {
         // the app was reopened while a session is still recording in the background: go back to it
         CaptureService.activeSession.value?.let { capturing = it }
-        // sessions finished earlier (or cut off) that are not on the server yet; the team's config
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            io.github.tewnut.poicapture.capture.Uploads.enqueuePending(ctx)
-            runCatching { Prefs.refreshConfig(ctx) }
+    }
+    val access = rememberRequiredAccess()
+    LaunchedEffect(onboarded, access.permissionsOk) {
+        // the onboarding asks, with the reasons; camera + location are the gate's below. Notifications only: optional.
+        if (!onboarded || !access.permissionsOk || Build.VERSION.SDK_INT < 33) return@LaunchedEffect
+        if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            perms.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
         }
     }
-    LaunchedEffect(onboarded) {
-        if (!onboarded) return@LaunchedEffect   // the onboarding asks, with the reasons
-        val wanted = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (Build.VERSION.SDK_INT >= 33) wanted += Manifest.permission.POST_NOTIFICATIONS
-        val missing = wanted.filter { ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isNotEmpty()) perms.launch(missing.toTypedArray())
-    }
 
+    val unsupported = remember { io.github.tewnut.poicapture.capture.DeviceCheck.missing(ctx) }
+    if (unsupported.isNotEmpty()) {
+        io.github.tewnut.poicapture.ui.UnsupportedDevice(unsupported)
+        return
+    }
     if (!onboarded && capturing == null) {
-        OnboardingScreen(onDone = { onboarded = true; tab = "new" })
+        OnboardingScreen(onDone = { onboarded = true; screen = "home" })
+        return
+    }
+    // GPS is a must: no way into the app without precise location, the camera and the phone's location on.
+    // A session already recording keeps its screen (the service reports a lost GPS itself).
+    if (!access.ok && capturing == null) {
+        AccessGate(access)
         return
     }
 
     val sid = capturing
     if (sid != null) {
-        CaptureScreen(sid, onDone = { capturing = null; tab = "sessions" }, onCancel = { capturing = null; tab = "new" })
+        CaptureScreen(sid, onDone = { capturing = null; screen = "home" }, onCancel = { capturing = null; screen = "new" })
         return
     }
     val ms = mapOf
     if (ms != null) {
         BackHandler { mapOf = null }
-        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { mapOf = null }) { Text(stringResource(R.string.map_back)) }
-                Text(stringResource(R.string.map_title), fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            }
+        Column(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
+            io.github.tewnut.poicapture.ui.ScreenHeader(mapTitle.ifBlank { stringResource(R.string.map_title) }, onBack = { mapOf = null },
+                subtitle = stringResource(R.string.map_title).takeIf { mapTitle.isNotBlank() })
             SessionMap(ms, refresh = null, live = false, modifier = Modifier.weight(1f).fillMaxWidth())
         }
         return
     }
-    Scaffold(
-        bottomBar = {
-            NavigationBar(containerColor = Color.White) {
-                val colors = NavigationBarItemDefaults.colors(indicatorColor = Palette.GreenLight, selectedIconColor = Palette.Green,
-                    selectedTextColor = Palette.Green)
-                NavigationBarItem(tab == "new", { tab = "new" }, { Icon(Icons.Filled.Add, null) }, label = { Text(stringResource(R.string.nav_new)) }, colors = colors)
-                NavigationBarItem(tab == "sessions", { tab = "sessions" }, { Icon(Icons.AutoMirrored.Filled.List, null) }, label = { Text(stringResource(R.string.nav_sessions)) }, colors = colors)
-                NavigationBarItem(tab == "profile", { tab = "profile" }, { Icon(Icons.Filled.Person, null) }, label = { Text(stringResource(R.string.nav_profile)) }, colors = colors)
-            }
-        },
-    ) { pad ->
-        Box(Modifier.fillMaxSize().padding(pad)) {
-            when (tab) {
-                "sessions" -> SessionsScreen(onNew = { tab = "new" }, onOpenMap = { mapOf = it })
-                "profile" -> ProfileScreen(onDone = { tab = "new" }, onReplayOnboarding = { Prefs.setOnboarded(ctx, false); onboarded = false })
-                else -> SetupScreen(onStart = { capturing = it }, onOpenProfile = { tab = "profile" })
-            }
-        }
+    when (screen) {
+        "new" -> SetupScreen(onStart = { capturing = it }, onOpenSettings = { screen = "settings" }, onBack = { screen = "home" })
+        "settings" -> SettingsScreen(onBack = { screen = "home" },
+            onReplayOnboarding = { Prefs.setOnboarded(ctx, false); onboarded = false })
+        else -> SessionsScreen(onNew = { screen = "new" }, onOpenMap = { id, title -> mapTitle = title; mapOf = id }, onOpenSettings = { screen = "settings" })
     }
 }

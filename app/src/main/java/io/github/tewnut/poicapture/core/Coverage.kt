@@ -64,23 +64,5 @@ object Coverage {
         return !(b.getDouble(2) < s || b.getDouble(0) > n || b.getDouble(3) < w || b.getDouble(1) > e)
     }
 
-    /** Team coverage from the server API (GeoJSON FeatureCollection of LineString / Point). */
-    fun fromGeoJson(body: String): Pair<List<List<LatLon>>, List<LatLon>> {
-        val lines = mutableListOf<List<LatLon>>()
-        val points = mutableListOf<LatLon>()
-        val fs = JSONObject(body).optJSONArray("features") ?: return lines to points
-        for (i in 0 until fs.length()) {
-            val g = fs.getJSONObject(i).optJSONObject("geometry") ?: continue
-            val c = g.optJSONArray("coordinates") ?: continue
-            when (g.optString("type")) {
-                "LineString" -> lines += (0 until c.length()).map { j -> c.getJSONArray(j).let { LatLon(it.getDouble(1), it.getDouble(0)) } }
-                "MultiLineString" -> for (k in 0 until c.length()) c.getJSONArray(k).let { l ->
-                    lines += (0 until l.length()).map { j -> l.getJSONArray(j).let { LatLon(it.getDouble(1), it.getDouble(0)) } } }
-                "Point" -> points += LatLon(c.getDouble(1), c.getDouble(0))
-            }
-        }
-        return lines to points
-    }
-
     private fun r6(d: Double) = Math.round(d * 1e6) / 1e6
 }

@@ -46,10 +46,8 @@ fun PhotoRolesCard() {
     var adding by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf("") }
     fun save(r: PhotoRoles) { roles = r; Prefs.savePhotoRoles(ctx, r) }
-    val fromServer = roles.source == "server"
 
     Hint(stringResource(R.string.roles_intro))
-    if (fromServer) Hint(stringResource(R.string.roles_from_server), color = Palette.Blue)
 
     for ((i, r) in roles.roles.withIndex()) {
         var menu by remember(r.id) { mutableStateOf(false) }
@@ -61,7 +59,7 @@ fun PhotoRolesCard() {
                 val hint = roleHint(roles, r)
                 if (hint.isNotBlank()) Hint(hint)
             }
-            if (!fromServer) Box {
+            Box {
                 TextButton(onClick = { menu = true }, modifier = Modifier.size(48.dp)) { Text("⋮", fontSize = 20.sp) }
                 DropdownMenu(menu, { menu = false }) {
                     if (i > 0) DropdownMenuItem({ Text(stringResource(R.string.roles_move_up)) }, { menu = false; save(roles.moved(r.id, -1)) })
@@ -81,16 +79,8 @@ fun PhotoRolesCard() {
     }
 
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (!fromServer) TextButton(onClick = { adding = true }) { Text(stringResource(R.string.roles_add)) }
-        if (!fromServer && roles.source != "default") TextButton(onClick = { save(PhotoRoles.DEFAULT); msg = "" }) { Text(stringResource(R.string.roles_reset)) }
-        if (Prefs.settings(ctx).apiUrl.isNotBlank()) TextButton(onClick = {
-            msg = ctx.getString(R.string.roles_fetching)
-            scope.launch {
-                val ok = withContext(Dispatchers.IO) { runCatching { Prefs.refreshConfig(ctx) }.getOrDefault(false) }
-                roles = Prefs.photoRoles(ctx)
-                msg = ctx.getString(if (ok) R.string.roles_updated else R.string.roles_no_server_config)
-            }
-        }) { Text(stringResource(R.string.roles_fetch)) }
+        TextButton(onClick = { adding = true }) { Text(stringResource(R.string.roles_add)) }
+        if (roles.source != "default") TextButton(onClick = { save(PhotoRoles.DEFAULT); msg = "" }) { Text(stringResource(R.string.roles_reset)) }
     }
     if (msg.isNotEmpty()) Hint(msg, color = Palette.Blue)
 

@@ -13,6 +13,8 @@ import android.location.LocationManager
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -70,7 +73,6 @@ import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.core.CapturePlan
 import io.github.tewnut.poicapture.core.Coverage
-import io.github.tewnut.poicapture.capture.ServerApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.osmdroid.views.overlay.Polyline
@@ -101,6 +103,7 @@ private fun deviceJson(ctx: Context): JSONObject {
         .put("gnssHardware", lm.gnssHardwareModelName ?: JSONObject.NULL)
         .put("gnssYear", lm.gnssYearOfHardware)
         .put("emulator", isEmulator())
+        .put("capabilities", io.github.tewnut.poicapture.capture.DeviceCheck.capabilities(ctx))
         .put("screen", "${dm.widthPixels}x${dm.heightPixels}")
         .put("lang", Locale.getDefault().toLanguageTag())
         .put("app", runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: JSONObject.NULL)
@@ -112,7 +115,7 @@ private fun deviceJson(ctx: Context): JSONObject {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
+fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val settings = remember { Prefs.settings(ctx) }
     val email = remember { Prefs.email(ctx) }
@@ -126,10 +129,9 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                 android.net.Uri.fromParts("package", ctx.packageName, null)))
         }
     }
-    // "đã quét": where this phone (and, with the server API, the team) already recorded, to go where nothing is yet
+    // "đã quét": where this phone already recorded, to go where nothing is yet
     var showCoverage by remember { mutableStateOf(true) }
     var mine by remember { mutableStateOf(CoverLayer()) }
-    var team by remember { mutableStateOf(CoverLayer()) }
     LaunchedEffect(Unit) {
         mine = withContext(Dispatchers.IO) {
             val store = CaptureService.store(ctx)
@@ -137,16 +139,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
             CoverLayer(covs.flatMap { Coverage.lines(it) }, covs.flatMap { Coverage.points(it) })
         }
     }
-    val teamCell = live?.let { RoadCells.cellOf(LatLon(it.lat, it.lon)) }
-    LaunchedEffect(teamCell) {
-        val c = teamCell ?: return@LaunchedEffect
-        val body = withContext(Dispatchers.IO) { ServerApi.coverage(ctx, c.south - 0.01, c.west - 0.01, c.north + 0.01, c.east + 0.01) } ?: return@LaunchedEffect
-        runCatching { Coverage.fromGeoJson(body) }.getOrNull()?.let { (l, p) -> team = CoverLayer(l, p) }
-    }
     var mode by remember { mutableStateOf(Mode.PHOTO_AUTO) }
     var kind by remember { mutableStateOf(SessionKind.SWEEP) }
-    var facade by remember { mutableStateOf(settings.facadeDistanceM) }
-    val plan = CapturePlan.of(facade)
     var recenter by remember { mutableIntStateOf(0) }
     var nearWays by remember { mutableStateOf<List<Way>?>(null) }
     var roadStatus by remember { mutableStateOf<Int?>(null) }   // string resource of the road data status, null = fine
@@ -187,20 +181,33 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
             else RoadSource.suggest(RoadSource.cachedCatalogue(ctx), l.lat, l.lon)
         }
     }
-    val currentRoad = live?.let { l -> nearWays?.let { ways ->
-        matchRoad(ways, LatLon(l.lat, l.lon))?.takeIf { it.distanceM <= 30 }?.let { m -> ways.firstOrNull { it.id == m.wayId }?.let { wayLabel(ctx, it) } }
+    val currentWay = live?.let { l -> nearWays?.let { ways ->
+        matchRoad(ways, LatLon(l.lat, l.lon))?.takeIf { it.distanceM <= 30 }?.let { m -> ways.firstOrNull { it.id == m.wayId } }
     } }
+    val currentRoad = currentWay?.let { wayLabel(ctx, it) }
+    // spacing and speed as the capture will start: from the type of this road (see CapturePlan.facadeForRoad)
+    val plan = CapturePlan.of(CapturePlan.facadeForRoad(currentWay?.highway))
 
-    val ready = Onboarding.isEmail(email)
+    val emailOk = Onboarding.isEmail(email)
+    // the same rule as the capture: Start only with a GPS fix from the last 5 s (and an email)
+    val ready = emailOk && live != null
 
-    Column(Modifier.fillMaxSize()) {
+    androidx.activity.compose.BackHandler(onBack = onBack)
+    Column(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
+        var info by remember { mutableStateOf(false) }
+        ScreenHeader(stringResource(R.string.home_new_session), onBack = onBack) {
+            androidx.compose.material3.IconButton(onClick = { info = true }) {
+                androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Outlined.Info, stringResource(R.string.setup_info_title), tint = Palette.Ink)
+            }
+        }
+        if (info) SetupInfo(plan.photoEveryM, plan.maxSpeedKmh) { info = false }
         // ---------- map ----------
         Box(Modifier.weight(0.38f).heightIn(min = 150.dp).fillMaxWidth()) {
-            LiveMap(settings.tileUrl, loc.fix, recenter, if (showCoverage) mine else CoverLayer(), if (showCoverage) team else CoverLayer(),
+            LiveMap(settings.tileUrl, loc.fix, recenter, if (showCoverage) mine else CoverLayer(),
                 Modifier.fillMaxSize().clipToBounds())
-            if (mine.lines.isNotEmpty() || mine.points.isNotEmpty() || team.lines.isNotEmpty()) {
+            if (mine.lines.isNotEmpty() || mine.points.isNotEmpty()) {
                 androidx.compose.material3.FilterChip(showCoverage, { showCoverage = !showCoverage },
-                    { Text(stringResource(if (team.lines.isNotEmpty()) R.string.setup_coverage_team else R.string.setup_coverage), fontSize = 12.sp) },
+                    { Text(stringResource(R.string.setup_coverage), fontSize = 12.sp) },
                     modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
                     colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(containerColor = Color.White, selectedContainerColor = Palette.GreenLight))
             }
@@ -209,11 +216,13 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                     LocStatus.NO_PERMISSION -> Pill(stringResource(R.string.setup_loc_no_permission), dot = Palette.Red)
                     LocStatus.APPROXIMATE_ONLY -> Pill(stringResource(R.string.setup_loc_approximate), dot = Palette.Red)
                     LocStatus.DISABLED -> Pill(stringResource(R.string.setup_loc_disabled), dot = Palette.Red)
-                    LocStatus.SEARCHING -> Pill(if (loc.satsSeen > 0) stringResource(R.string.setup_loc_searching_sats, loc.satsUsed, loc.satsSeen)
-                        else stringResource(R.string.setup_loc_searching), dot = Color(0xFFFEC84B))
+                    LocStatus.SEARCHING -> Pill(when {
+                            loc.satsSeen > 0 -> stringResource(R.string.setup_loc_searching_sats, loc.satsUsed, loc.satsSeen)
+                            loc.approx != null -> stringResource(R.string.setup_loc_network, loc.approx!!.accuracyM.roundToInt())
+                            else -> stringResource(R.string.setup_loc_searching)
+                        }, dot = Color(0xFFFEC84B))
                     LocStatus.OK -> live!!.let { l ->
-                        if (!l.gps) Pill(stringResource(R.string.setup_loc_network, l.accuracyM.roundToInt()), dot = Color(0xFFFEC84B))
-                        else if (l.accuracyM <= settings.maxAccuracyM) Pill(stringResource(R.string.setup_gps_good, l.accuracyM.roundToInt()), dot = Color(0xFF47CD89))
+                        if (l.accuracyM <= settings.maxAccuracyM) Pill(stringResource(R.string.setup_gps_good, l.accuracyM.roundToInt()), dot = Color(0xFF47CD89))
                         else Pill(stringResource(R.string.setup_gps_weak, l.accuracyM.roundToInt()), dot = Color(0xFFFEC84B))
                     }
                 }
@@ -232,23 +241,19 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
             Column(Modifier.fillMaxSize()) {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    LocationHelp(loc)
+                    // only when there is something to do (permission, location off); the map shows the satellites
+                    if (loc.status != LocStatus.SEARCHING) LocationHelp(loc)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         KindCard(stringResource(R.string.setup_sweep_title), stringResource(R.string.setup_sweep_sub),
                             kind == SessionKind.SWEEP, Modifier.weight(1f)) { kind = SessionKind.SWEEP }
                         KindCard(stringResource(R.string.setup_place_title), stringResource(R.string.setup_place_sub),
                             kind == SessionKind.POI, Modifier.weight(1f)) { kind = SessionKind.POI }
                     }
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Column {
                         Hint(stringResource(R.string.setup_you_are_on))
                         Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
-                            fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink)
-                        val status = stringResource(roadStatus ?: R.string.setup_road_auto_hint)
-                        Hint(when {
-                            roadSource.startsWith("pack:") -> stringResource(R.string.setup_source_offline, status)
-                            roadSource == "cache" -> stringResource(R.string.setup_source_cache, status)
-                            else -> status
-                        })
+                            fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink, maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                         // outside every installed pack, but the catalogue has one here: suggest it (computed off the UI thread)
                         val suggest = packSuggestion
                         if (suggest != null) {
@@ -256,35 +261,22 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                             PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null; roadReload++ })
                         }
                     }
-                    if (kind == SessionKind.POI) {
-                        Hint(stringResource(R.string.setup_poi_hint))
-                    } else {
-                    Text(stringResource(R.string.setup_facade_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (d in (listOf(4, 6, 8, 12) + settings.facadeDistanceM.roundToInt()).distinct().sorted()) {
-                            FilterChip(facade.roundToInt() == d, { facade = d.toDouble() }, { Text(stringResource(R.string.setup_distance_m, d)) })
+                    if (kind == SessionKind.SWEEP) {
+                        Text(stringResource(R.string.setup_mode_short), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(mode == Mode.PHOTO_AUTO, { mode = Mode.PHOTO_AUTO }, { Text(stringResource(R.string.setup_mode_auto)) })
+                            FilterChip(mode == Mode.PHOTO_MANUAL, { mode = Mode.PHOTO_MANUAL }, { Text(stringResource(R.string.setup_mode_manual)) })
                         }
-                    }
-                    Hint(stringResource(R.string.setup_facade_hint))
-                    Text(stringResource(R.string.setup_mode_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(mode == Mode.PHOTO_AUTO, { mode = Mode.PHOTO_AUTO }, { Text(stringResource(R.string.setup_mode_auto)) })
-                        FilterChip(mode == Mode.PHOTO_MANUAL, { mode = Mode.PHOTO_MANUAL }, { Text(stringResource(R.string.setup_mode_manual)) })
-                        FilterChip(mode == Mode.VIDEO, { mode = Mode.VIDEO }, { Text(stringResource(R.string.setup_mode_video)) })
-                    }
-                    Hint(when (mode) {
-                        Mode.PHOTO_AUTO -> stringResource(R.string.setup_mode_auto_hint, String.format(Locale.ROOT, "%.1f", plan.photoEveryM), plan.maxSpeedKmh)
-                        Mode.PHOTO_MANUAL -> stringResource(R.string.setup_mode_manual_hint, plan.maxSpeedKmh)
-                        Mode.VIDEO -> stringResource(R.string.setup_mode_video_hint, plan.maxSpeedKmh)
-                    })
-                    Hint(stringResource(R.string.setup_mount_hint))
+                        Hint(if (mode == Mode.PHOTO_AUTO) stringResource(R.string.setup_plan_auto_short, String.format(Locale.ROOT, "%.1f", plan.photoEveryM), plan.maxSpeedKmh)
+                            else stringResource(R.string.setup_plan_short, plan.maxSpeedKmh))
                     }
                 }
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    if (!ready) {
+                    if (emailOk && live == null) Hint(stringResource(R.string.setup_need_gps), Modifier.padding(bottom = 6.dp), Palette.Amber)
+                    if (!emailOk) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Hint(stringResource(R.string.setup_need_email), Modifier.weight(1f), Palette.Amber)
-                            TextButton(onClick = onOpenProfile) { Text(stringResource(R.string.setup_enter_email)) }
+                            TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.setup_enter_email)) }
                         }
                     }
                     Button(
@@ -305,7 +297,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenProfile: () -> Unit) {
                             val s = Session(id = uid("s_", now), createdAt = iso(now), contributor = contributor, note = "",
                                 vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else mode,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
-                                settings = settings.copy(facadeDistanceM = facade), device = deviceJson(ctx), kind = kind, email = email,
+                                settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M), device = deviceJson(ctx), kind = kind, email = email,
                                 photoRoles = if (kind == SessionKind.POI && Prefs.askPhotoRole(ctx)) Prefs.photoRoles(ctx) else null)
                             CaptureService.store(ctx).create(s)
                             onStart(s.id)
@@ -323,7 +315,7 @@ private fun KindCard(title: String, sub: String, selected: Boolean, modifier: Mo
         onClick = onClick, modifier = modifier,
         border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) Palette.Green else Color(0xFFD0D5DD)),
     ) {
-        Column(Modifier.background(if (selected) Palette.GreenLight else Color.Transparent).padding(12.dp)) {
+        Column(Modifier.fillMaxWidth().background(if (selected) Palette.GreenLight else Color.Transparent).padding(12.dp)) {
             Text(title, fontWeight = FontWeight.Bold, color = if (selected) Palette.Green else Palette.Ink)
             Hint(sub)
         }
@@ -339,7 +331,7 @@ fun Hint(t: String, modifier: Modifier = Modifier, color: Color = Palette.Muted)
 
 /** Map centred on the rider: blue dot with an accuracy circle, re-centre on request. */
 @Composable
-private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: CoverLayer, team: CoverLayer, modifier: Modifier) {
+private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: CoverLayer, modifier: Modifier) {
     val ctx = LocalContext.current
     val map = remember {
         MapView(ctx).apply {
@@ -373,7 +365,7 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: Cov
     }
     AndroidView({ map }, modifier) { m ->
         m.overlays.clear()
-        for ((layer, color) in listOf(team to 0xAA7A5AF8.toInt(), mine to 0xAA12B76A.toInt())) {
+        for ((layer, color) in listOf(mine to 0xAA12B76A.toInt())) {
             for (line in layer.lines) m.overlays.add(Polyline(m).apply {
                 setPoints(line.map { GeoPoint(it.lat, it.lon) })
                 outlinePaint.color = color
@@ -409,5 +401,28 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: Cov
             }
         }
         m.invalidate()
+    }
+}
+
+/** ⓘ on New session: everything the main screen leaves out to stay short. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun SetupInfo(photoEveryM: Double, maxSpeedKmh: Int, onClose: () -> Unit) {
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onClose, containerColor = Color.White) {
+        Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(stringResource(R.string.setup_info_title), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
+            @Composable fun Item(title: String, text: String) = Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, fontWeight = FontWeight.Bold, color = Palette.Ink)
+                Text(text, color = Palette.Muted, fontSize = 15.sp)
+            }
+            Item(stringResource(R.string.setup_sweep_title), stringResource(R.string.setup_mount_hint))
+            Item(stringResource(R.string.setup_place_title), stringResource(R.string.setup_poi_hint))
+            Item(stringResource(R.string.setup_facade_title), stringResource(R.string.setup_facade_hint))
+            Item(stringResource(R.string.setup_mode_auto), stringResource(R.string.setup_mode_auto_hint, String.format(Locale.ROOT, "%.1f", photoEveryM), maxSpeedKmh))
+            Item(stringResource(R.string.setup_mode_manual), stringResource(R.string.setup_mode_manual_hint, maxSpeedKmh))
+            Item(stringResource(R.string.setup_you_are_on), stringResource(R.string.setup_road_auto_hint))
+            Item(stringResource(R.string.setup_info_gps_title), stringResource(R.string.setup_info_gps))
+        }
     }
 }

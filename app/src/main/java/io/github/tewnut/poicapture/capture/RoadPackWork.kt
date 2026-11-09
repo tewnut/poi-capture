@@ -17,7 +17,6 @@ import kotlinx.coroutines.withContext
 import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.core.CatalogueError
 import io.github.tewnut.poicapture.core.CatalogueException
-import io.github.tewnut.poicapture.core.UploadJob
 import io.github.tewnut.poicapture.net.RoadSource
 import java.io.File
 import java.io.FileOutputStream
@@ -62,7 +61,7 @@ class RoadPackWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                 }
             }
             c.disconnect()
-            if (sha.isNotBlank() && UploadJob.sha256(part) != sha) { part.delete(); throw IOException("checksum mismatch, downloading again") }
+            if (sha.isNotBlank() && sha256(part) != sha) { part.delete(); throw IOException("checksum mismatch, downloading again") }
             packs.install(part)
             Result.success()
         } catch (e: Exception) {
@@ -79,7 +78,7 @@ object RoadPackDownloads {
         val req = OneTimeWorkRequestBuilder<RoadPackWorker>()
             .setInputData(workDataOf("id" to e.id, "url" to e.url, "sha256" to e.sha256, "bytes" to e.bytes))
             .setConstraints(Constraints.Builder()
-                .setRequiredNetworkType(if (anyNetwork || Prefs.settings(ctx).uploadOnMobileData) NetworkType.CONNECTED else NetworkType.UNMETERED)
+                .setRequiredNetworkType(if (anyNetwork) NetworkType.CONNECTED else NetworkType.UNMETERED)
                 .build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
@@ -113,4 +112,10 @@ object RoadPackCatalogue {
             return list
         } finally { c.disconnect() }
     }
+}
+
+private fun sha256(f: java.io.File): String {
+    val md = java.security.MessageDigest.getInstance("SHA-256")
+    f.inputStream().use { s -> val b = ByteArray(1 shl 16); while (true) { val n = s.read(b); if (n < 0) break; md.update(b, 0, n) } }
+    return md.digest().joinToString("") { "%02x".format(it) }
 }

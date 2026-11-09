@@ -24,23 +24,11 @@ class SessionStore(val root: File) {
     private fun itemsFile(sessionId: String) = File(dir(sessionId), "items.jsonl")
     private fun poisFile(sessionId: String) = File(dir(sessionId), "pois.jsonl")     // POI mode: one record per place
     private fun marksFile(sessionId: String) = File(dir(sessionId), "marks.jsonl")   // sweep mode: "Đánh dấu" taps
-    private fun uploadFile(sessionId: String) = File(dir(sessionId), "upload.json")  // background upload state
     fun coverageFile(sessionId: String) = File(dir(sessionId), "coverage.json")      // thinned track for the setup map
 
-    fun uploadState(sessionId: String): UploadState =
-        runCatching { UploadState.fromJson(JSONObject(uploadFile(sessionId).readText())) }.getOrDefault(UploadState())
-
-    @Synchronized
-    fun saveUploadState(sessionId: String, st: UploadState) {
-        val tmp = File(dir(sessionId), "upload.json.tmp")
-        tmp.writeText(st.toJson().toString())
-        val dst = uploadFile(sessionId)
-        if (!tmp.renameTo(dst)) { dst.delete(); tmp.renameTo(dst) }
-    }
-
     /**
-     * Version of what the agent gets (photos, places, marks, track), as the newest modification time: an edit after
-     * an upload (moved photo, reviewed place) makes it newer, so the session must be uploaded again.
+     * Version of a session's content (photos, places, marks, track), as the newest modification time: an edit (moved
+     * photo, reviewed place) makes the cached coverage stale.
      */
     fun contentVersion(sessionId: String): Long =
         listOf(itemsFile(sessionId), poisFile(sessionId), marksFile(sessionId), trackFile(sessionId))

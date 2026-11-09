@@ -18,6 +18,8 @@ import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.lifecycle.Lifecycle
@@ -76,7 +78,11 @@ object Palette {
  * fix older than a minute, maybe from elsewhere): fine to centre a map, not to say which road the contributor is on.
  */
 data class LiveLocation(val lat: Double, val lon: Double, val accuracyM: Float, val simulated: Boolean, val atMs: Long,
-                        val gps: Boolean = true, val stale: Boolean = false)
+                        val gps: Boolean = true, val stale: Boolean = false, val fixNanos: Long = 0L) {
+    /** A GPS fix at most [GPS_MAX_AGE_MS] old: the same rule as the capture (every photo needs one). */
+    fun freshGps(nowNanos: Long = SystemClock.elapsedRealtimeNanos()): Boolean =
+        gps && !stale && (nowNanos - fixNanos) / 1_000_000 <= io.github.tewnut.poicapture.capture.GPS_MAX_AGE_MS
+}
 
 fun isEmulator(): Boolean = Build.HARDWARE in setOf("ranchu", "goldfish") || Build.FINGERPRINT.startsWith("generic")
 
@@ -84,8 +90,13 @@ fun isEmulator(): Boolean = Build.HARDWARE in setOf("ranchu", "goldfish") || Bui
 enum class LocStatus { NO_PERMISSION, APPROXIMATE_ONLY, DISABLED, SEARCHING, OK }
 
 data class LocationState(val fix: LiveLocation?, val status: LocStatus, val satsUsed: Int, val satsSeen: Int, val searchingSinceMs: Long) {
-    /** A current position (not a remembered one). */
-    val live: LiveLocation? get() = fix?.takeIf { !it.stale }
+    /**
+     * The current GPS position. A Wi-Fi / cell (or fused) fix is never "where the contributor is": it can be off by
+     * a block or more, so the road, the readiness and the photos wait for a satellite fix.
+     */
+    val live: LiveLocation? get() = fix?.takeIf { it.freshGps() }
+    /** A current position from any source (Wi-Fi / cell included): good enough to pick a province or centre a map. */
+    val approx: LiveLocation? get() = fix?.takeIf { !it.stale }
 }
 
 /** Continuous location updates while the composable is on screen; see [rememberLocationState]. */
@@ -128,12 +139,12 @@ fun rememberLocationState(): LocationState {
         fun accept(l: Location, remembered: Boolean) {
             val isGps = l.provider == LocationManager.GPS_PROVIDER
             val cur = fix
-            // a Wi-Fi / cell fix never replaces a fresh GPS fix
-            if (cur != null && cur.gps && !cur.stale && !isGps && System.currentTimeMillis() - cur.atMs < 10_000) return
+            // a Wi-Fi / cell fix never replaces a GPS fix; after 30 s without GPS it may move the map, still not "live"
+            if (cur != null && cur.gps && !cur.stale && !isGps && System.currentTimeMillis() - cur.atMs < 30_000) return
             val ageMs = (SystemClock.elapsedRealtimeNanos() - l.elapsedRealtimeNanos) / 1_000_000
             val mock = if (Build.VERSION.SDK_INT >= 31) l.isMock else @Suppress("DEPRECATION") l.isFromMockProvider
             fix = LiveLocation(l.latitude, l.longitude, l.accuracy, mock || isEmulator(), System.currentTimeMillis(),
-                gps = isGps, stale = remembered && ageMs > 60_000)
+                gps = isGps, stale = remembered && ageMs > 60_000, fixNanos = l.elapsedRealtimeNanos)
         }
         val listener = LocationListener { accept(it, remembered = false) }
         val providers = buildList {
@@ -146,6 +157,7 @@ fun rememberLocationState(): LocationState {
                 .maxByOrNull { it.elapsedRealtimeNanos }?.let { accept(it, remembered = true) }
         }
         for (p in providers) runCatching { lm.requestLocationUpdates(p, 1000L, 0f, listener, Looper.getMainLooper()) }
+        io.github.tewnut.poicapture.capture.GpsKeeper.acquire(ctx)   // keeps the fix when the next screen takes over
         val gnss = object : GnssStatus.Callback() {
             override fun onSatelliteStatusChanged(status: GnssStatus) {
                 sats = (0 until status.satelliteCount).count { status.usedInFix(it) } to status.satelliteCount
@@ -155,14 +167,19 @@ fun rememberLocationState(): LocationState {
         runCatching { lm.registerGnssStatusCallback(ContextCompat.getMainExecutor(ctx), gnss) }
         onDispose {
             lm.removeUpdates(listener)
+            io.github.tewnut.poicapture.capture.GpsKeeper.release()
             runCatching { lm.unregisterGnssStatusCallback(gnss) }
         }
     }
+    // a GPS fix stops counting 5 s after it was taken: look again every second (a remembered fix, or the GPS lost)
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(1000); tick++ } }
+    val freshGps = remember(fix, tick) { fix?.freshGps() == true }
     val status = when {
         !fine && !coarse -> LocStatus.NO_PERMISSION
         !fine -> LocStatus.APPROXIMATE_ONLY
         !enabled -> LocStatus.DISABLED
-        fix == null || fix!!.stale -> LocStatus.SEARCHING
+        !freshGps -> LocStatus.SEARCHING
         else -> LocStatus.OK
     }
     return LocationState(fix, status, sats.first, sats.second, since)
@@ -282,5 +299,26 @@ fun SideIllustration(side: Side, selected: Boolean, modifier: Modifier = Modifie
         }
         drawPath(cone, accent.copy(alpha = 0.28f))
         drawPath(cone, accent, style = Stroke(width = 3f))
+    }
+}
+
+/**
+ * Top of a screen: ← back (when [onBack] is set), the title, and actions on the right (e.g. the Settings gear on the
+ * home screen). Sits under the status bar.
+ */
+@Composable
+fun ScreenHeader(title: String, onBack: (() -> Unit)? = null, subtitle: String? = null, actions: @Composable () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = if (onBack != null) 4.dp else 20.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        if (onBack != null) androidx.compose.material3.IconButton(onClick = onBack) {
+            androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack,
+                stringResource(R.string.nav_back), tint = Palette.Ink)
+        }
+        androidx.compose.foundation.layout.Column(Modifier.weight(1f).padding(start = if (onBack != null) 4.dp else 0.dp)) {
+            Text(title, fontSize = if (onBack != null) 20.sp else 26.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            if (subtitle != null) Text(subtitle, fontSize = 13.sp, color = Palette.Muted, maxLines = 1)
+        }
+        actions()
     }
 }

@@ -8,12 +8,12 @@ import android.os.Build
 import android.os.LocaleList
 
 /**
- * The app's UI language: the phone's by default, or English / Vietnamese picked in Profile.
+ * The app's UI language: the phone's by default, or English / Vietnamese picked in Settings.
  * - Android 13+: the system per-app language (LocaleManager; also in the system settings, see locales_config.xml).
  * - Android 11-12: the choice is kept in Prefs and applied by [wrap] in each component's attachBaseContext.
  */
 object AppLanguage {
-    /** Language tags offered in Profile; "" = follow the phone. */
+    /** Language tags offered in Settings; "" = follow the phone. */
     const val SYSTEM = ""
     val TAGS = listOf(SYSTEM, "en", "vi")
 
@@ -40,7 +40,7 @@ object AppLanguage {
         }
     }
 
-    /** Android 11-12: [base] with the language picked in Profile (13+ and "follow the phone": [base] itself). */
+    /** Android 11-12: [base] with the language picked in Settings (13+ and "follow the phone": [base] itself). */
     fun wrap(base: Context): Context {
         if (Build.VERSION.SDK_INT >= 33) return base
         val tag = sp(base).getString("language", SYSTEM) ?: SYSTEM

@@ -31,6 +31,7 @@ class GnssRecorder(private val lm: LocationManager, file: File) {
     val epochs = AtomicLong()
     val measurements = AtomicLong()
     val adrValid = AtomicLong()
+    val l5 = AtomicLong()          // measurements on the second frequency (L5 / E5a / B2a, ~1176 MHz)
     private var started = false
 
     private val callback = object : GnssMeasurementsEvent.Callback() {
@@ -63,6 +64,7 @@ class GnssRecorder(private val lm: LocationManager, file: File) {
     fun summary(): JSONObject = JSONObject()
         .put("epochs", epochs.get()).put("measurements", measurements.get()).put("adrValid", adrValid.get())
         .put("carrierPhase", adrValid.get() > 0)
+        .put("l5Measurements", l5.get()).put("dualFrequency", l5.get() > 0)
 
     private fun write(e: GnssMeasurementsEvent) {
         val c = e.clock
@@ -71,6 +73,7 @@ class GnssRecorder(private val lm: LocationManager, file: File) {
         for (m in e.measurements) {
             if (m.accumulatedDeltaRangeState and GnssMeasurement.ADR_STATE_VALID != 0) adrValid.incrementAndGet()
             measurements.incrementAndGet()
+            if (m.hasCarrierFrequencyHz() && m.carrierFrequencyHz < 1.3e9f) l5.incrementAndGet()
             val cols = listOf(
                 utc, c.timeNanos,
                 if (c.hasLeapSecond()) c.leapSecond else "",

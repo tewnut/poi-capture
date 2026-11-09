@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Navigation -->
-    <string name="nav_new">Ghi mới</string>
-    <string name="nav_sessions">Đã ghi</string>
-    <string name="nav_profile">Hồ sơ</string>
-    <string name="map_back">← Đã ghi</string>
+    <string name="nav_settings">Cài đặt</string>
     <string name="map_title">Vị trí ảnh</string>
 
-    <!-- Language (Profile) -->
+    <!-- Language (Settings) -->
     <string name="language_title">Ngôn ngữ</string>
     <string name="language_system">Theo hệ thống</string>
 
@@ -85,10 +82,10 @@
     <string name="onboarding_position_title">Vị trí đặt vào tòa nhà</string>
     <string name="onboarding_position_text">App tính vị trí mặt tiền từ GPS và hướng camera. Sai chỗ nào, kéo lại trên bản đồ.</string>
     <string name="onboarding_offline_title">Không cần mạng khi ghi</string>
-    <string name="onboarding_offline_text">Ảnh lưu trên máy, tự tải lên khi có Wi-Fi hoặc gửi file qua Zalo / Drive.</string>
+    <string name="onboarding_offline_text">Ảnh lưu trên máy cho đến khi bạn gửi file (Zalo, Drive, email…) hoặc lưu lại.</string>
 
     <string name="onboarding_email_title">Email của bạn</string>
-    <string name="onboarding_email_lead">Dùng để ghi công và gộp các phiên ghi của bạn trên máy chủ. Không cần xác minh, app không gửi thư.</string>
+    <string name="onboarding_email_lead">Đi kèm mỗi phiên bạn gửi, để ghi công và gộp các phiên của bạn. Không cần xác minh, app không gửi thư.</string>
     <string name="onboarding_email_label">Email</string>
     <string name="onboarding_email_placeholder">ten@gmail.com</string>
     <string name="onboarding_email_invalid">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
@@ -105,7 +102,6 @@
     <string name="onboarding_perms_title">Cho phép app dùng</string>
     <string name="onboarding_perms_lead">App chỉ dùng những quyền này khi bạn đang ghi.</string>
     <string name="onboarding_perms_grant">Cấp quyền</string>
-    <string name="onboarding_perms_later">Để sau</string>
     <string name="onboarding_perm_missing">Chưa cấp</string>
     <string name="onboarding_and">%1$s và %2$s</string>
     <string name="onboarding_perms_required">Chưa có %1$s thì chưa ghi được. Nếu Android không hỏi lại, mở Cài đặt → Quyền để bật.</string>
@@ -116,26 +112,23 @@
     <string name="onboarding_roads_loading">Đang tải danh sách tỉnh / thành…</string>
     <string name="onboarding_roads_error">Không tải được danh sách: %1$s</string>
     <string name="onboarding_retry">Thử lại</string>
-    <string name="onboarding_roads_skip">hoặc bỏ qua, tải sau ở Hồ sơ.</string>
     <string name="onboarding_roads_here">Bạn đang ở %1$s</string>
     <string name="onboarding_roads_installed">Đã có dữ liệu đường, sẵn sàng ghi.</string>
     <string name="onboarding_roads_downloading">Đang tự tải (cả khi dùng 4G). Gói tải tiếp ở nền, bạn có thể đi tiếp.</string>
     <string name="onboarding_roads_waiting">Đang chờ vị trí để biết bạn ở tỉnh / thành nào… hoặc chọn bên dưới.</string>
     <string name="onboarding_roads_no_pack">Vị trí hiện tại không thuộc tỉnh / thành nào có gói: chọn bên dưới.</string>
+    <string name="onboarding_roads_need">Tải dữ liệu đường để tiếp tục</string>
     <plurals name="onboarding_roads_other_count">
         <item quantity="other">Chọn tỉnh / thành khác (%1$d)</item>
     </plurals>
     <string name="onboarding_roads_others">Tỉnh / thành khác</string>
     <string name="onboarding_roads_all">Các tỉnh / thành</string>
-    <string name="onboarding_roads_credit">Dữ liệu đường © OpenStreetMap contributors (ODbL), qua Geofabrik. Quản lý gói ở Hồ sơ.</string>
+    <string name="onboarding_roads_credit">Dữ liệu đường © OpenStreetMap contributors (ODbL), qua Geofabrik. Quản lý gói ở Cài đặt.</string>
 
     <string name="onboarding_ready_title">Sẵn sàng!</string>
     <string name="onboarding_ready_button">Bắt đầu ghi</string>
-    <string name="onboarding_facade_title">Mặt tiền thường cách camera</string>
-    <string name="setup_distance_m">%1$d m</string>
-    <string name="onboarding_facade_hint">Phố hẹp, đi sát lề: 4 m · phố thường: 6 m · vỉa hè rộng: 8 m · đại lộ: 12 m. → 1 ảnh mỗi %1$s m, chạy tối đa %2$d km/h. Đổi được ở mỗi lần ghi.</string>
     <string name="onboarding_mount_title">Gắn máy</string>
-    <string name="onboarding_mount_text">• Điện thoại nằm ngang, kẹp chắc trên giá xe.\n• Camera sau nhìn sang dãy nhà bên phải.\n• Vài lần tăng tốc / phanh đầu tiên, app tự đo hướng camera.</string>
+    <string name="onboarding_mount_text">• Điện thoại kẹp chắc trên giá xe, tốt nhất nằm ngang (thấy rộng hơn).\n• Camera sau nhìn sang dãy nhà bên phải.\n• Vài lần tăng tốc / phanh đầu tiên, app tự đo hướng camera.</string>
     <string name="onboarding_summary_name">Người ghi: %1$s</string>
     <string name="onboarding_summary_perms_ok">Đã cấp quyền camera và vị trí</string>
     <string name="onboarding_summary_perms_missing">Còn thiếu quyền %1$s</string>
@@ -150,7 +143,6 @@
     <string name="setup_roads_loading">Đang tải dữ liệu đường quanh bạn…</string>
     <string name="setup_roads_failed">Chưa tải được dữ liệu đường (mạng hoặc máy chủ bận). Vẫn ghi bình thường, tên đường được nhận sau.</string>
     <string name="setup_coverage">Đã quét</string>
-    <string name="setup_coverage_team">Đã quét · tím = nhóm</string>
     <string name="setup_loc_no_permission">Chưa cho phép vị trí</string>
     <string name="setup_loc_approximate">Chỉ có vị trí gần đúng</string>
     <string name="setup_loc_disabled">Vị trí của máy đang tắt</string>
@@ -162,28 +154,20 @@
     <string name="setup_simulated">Máy ảo: vị trí giả lập, không phải GPS thật</string>
     <string name="setup_recenter">Về vị trí của tôi</string>
     <string name="setup_sweep_title">Quét đường</string>
-    <string name="setup_sweep_sub">Chạy xe, app tự chụp dãy nhà</string>
     <string name="setup_place_title">Chụp địa điểm</string>
-    <string name="setup_place_sub">Dừng lại, chụp kỹ từng cửa hàng</string>
     <string name="setup_you_are_on">Bạn đang ở</string>
     <string name="setup_waiting_location">Chờ vị trí…</string>
     <string name="setup_road_unknown">Chưa nhận ra đường</string>
     <string name="setup_road_auto_hint">Tên đường được tự nhận khi bạn chạy, rẽ sang đường khác cũng được.</string>
-    <string name="setup_source_offline">%1$s (dữ liệu offline)</string>
-    <string name="setup_source_cache">%1$s (dữ liệu đã lưu trên máy)</string>
     <string name="setup_pack_suggest">Tải dữ liệu đường của vùng này để nhận tên đường cả khi mất mạng:</string>
     <string name="setup_poi_hint">Với mỗi cửa hàng: chụp ★ mặt tiền trực diện (ảnh bìa), biển hiệu, rồi bên hông / bên trong / thông tin (giờ mở cửa, SĐT, menu) nếu có. Sau đó ghim địa điểm lên đúng tòa nhà trên bản đồ. Ảnh đã được gắn sẵn với địa điểm, không cần xử lý tách ảnh sau.</string>
-    <string name="setup_facade_title">Mặt tiền cách camera khoảng</string>
-    <string name="setup_facade_hint">Phố hẹp, đi sát lề: 4 m · phố thường: 6 m · vỉa hè rộng: 8 m · đại lộ: 12 m. Giúp đặt địa điểm đúng vào tòa nhà.</string>
-    <string name="setup_mode_title">Cách ghi</string>
+    <string name="setup_facade_title">Khoảng cách tới dãy nhà</string>
+    <string name="setup_facade_hint">Tự đặt theo loại đường bạn đang đi (hẻm, đường nhỏ 4 m, đường cấp 3 5 m, cấp 2 6 m, đường chính 8 m), chọn phía gần để các ảnh luôn chồng lên nhau. Vị trí từng cửa hàng được tính từ nhiều ảnh, không phải từ con số này.</string>
     <string name="setup_mode_auto">Ảnh tự động</string>
     <string name="setup_mode_manual">Bấm tay</string>
-    <string name="setup_mode_video">Video</string>
     <string name="setup_mode_auto_hint">1 ảnh mỗi %1$s m (mỗi biển hiệu có trong ≥ 2 ảnh) · chạy tối đa %2$d km/h</string>
     <string name="setup_mode_manual_hint">Chụp bằng nút âm lượng hoặc nút bấm Bluetooth trên tay lái, không cần chạm màn hình · chạy tối đa %1$d km/h</string>
-    <string name="setup_mode_video_hint">Quay liên tục · chạy tối đa %1$d km/h</string>
-    <string name="setup_mount_hint">Gắn máy chắc, nằm ngang, camera nhìn sang dãy nhà cần ghi. App tự nhận bên (phải/trái) khi bạn chạy. Bấm ★ Đánh dấu khi đi qua cửa hàng đáng chú ý.</string>
-    <string name="setup_need_email">Cần email người ghi trước khi bắt đầu.</string>
+    <string name="setup_mount_hint">Gắn máy chắc (nằm ngang thấy rộng hơn), camera nhìn sang dãy nhà cần ghi. App tự nhận bên (phải/trái) khi bạn chạy. Bấm ★ Đánh dấu khi đi qua cửa hàng đáng chú ý.</string>
     <string name="setup_enter_email">Nhập email</string>
     <string name="setup_session_running">Đang có một phiên ghi chưa kết thúc.</string>
     <string name="setup_start">Bắt đầu</string>
@@ -224,31 +208,8 @@
     <string name="capture_mount_back">Camera đang nhìn về phía sau: xoay sang dãy nhà!</string>
     <string name="capture_mount_measuring">Đang nhận hướng camera… (tăng tốc / phanh vài lần)</string>
     <string name="capture_speed_max">km/h · tối đa %1$d</string>
-    <string name="capture_ready_poi">Sẵn sàng chụp địa điểm?</string>
-    <string name="capture_ready">Sẵn sàng ghi?</string>
-    <string name="capture_check_gps_good">GPS tốt (±%1$s m)</string>
-    <string name="capture_check_gps_weak">GPS còn yếu, đợi thêm chút</string>
-    <string name="capture_check_gps_waiting">Đang chờ GPS…</string>
-    <string name="capture_check_camera_ready">Camera sẵn sàng</string>
     <string name="capture_check_camera_error">Không mở được camera</string>
     <string name="capture_check_camera_opening">Đang mở camera…</string>
-    <string name="capture_check_road">Đường: %1$s</string>
-    <string name="capture_check_on_road">Đang ở: %1$s</string>
-    <string name="capture_check_no_road">Chưa có dữ liệu đường: vẫn ghi được, đường được nhận sau</string>
-    <string name="capture_check_roles">Mỗi địa điểm: chụp ★ %1$s, rồi %2$s nếu có. App tự chọn loại ảnh tiếp theo.</string>
-    <string name="capture_check_poi_default">Mỗi địa điểm: chụp mặt tiền thấy cả cửa hàng, biển hiệu đọc được chữ, thêm bên trong / bảng giá nếu có. Hệ thống tự nhận ra ảnh nào là gì.</string>
-    <string name="capture_check_poi_flow">Chụp xong một địa điểm thì bấm “Xong địa điểm” và chụp tiếp địa điểm sau, không cần nhập gì. Vị trí theo GPS; cần thì “Ghim, tình trạng…” để đặt lên đúng tòa nhà hoặc báo đã đóng cửa.</string>
-    <string name="capture_check_volume_shoot">Nút âm lượng cũng là nút chụp.</string>
-    <string name="capture_check_mount">Máy gắn chắc, nằm ngang, camera nhìn sang dãy nhà cần ghi. App tự nhận bên sau vài lần tăng tốc / phanh.</string>
-    <string name="capture_check_keys_shoot">Nút âm lượng (hoặc nút bấm Bluetooth trên tay lái) là nút chụp.</string>
-    <string name="capture_check_keys_mark">Nút âm lượng (hoặc nút bấm Bluetooth trên tay lái) = ★ Đánh dấu, không cần chạm màn hình.</string>
-    <string name="capture_check_plan_auto">Mặt tiền cách ~%1$d m: 1 ảnh mỗi %2$s m, chạy tối đa %3$d km/h</string>
-    <string name="capture_check_plan">Mặt tiền cách ~%1$d m: chạy tối đa %2$d km/h</string>
-    <string name="capture_simulated_hint">Máy ảo: vị trí đang là vị trí giả lập.</string>
-    <string name="capture_cancel">Huỷ</string>
-    <string name="capture_start_poi">Bắt đầu chụp</string>
-    <string name="capture_start_video">Bắt đầu quay</string>
-    <string name="capture_start">Bắt đầu ghi</string>
     <string name="capture_reading">Đang đọc chữ trên ảnh…</string>
     <string name="capture_read">Đọc được: %1$s</string>
 
@@ -269,7 +230,7 @@
     <string name="poi_read_house">Số nhà: %1$s</string>
     <string name="poi_read_category">Loại hình: %1$s</string>
     <string name="poi_reading">Đang đọc chữ trên ảnh…</string>
-    <string name="poi_read_nothing">Máy chưa đọc được gì. Hệ thống sẽ đọc lại ảnh trên máy chủ.</string>
+    <string name="poi_read_nothing">Máy chưa đọc được gì. Ảnh sẽ được đọc lại sau khi bạn gửi.</string>
     <string name="poi_read_hint">Gợi ý cho hệ thống; tên, địa chỉ, loại hình được kiểm tra lại với ảnh và bản đồ.</string>
     <string name="poi_status">Tình trạng</string>
     <string name="poi_more_open">▾ Ghi chú thêm</string>
@@ -296,7 +257,6 @@
 
     <!-- ==== Sessions, session map, shared components ==== -->
     <!-- Sessions tab (ui/SessionsScreen.kt) -->
-    <string name="sessions_title">Đã ghi</string>
     <plurals name="sessions_places">
         <item quantity="other">%1$d địa điểm</item>
     </plurals>
@@ -306,43 +266,25 @@
     <string name="sessions_send_chooser">Gửi %1$s</string>
     <string name="sessions_packed">Đã đóng gói %1$s. Chọn Zalo, Drive, email… để gửi.</string>
     <string name="sessions_pack_failed">Không đóng gói được: %1$s</string>
-    <string name="sessions_all_uploaded">Mọi phiên đã được tải lên máy chủ.</string>
-    <plurals name="sessions_not_uploaded">
-        <item quantity="other">%1$d phiên chưa tải lên · %2$s</item>
-    </plurals>
-    <string name="sessions_auto_upload_wifi">Tự tải lên khi có Wi-Fi, tiếp tục được nếu mất mạng giữa chừng. Còn trống %1$s.</string>
-    <string name="sessions_auto_upload_any">Tự tải lên khi có mạng (cả 4G), tiếp tục được nếu mất mạng giữa chừng. Còn trống %1$s.</string>
     <string name="sessions_none_unsent">Không có phiên nào chờ gửi.</string>
     <plurals name="sessions_unsent">
         <item quantity="other">%1$d phiên chưa gửi · %2$s · %3$s</item>
     </plurals>
     <string name="sessions_local_only">Dữ liệu chỉ nằm trong máy tới khi bạn gửi. Còn trống %1$s.</string>
     <string name="sessions_loading">Đang đọc các phiên đã ghi…</string>
-    <string name="sessions_empty">Chưa có phiên ghi nào.</string>
-    <string name="sessions_first">Ghi phiên đầu tiên</string>
-    <string name="sessions_queued">Đã đưa vào hàng chờ tải lên.</string>
+    <string name="sessions_empty">Chưa có phiên ghi nào</string>
     <string name="sessions_delete_title">Xoá phiên này?</string>
-    <string name="sessions_delete_uploaded">Phiên đã tải lên máy chủ. Chỉ xoá bản trong máy.</string>
-    <string name="sessions_delete_changed">Phiên đã tải lên, nhưng các sửa đổi sau đó CHƯA được tải lại. Xoá thì mất các sửa đổi này.</string>
     <string name="sessions_delete_sent">Phiên đã được gửi. Ảnh và video trong máy sẽ bị xoá.</string>
-    <string name="sessions_delete_unsent">Phiên CHƯA được gửi hay tải lên. Ảnh và video sẽ mất hẳn.</string>
+    <string name="sessions_delete_unsent">Phiên CHƯA được gửi hay lưu. Ảnh và video sẽ mất hẳn.</string>
     <string name="sessions_deleting">Đang xoá…</string>
     <string name="sessions_deleted">Đã xoá phiên.</string>
     <string name="sessions_delete">Xoá</string>
     <string name="sessions_keep">Không</string>
     <string name="sessions_more">Thêm</string>
-    <string name="sessions_send_other_app">Gửi qua ứng dụng khác</string>
     <string name="sessions_save_zip">Lưu file zip vào máy</string>
     <string name="sessions_delete_session">Xoá phiên</string>
     <string name="sessions_badge_recording">Đang ghi</string>
     <string name="sessions_badge_empty">Trống</string>
-    <string name="sessions_badge_reupload">Cần tải lại</string>
-    <string name="sessions_badge_uploaded">Đã tải lên</string>
-    <string name="sessions_badge_uploading">Đang tải %1$d%%</string>
-    <string name="sessions_badge_wait_wifi">Chờ Wi-Fi</string>
-    <string name="sessions_badge_wait_network">Chờ mạng</string>
-    <string name="sessions_badge_failed">Lỗi tải, sẽ thử lại</string>
-    <string name="sessions_badge_not_uploaded">Chưa tải lên</string>
     <string name="sessions_badge_sent">Đã gửi</string>
     <string name="sessions_badge_not_sent">Chưa gửi</string>
     <plurals name="sessions_videos">
@@ -359,8 +301,6 @@
     <string name="sessions_side_right">Bên phải</string>
     <string name="sessions_side_left">Bên trái</string>
     <string name="sessions_side_measured">%1$s (đã đo)</string>
-    <string name="sessions_vehicle_car">Ô tô</string>
-    <string name="sessions_vehicle_motorbike">Xe máy</string>
     <string name="sessions_mode_auto">ảnh tự động</string>
     <string name="sessions_mode_manual">ảnh bấm tay</string>
     <string name="sessions_mode_video">video</string>
@@ -368,19 +308,6 @@
         <item quantity="other">%1$d ảnh đã sửa vị trí</item>
     </plurals>
     <string name="sessions_interrupted">bị gián đoạn (vẫn gửi được)</string>
-    <string name="sessions_upload_error">Lỗi: %1$s</string>
-    <string name="sessions_agent_done">Hệ thống đã xử lý</string>
-    <plurals name="sessions_agent_found">
-        <item quantity="other">tìm thấy %1$d địa điểm</item>
-    </plurals>
-    <plurals name="sessions_agent_recapture">
-        <item quantity="other">%1$d chỗ cần chụp lại (xem trên Bản đồ)</item>
-    </plurals>
-    <string name="sessions_agent_processing">Hệ thống đang xử lý…</string>
-    <string name="sessions_agent_failed">Hệ thống chưa xử lý được phiên này, quản lý sẽ kiểm tra.</string>
-    <string name="sessions_agent_received">Máy chủ đã nhận</string>
-    <string name="sessions_reupload">Tải lại</string>
-    <string name="sessions_upload_now">Tải lên ngay</string>
     <string name="sessions_send">Gửi</string>
     <string name="sessions_send_again">Gửi lại</string>
     <string name="sessions_map">Bản đồ</string>
@@ -391,20 +318,12 @@
     <!-- Photo map (ui/SessionMap.kt) -->
     <string name="sessionmap_no_photos_live">Chưa có ảnh. Ảnh sẽ hiện trên bản đồ ngay khi chụp.</string>
     <string name="sessionmap_no_photos">Phiên này không có ảnh.</string>
-    <plurals name="sessionmap_summary">
-        <item quantity="other">%1$d ảnh · %2$d đã sửa vị trí · chạm vào chấm để xem ảnh</item>
-    </plurals>
     <string name="sessionmap_photo_desc">Ảnh %1$d</string>
-    <string name="sessionmap_tap_close">Chạm để đóng</string>
     <string name="sessionmap_photo_thumb_desc">Ảnh %1$d, chạm để xem lớn</string>
-    <string name="sessionmap_photo_title">Ảnh %1$d/%2$d · %3$s</string>
     <string name="sessionmap_no_road">Chưa nhận ra đường</string>
-    <string name="sessionmap_moved">Vị trí đã sửa tay (GPS gốc vẫn được giữ)</string>
+    <string name="sessionmap_moved">Đã sửa vị trí</string>
     <string name="sessionmap_gps">Vị trí GPS</string>
     <string name="sessionmap_gps_accuracy">Vị trí GPS ±%1$d m</string>
-    <string name="sessionmap_facade">■ điểm mặt tiền ước tính, cách %1$d m</string>
-    <string name="sessionmap_relocate_hint">Chạm vào đúng vị trí trên bản đồ (hoặc giữ và kéo chấm xanh).</string>
-    <string name="sessionmap_cancel_move">Huỷ sửa</string>
     <string name="sessionmap_move">Sửa vị trí</string>
     <string name="sessionmap_back_gps">Về vị trí GPS</string>
 
@@ -420,7 +339,7 @@
     <string name="common_searching_long">Ra chỗ thoáng, xa mái che và nhà cao tầng. Lần đầu bật GPS có thể mất 1–2 phút.</string>
     <string name="common_settings">Cài đặt</string>
 
-    <!-- ==== Profile, offline road data, photo kinds ==== -->
+    <!-- ==== Settings, offline road data, photo kinds ==== -->
     <!-- Offline road data (RoadPacksCard) -->
     <string name="packs_importing">Đang nhập gói…</string>
     <string name="packs_import_done">Đã cài %1$s (%2$s).</string>
@@ -453,7 +372,6 @@
 
     <!-- Photo kinds of Place capture (PhotoRolesCard) -->
     <string name="roles_intro">Các nút chọn loại ảnh khi chụp một địa điểm, theo thứ tự chụp. ★ = ảnh bìa. Sau ảnh của loại có dấu ↻, app tự chuyển sang loại tiếp theo chưa có ảnh.</string>
-    <string name="roles_from_server">Do quản lý cài đặt trên máy chủ, không sửa trên máy được.</string>
     <string name="roles_move_up">Lên trên</string>
     <string name="roles_move_down">Xuống dưới</string>
     <string name="roles_make_cover">Đặt làm ảnh bìa ★</string>
@@ -462,10 +380,6 @@
     <string name="roles_remove">Bỏ loại này</string>
     <string name="roles_add">+ Thêm loại ảnh</string>
     <string name="roles_reset">Khôi phục mặc định</string>
-    <string name="roles_fetching">Đang lấy cấu hình…</string>
-    <string name="roles_updated">Đã cập nhật từ máy chủ.</string>
-    <string name="roles_no_server_config">Máy chủ chưa có cấu hình chung, dùng danh sách trên máy.</string>
-    <string name="roles_fetch">Lấy từ máy chủ</string>
     <string name="roles_add_title">Thêm loại ảnh</string>
     <string name="roles_add_name">Tên nút, ví dụ: Bãi đỗ xe</string>
     <string name="roles_add_hint">Gợi ý khi chụp (không bắt buộc)</string>
@@ -473,27 +387,89 @@
     <string name="roles_add_confirm">Thêm</string>
     <string name="roles_cancel">Huỷ</string>
 
-    <!-- Profile -->
-    <string name="profile_title">Hồ sơ</string>
-    <string name="profile_contributor">Người ghi</string>
-    <string name="profile_email">Email</string>
-    <string name="profile_email_ok">Không cần xác minh. Dùng để ghi công và gộp các phiên ghi của bạn.</string>
-    <string name="profile_email_bad">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
-    <string name="profile_display_name">Tên hiển thị (không bắt buộc)</string>
-    <string name="profile_facade_title">Khoảng cách tới mặt tiền (mặc định)</string>
-    <string name="profile_facade_hint">Từ camera tới mặt tiền nhà (không phải tới mép đường), thường gặp khi bạn chạy làn sát lề. Dùng để tính khoảng cách giữa các ảnh, tốc độ tối đa và đặt địa điểm đúng vào tòa nhà. Chỉnh lại được ở mỗi lần ghi.</string>
-    <string name="profile_facade_caption">1 ảnh mỗi %1$s m · tối đa %2$d km/h</string>
-    <string name="profile_road_data">Dữ liệu đường offline</string>
-    <string name="profile_advanced_hide">▾ Ẩn cài đặt nâng cao</string>
-    <string name="profile_advanced_show">▸ Cài đặt nâng cao (góc giá đỡ, loại ảnh)</string>
-    <string name="profile_mount_title">Góc chếch giá đỡ (chỉnh tay)</string>
-    <string name="profile_mount_hint">App tự đo hướng camera khi bạn tăng tốc / phanh vài lần. Chỉ chỉnh ở đây nếu app báo chưa đo được: camera hơi chếch về phía trước hay phía sau bao nhiêu độ.</string>
-    <string name="profile_mount_forward">chếch về phía trước</string>
-    <string name="profile_mount_backward">chếch về phía sau</string>
-    <string name="profile_mount_square">vuông góc với đường</string>
-    <string name="profile_roles_title">Chọn loại ảnh khi chụp địa điểm</string>
-    <string name="profile_roles_ask">Hỏi loại của từng ảnh (mặt tiền, biển hiệu…)</string>
-    <string name="profile_roles_hint">Không cần: hệ thống tự nhận ra ảnh nào là mặt tiền, biển hiệu, bên trong. Chỉ bật khi nhóm yêu cầu.</string>
-    <string name="profile_done">Xong</string>
-    <string name="profile_replay_onboarding">Xem lại phần giới thiệu</string>
+    <!-- Settings -->
+    <string name="settings_title">Cài đặt</string>
+    <string name="settings_contributor">Người ghi</string>
+    <string name="settings_email">Email</string>
+    <string name="settings_email_ok">Không cần xác minh. Dùng để ghi công và gộp các phiên ghi của bạn.</string>
+    <string name="settings_email_bad">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
+    <string name="settings_display_name">Tên hiển thị (không bắt buộc)</string>
+    <string name="settings_road_data">Dữ liệu đường offline</string>
+    <string name="settings_advanced_hide">▾ Ẩn cài đặt nâng cao</string>
+    <string name="settings_advanced_show">▸ Cài đặt nâng cao (góc giá đỡ, loại ảnh)</string>
+    <string name="settings_mount_title">Góc chếch giá đỡ (chỉnh tay)</string>
+    <string name="settings_mount_hint">App tự đo hướng camera khi bạn tăng tốc / phanh vài lần. Chỉ chỉnh ở đây nếu app báo chưa đo được: camera hơi chếch về phía trước hay phía sau bao nhiêu độ.</string>
+    <string name="settings_mount_forward">chếch về phía trước</string>
+    <string name="settings_mount_backward">chếch về phía sau</string>
+    <string name="settings_mount_square">vuông góc với đường</string>
+    <string name="settings_roles_title">Chọn loại ảnh khi chụp địa điểm</string>
+    <string name="settings_roles_ask">Hỏi loại của từng ảnh (mặt tiền, biển hiệu…)</string>
+    <string name="settings_roles_hint">Không cần: hệ thống tự nhận ra ảnh nào là mặt tiền, biển hiệu, bên trong. Chỉ bật khi nhóm yêu cầu.</string>
+    <string name="settings_replay_onboarding">Xem lại phần giới thiệu</string>
+
+    <!-- access gate: GPS is a must -->
+    <string name="gate_title">Cần có GPS</string>
+    <string name="gate_lead">Mỗi ảnh cần vị trí GPS chính xác, nên app chỉ mở khi đã bật đủ các mục dưới đây.</string>
+    <string name="gate_precise_why">Trong hộp thoại của Android, chọn “Chính xác” (không chọn “Gần đúng”) và “Trong khi dùng ứng dụng”.</string>
+    <string name="gate_location_on">Vị trí của điện thoại (GPS)</string>
+    <string name="gate_location_on_why">Bật Vị trí trong bảng cài đặt nhanh hoặc Cài đặt → Vị trí.</string>
+    <string name="gate_denied">Vẫn chưa được? Mở Cài đặt của app → Quyền, cho phép Camera, và với Vị trí chọn “Chỉ cho phép khi dùng ứng dụng” và bật “Sử dụng vị trí chính xác”.</string>
+    <plurals name="sessionmap_no_gps">
+        <item quantity="other">%1$d ảnh không có vị trí GPS nên không hiện trên bản đồ</item>
+    </plurals>
+    <string name="onboarding_language_title">Ngôn ngữ · Language</string>
+    <string name="onboarding_language_lead">Chọn ngôn ngữ của app.</string>
+    <string name="onboarding_language_later">Có thể đổi lại sau trong Cài đặt.</string>
+    <!-- capture: GPS lost -->
+    <string name="capture_gps_lost_title">Mất GPS: tạm dừng ghi</string>
+    <string name="capture_gps_lost_text">Mỗi ảnh cần vị trí GPS trong 5 giây gần nhất. Chưa ghi gì cho đến khi có lại GPS.</string>
+    <string name="capture_gps_lost_sky">Ra chỗ thoáng, xa nhà cao tầng, cây và mái che.</string>
+    <string name="capture_gps_lost_location">Giữ Vị trí của điện thoại bật, với vị trí chính xác cho app này.</string>
+    <string name="capture_gps_lost_settings">Cài đặt vị trí</string>
+    <string name="capture_gps_lost_resume">App tự ghi tiếp ngay khi có lại GPS.</string>
+    <!-- navigation: home = sessions -->
+    <string name="nav_back">Quay lại</string>
+    <string name="sessions_empty_text">Chạy dọc một con phố hoặc dừng ở vài cửa hàng. Các phiên ghi sẽ hiện ở đây, sẵn sàng để gửi.</string>
+    <string name="sessionmap_counter">%1$d / %2$d</string>
+    <!-- device check: what the phone must have -->
+    <string name="device_title">Điện thoại này không ghi được</string>
+    <string name="device_lead">POI Capture cần những thứ sau để đặt mỗi ảnh đúng chỗ, và máy này không có:</string>
+    <string name="device_need_gps">Bộ thu GPS</string>
+    <string name="device_need_gps_why">Vị trí của mỗi ảnh.</string>
+    <string name="device_need_gyro">Con quay hồi chuyển (gyroscope)</string>
+    <string name="device_need_gyro_why">Biết camera đang nhìn hướng nào.</string>
+    <string name="device_need_accel">Cảm biến gia tốc</string>
+    <string name="device_need_accel_why">Biết hướng camera và cách cầm máy.</string>
+    <string name="device_need_camera">Camera sau, từ 1080p trở lên</string>
+    <string name="device_need_camera_why">Biển hiệu phải đọc được trên ảnh.</string>
+    <string name="device_footer">Vui lòng ghi bằng điện thoại khác.</string>
+    <string name="device_close">Đóng</string>
+    <string name="sessionmap_move_banner">Kéo bản đồ dưới ghim</string>
+    <string name="sessionmap_move_title">Sửa vị trí ảnh %1$d/%2$d</string>
+    <string name="sessionmap_move_hint">Ghim luôn ở giữa; phóng to để đặt đúng cửa.</string>
+    <string name="sessionmap_move_distance">Cách vị trí cũ %1$d m</string>
+    <string name="sessionmap_place_here">Đặt ở đây</string>
+    <string name="sessionmap_cancel">Huỷ</string>
+    <string name="setup_sweep_sub">Chạy xe · tự chụp</string>
+    <string name="setup_place_sub">Dừng ở từng cửa hàng</string>
+    <string name="setup_mode_short">Cách ghi</string>
+    <string name="setup_plan_auto_short">%1$s m/ảnh · ≤ %2$d km/h</string>
+    <string name="setup_plan_short">≤ %1$d km/h</string>
+    <string name="setup_need_gps">Đang chờ GPS…</string>
+    <string name="setup_need_email">Nhập email để bắt đầu</string>
+    <string name="setup_info_title">Cách dùng</string>
+    <string name="setup_info_gps_title">GPS</string>
+    <string name="setup_info_gps">Nút Bắt đầu mở khi máy bắt được vệ tinh trong 5 giây gần nhất. Ngoài trời thoáng chỉ vài giây; trong nhà hay giữa nhà cao tầng có thể mất vài phút. Vị trí từ Wi-Fi không bao giờ dùng cho ảnh.</string>
+    <string name="sessionmap_warn_far">Xa hơn %1$d m so với chỗ chụp</string>
+    <string name="sessionmap_warn_road">Đang nằm trên đường, không phải trên nhà</string>
+    <string name="sessionmap_warn_across">Ở bên kia đường so với hướng camera</string>
+    <string name="service_too_dark">Quá tối: ảnh có thể không thấy biển hiệu</string>
+    <string name="service_blurry">Ảnh bị nhoè: chạy chậm lại</string>
+    <string name="service_blurry_poi">Ảnh vừa chụp bị nhoè: giữ yên máy và chụp lại</string>
+    <string name="capture_too_dark_title">Quá tối để quét đường</string>
+    <string name="capture_too_dark_text">Khi chạy xe cần tốc độ chụp 1/500 giây hoặc nhanh hơn để đọc được biển hiệu, và trời không đủ sáng. Hãy dùng Chụp địa điểm: dừng ở từng cửa hàng và giữ yên máy.</string>
+    <string name="capture_too_dark_back">Quay lại</string>
+    <string name="sessions_title">Ghi POI</string>
+    <string name="home_new_session">Ghi mới</string>
+    <string name="session_no_street">Chưa rõ tên đường</string>
 </resources>

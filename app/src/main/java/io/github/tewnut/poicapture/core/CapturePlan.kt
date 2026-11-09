@@ -28,6 +28,21 @@ data class CapturePlan(
 
     companion object {
         const val DEFAULT_HFOV = 70.0
+
+        /**
+         * Expected camera → shop-front distance from the type of road being ridden (OSM `highway`), on the near side
+         * of what is usual so that photos overlap even where the fronts are close: the distance changes from block to
+         * block, so it is not asked. Unknown road: the nearest case. Where a shop really is comes from several photos
+         * (triangulation by the agent), not from this number.
+         */
+        fun facadeForRoad(highway: String?): Double = when (highway?.removeSuffix("_link")) {
+            "motorway", "trunk", "primary" -> 8.0
+            "secondary" -> 6.0
+            "tertiary" -> 5.0
+            else -> UNKNOWN_ROAD_FACADE_M      // residential, service, alleys, living streets, unknown
+        }
+        const val UNKNOWN_ROAD_FACADE_M = 4.0
+        const val DEFAULT_HFOV_PORTRAIT = 43.0   // the 16:9 frame's short side, same lens as DEFAULT_HFOV
         const val EXPOSURE_S = 1.0 / 250      // typical phone daylight exposure on auto (the real one is in each photo's EXIF)
         const val MAX_BLUR_PX = 8.0           // at 2560 px width: small sign text still readable
         const val MAX_SHOTS_PER_SEC = 1.5     // sustained full-resolution shots on a mid-range phone

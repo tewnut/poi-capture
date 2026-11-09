@@ -12,6 +12,13 @@ import java.io.File
 import java.util.zip.ZipFile
 
 class StoreExportTest {
+    @Test fun aSessionIsNamedAfterItsStreetAndDay() {
+        val items = List(5) { org.json.JSONObject().put("roadName", "Nguyễn Thanh Sơn") } + org.json.JSONObject().put("roadName", "Đường số 6")
+        val utc7 = java.time.ZoneId.of("Asia/Ho_Chi_Minh")
+        org.junit.Assert.assertEquals("Nguyễn Thanh Sơn [261110]", TrackStats.sessionName(items, "2026-11-09T17:30:00Z", "?", utc7))
+        org.junit.Assert.assertEquals("No street [261109]", TrackStats.sessionName(emptyList(), "2026-11-09T01:00:00Z", "No street", utc7))
+    }
+
     @get:Rule val tmp = TemporaryFolder()
 
     private fun session(road: Road = Road.of(WAY, listOf(WAY)), kind: SessionKind = SessionKind.SWEEP) = Session(

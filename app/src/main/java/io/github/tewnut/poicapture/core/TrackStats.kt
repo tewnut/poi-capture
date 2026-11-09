@@ -36,6 +36,18 @@ data class TrackStats(val distanceM: Double, val durationMs: Long, val points: I
          * The most photographed roads of a session (auto mode), most frequent first; a road counts only when at
          * least `minShare` of all items were taken on it (one stray match does not name a session).
          */
+        /**
+         * A session's name, "{street} [yymmdd]": the street most of its photos were taken on (any street when none
+         * dominates, [fallback] when none is known) and the local day it started.
+         */
+        fun sessionName(items: List<JSONObject>, startedIso: String?, fallback: String,
+                        zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+            val street = mainRoads(items, max = 1).firstOrNull() ?: mainRoads(items, max = 1, minShare = 0.0).firstOrNull() ?: fallback
+            val day = runCatching { java.time.format.DateTimeFormatter.ofPattern("yyMMdd").withZone(zone).format(java.time.Instant.parse(startedIso)) }
+                .getOrNull()
+            return if (day != null) "$street [$day]" else street
+        }
+
         fun mainRoads(items: List<JSONObject>, max: Int = 2, minShare: Double = 0.2): List<String> =
             items.mapNotNull { it.optString("roadName").takeIf { n -> n.isNotBlank() && n != "null" } }
                 .groupingBy { it }.eachCount().entries

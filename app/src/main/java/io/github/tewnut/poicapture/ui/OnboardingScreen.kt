@@ -69,22 +69,24 @@ import io.github.tewnut.poicapture.net.RoadSource
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class Step { WELCOME, EMAIL, PERMISSIONS, ROADS, READY }
+private enum class Step { LANGUAGE, WELCOME, EMAIL, PERMISSIONS, ROADS, READY }
 
 /**
- * First run, once per phone: what the app does → email (not verified) → permissions → offline road data for where the
- * contributor is → mounting and facade distance. Everything here can be changed later in Hồ sơ.
+ * First run, once per phone: language → what the app does → email (not verified) → permissions → offline road data for
+ * where the contributor is → mounting and facade distance. Every step is a must; all of it can be changed later in
+ * Settings.
  */
 @Composable
 fun OnboardingScreen(onDone: () -> Unit) {
     val ctx = LocalContext.current
-    var step by rememberSaveable { mutableStateOf(Step.WELCOME) }
-    BackHandler(enabled = step != Step.WELCOME) { step = Step.entries[step.ordinal - 1] }
+    // saveable: picking a language recreates the activity, the onboarding stays on its step
+    var step by rememberSaveable { mutableStateOf(Step.LANGUAGE) }
+    BackHandler(enabled = step.ordinal > 0) { step = Step.entries[step.ordinal - 1] }
 
     Column(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
         // top bar: back + progress
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (step != Step.WELCOME) TextButton(onClick = { step = Step.entries[step.ordinal - 1] }) { Text(stringResource(R.string.onboarding_back)) }
+            if (step.ordinal > 0) TextButton(onClick = { step = Step.entries[step.ordinal - 1] }) { Text(stringResource(R.string.onboarding_back)) }
             Spacer(Modifier.weight(1f))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(end = 12.dp)) {
                 for (s in Step.entries) {
@@ -94,6 +96,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
             }
         }
         when (step) {
+            Step.LANGUAGE -> LanguageStep { step = Step.WELCOME }
             Step.WELCOME -> WelcomeStep { step = Step.EMAIL }
             Step.EMAIL -> EmailStep(ctx) { step = Step.PERMISSIONS }
             Step.PERMISSIONS -> PermissionsStep(ctx) { step = Step.ROADS }
@@ -105,7 +108,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
 
 /** Scrolling body + the primary button pinned at the bottom (and an optional secondary action above it). */
 @Composable
-private fun StepFrame(title: String, lead: String?, button: String, enabled: Boolean = true, onNext: () -> Unit,
+internal fun StepFrame(title: String, lead: String?, button: String, enabled: Boolean = true, onNext: () -> Unit,
                       secondary: (@Composable () -> Unit)? = null, content: @Composable () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
@@ -124,7 +127,7 @@ private fun StepFrame(title: String, lead: String?, button: String, enabled: Boo
 }
 
 @Composable
-private fun IconRow(icon: String, title: String, text: String, trailing: (@Composable () -> Unit)? = null) {
+internal fun IconRow(icon: String, title: String, text: String, trailing: (@Composable () -> Unit)? = null) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         Box(Modifier.size(48.dp).background(Palette.GreenLight, CircleShape), contentAlignment = Alignment.Center) {
             Text(icon, fontSize = 22.sp)
@@ -138,9 +141,21 @@ private fun IconRow(icon: String, title: String, text: String, trailing: (@Compo
 }
 
 @Composable
-private fun WhiteCard(content: @Composable () -> Unit) {
+internal fun WhiteCard(content: @Composable () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(1.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
+    }
+}
+
+// ---------------------------------------------------------------- 0. language
+
+/** First of all, so everything after it reads in the contributor's language (the title is in both). */
+@Composable
+private fun LanguageStep(onNext: () -> Unit) {
+    StepFrame(stringResource(R.string.onboarding_language_title), stringResource(R.string.onboarding_language_lead),
+        stringResource(R.string.onboarding_continue), onNext = onNext) {
+        WhiteCard { LanguageRow() }
+        Hint(stringResource(R.string.onboarding_language_later))
     }
 }
 
@@ -221,12 +236,27 @@ private fun PermissionsStep(ctx: Context, onNext: () -> Unit) {
     val list = remember { perms() }
     // re-read the grants after each request / return from Settings
     val missing = remember(tick) { list.filter { p -> !granted(ctx, p.names.first()) } }
-    val required = missing.filter { it.icon != "🔔" }
+    val required = missing
+    // the phone's location switch too: GPS is a must, and the next step looks for the province
+    val access = rememberRequiredAccess()
 
+    // every permission is a must: no "Later"; the button asks, then (Android stops asking) opens Settings
     StepFrame(stringResource(R.string.onboarding_perms_title), stringResource(R.string.onboarding_perms_lead),
-        stringResource(if (missing.isEmpty()) R.string.onboarding_continue else R.string.onboarding_perms_grant),
-        onNext = { if (missing.isEmpty()) onNext() else request.launch(missing.flatMap { it.names }.toTypedArray()) },
-        secondary = { if (asked && missing.isNotEmpty()) TextButton(onClick = onNext) { Text(stringResource(R.string.onboarding_perms_later)) } }) {
+        stringResource(when {
+            missing.isNotEmpty() && asked -> R.string.onboarding_open_settings
+            missing.isNotEmpty() -> R.string.onboarding_perms_grant
+            !access.locationOn -> R.string.common_turn_on_location
+            else -> R.string.onboarding_continue
+        }),
+        onNext = {
+            when {
+                missing.isNotEmpty() && asked -> settings.launch(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", ctx.packageName, null)))
+                missing.isNotEmpty() -> request.launch(missing.flatMap { it.names }.toTypedArray())
+                !access.locationOn -> ctx.startActivity(Intent(AndroidSettings.ACTION_LOCATION_SOURCE_SETTINGS))
+                else -> onNext()
+            }
+        }) {
         WhiteCard {
             for (p in list) {
                 val ok = p !in missing
@@ -235,12 +265,19 @@ private fun PermissionsStep(ctx: Context, onNext: () -> Unit) {
                         fontWeight = FontWeight.Bold, fontSize = if (ok) 20.sp else 13.sp)
                 }
             }
+            IconRow("🛰️", stringResource(R.string.gate_location_on), stringResource(R.string.gate_location_on_why)) {
+                Text(if (access.locationOn) "✓" else stringResource(R.string.onboarding_perm_missing),
+                    color = if (access.locationOn) Palette.Green else Palette.Amber,
+                    fontWeight = FontWeight.Bold, fontSize = if (access.locationOn) 20.sp else 13.sp)
+            }
         }
+        if (missing.any { it.title == R.string.onboarding_perm_location }) Hint(stringResource(R.string.gate_precise_why))
         if (asked && required.isNotEmpty()) {
             Hint(stringResource(R.string.onboarding_perms_required, joinTitles(ctx, required)), color = Palette.Amber)
-            TextButton(onClick = {
-                settings.launch(Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null)))
-            }) { Text(stringResource(R.string.onboarding_open_settings)) }
+            // Settings is the main button now; this one asks once more (Android may still show its dialog)
+            TextButton(onClick = { request.launch(missing.flatMap { it.names }.toTypedArray()) }) {
+                Text(stringResource(R.string.onboarding_perms_grant))
+            }
         }
     }
 }
@@ -266,7 +303,8 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
         catch (e: Exception) { error = errorText(ctx, e) }
         loading = false
     }
-    val live = rememberLiveLocation()
+    // which province: a Wi-Fi / cell fix is close enough, and indoors it comes long before GPS
+    val live = rememberLocationState().approx
     val suggestion = live?.let { RoadSource.suggest(catalogue, it.lat, it.lon) }
     // the province the contributor is in: download its pack right away (once), no tap needed
     var autoStarted by rememberSaveable { mutableStateOf(false) }
@@ -279,8 +317,11 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     }
     var showAll by rememberSaveable { mutableStateOf(false) }
 
+    // a must: no way on until at least one province / city pack is on the phone
+    val haveRoads = installed.isNotEmpty()
     StepFrame(stringResource(R.string.onboarding_roads_title), stringResource(R.string.onboarding_roads_lead),
-        stringResource(R.string.onboarding_continue), onNext = onNext) {
+        stringResource(if (haveRoads) R.string.onboarding_continue else R.string.onboarding_roads_need),
+        enabled = haveRoads, onNext = onNext) {
         when {
             loading && catalogue.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -288,10 +329,7 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
             }
             error != null && catalogue.isEmpty() -> {
                 Hint(stringResource(R.string.onboarding_roads_error, error ?: ""), color = Palette.Red)
-                Row {
-                    TextButton(onClick = { attempt++ }) { Text(stringResource(R.string.onboarding_retry)) }
-                    Hint(stringResource(R.string.onboarding_roads_skip), Modifier.align(Alignment.CenterVertically))
-                }
+                TextButton(onClick = { attempt++ }) { Text(stringResource(R.string.onboarding_retry)) }
             }
         }
         if (suggestion != null) {
@@ -333,16 +371,6 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
 
     StepFrame(stringResource(R.string.onboarding_ready_title), null, stringResource(R.string.onboarding_ready_button),
         onNext = { Prefs.saveSettings(ctx, settings); onDone() }) {
-        WhiteCard {
-            Text(stringResource(R.string.onboarding_facade_title), fontWeight = FontWeight.Bold, color = Palette.Ink)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (d in listOf(4.0, 6.0, 8.0, 12.0)) {
-                    FilterChip(settings.facadeDistanceM == d, { settings = settings.copy(facadeDistanceM = d) },
-                        { Text(stringResource(R.string.setup_distance_m, d.roundToInt())) })
-                }
-            }
-            Hint(stringResource(R.string.onboarding_facade_hint, String.format(Locale.ROOT, "%.1f", plan.photoEveryM), plan.maxSpeedKmh))
-        }
         WhiteCard {
             Text(stringResource(R.string.onboarding_mount_title), fontWeight = FontWeight.Bold, color = Palette.Ink)
             Hint(stringResource(R.string.onboarding_mount_text))

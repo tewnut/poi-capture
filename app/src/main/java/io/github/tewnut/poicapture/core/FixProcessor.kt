@@ -200,7 +200,7 @@ class FixProcessor(
 fun facadeFields(at: LatLon?, cameraBearing: Double?, distanceM: Double?): JSONObject? {
     if (at == null || cameraBearing == null || distanceM == null) return null
     val p = Geo.destination(at, cameraBearing, distanceM)
-    return JSONObject().put("facadeLat", p.lat).put("facadeLon", p.lon).put("facadeDistanceM", distanceM).put("facadeSource", "profile")
+    return JSONObject().put("facadeLat", p.lat).put("facadeLon", p.lon).put("facadeDistanceM", distanceM).put("facadeSource", "roadType")
 }
 
 /**

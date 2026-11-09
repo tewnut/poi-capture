@@ -34,6 +34,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import kotlin.math.roundToInt
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -101,9 +107,10 @@ data class PhotoPin(val id: String, val gps: LatLon, val fixed: LatLon?, val tMs
 }
 
 /**
- * Map of one session: the track, a dot where each photo was taken (orange when moved by hand), and a panel to look at
- * a photo and put it in the right place (tap "Sửa vị trí" then the map, or drag the selected dot).
- * `live` = the session is being recorded: data is reloaded whenever `refresh` changes and the map follows the rider.
+ * Map of one session: the track, a dot where each photo was taken (orange when moved by hand), and a strip of photo
+ * cards to swipe through. Swiping centres the map on that photo, tapping a dot brings its card; "Move" zooms in so
+ * the dot can be put on the right doorway (tap the map or drag the dot). Tap a photo to see it full screen.
+ * `live` = the session is being recorded: data is reloaded whenever `refresh` changes and the newest photo is shown.
  */
 @Composable
 fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifier = Modifier) {
@@ -111,18 +118,35 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
     val store = remember { CaptureService.store(ctx) }
     val scope = rememberCoroutineScope()
     var pins by remember { mutableStateOf<List<PhotoPin>>(emptyList()) }
+    var noGps by remember { mutableIntStateOf(0) }   // photos taken before / without a GPS fix: not on the map
     var track by remember { mutableStateOf<List<LatLon>>(emptyList()) }
-    var selected by remember { mutableStateOf<String?>(null) }
     var relocating by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
+    var viewer by remember { mutableStateOf<Int?>(null) }   // full-screen photo, by index
 
     LaunchedEffect(sessionId, refresh, reload) {
-        val (p, t) = withContext(Dispatchers.IO) {
-            store.items(sessionId).mapNotNull { PhotoPin.of(it) }.sortedBy { it.tMs } to store.trackPoints(sessionId)
-        }
-        pins = p
+        val (items, t) = withContext(Dispatchers.IO) { store.items(sessionId) to store.trackPoints(sessionId) }
+        pins = items.mapNotNull { PhotoPin.of(it) }.sortedBy { it.tMs }
+        noGps = items.count { it.optString("kind") == "photo" } - pins.size
         track = t
     }
+
+    // roads around the photos (offline packs / saved data, no network): for the Move warnings
+    var ways by remember { mutableStateOf<List<io.github.tewnut.poicapture.core.Way>>(emptyList()) }
+    LaunchedEffect(pins.size) {
+        if (pins.isEmpty()) return@LaunchedEffect
+        ways = withContext(Dispatchers.IO) {
+            pins.flatMap { io.github.tewnut.poicapture.core.RoadCells.around(it.gps, 60.0) }.distinct()
+                .flatMap { c -> runCatching { io.github.tewnut.poicapture.net.RoadSource.local(ctx, c)?.ways }.getOrNull().orEmpty() }
+                .distinctBy { it.key }
+        }
+    }
+    val pager = androidx.compose.foundation.pager.rememberPagerState { pins.size }
+    val selected = pins.getOrNull(pager.currentPage)?.id
+    // another photo on screen: stop moving the previous one
+    LaunchedEffect(pager.currentPage) { relocating = false }
+    // recording: show the newest photo as it comes in
+    LaunchedEffect(pins.size) { if (live && pins.isNotEmpty()) pager.animateScrollToPage(pins.size - 1) }
 
     fun move(id: String, to: LatLon?) {
         scope.launch {
@@ -132,83 +156,177 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
         }
     }
 
-    val sel = pins.firstOrNull { it.id == selected }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var cardsPx by remember { mutableIntStateOf(0) }   // height of the card strip: the map centres above it
+    var barPx by remember { mutableIntStateOf(0) }     // height of the move bar
+    var mapView by remember { mutableStateOf<MapView?>(null) }
+    var centre by remember { mutableStateOf<LatLon?>(null) }   // under the pin while moving
+    val sel = pins.getOrNull(pager.currentPage)
+    val insetPx = if (relocating) barPx else cardsPx
+    // Move starts with the pin on the photo: 0 m until the map is dragged
+    LaunchedEffect(relocating) { if (relocating) centre = sel?.at }
     Box(modifier) {
-        PinsMap(pins, track, selected, live, relocating,
-            onSelect = { selected = it; relocating = false },
-            onMapTap = { p -> val s = selected; if (relocating && s != null) move(s, p) },
-            onDragged = { id, p -> move(id, p) },
+        PinsMap(pins, track, selected, live, relocating, bottomInsetPx = insetPx, moveCentre = if (relocating) centre else null,
+            onSelect = { id -> pins.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } },
+            onMap = { mapView = it }, onCentre = { centre = it },
             modifier = Modifier.fillMaxSize().clipToBounds())
 
-        if (pins.isEmpty()) {
-            Pill(stringResource(if (live) R.string.sessionmap_no_photos_live else R.string.sessionmap_no_photos),
-                Modifier.align(Alignment.BottomCenter).padding(16.dp))
-        } else if (sel == null) {
-            Pill(LocalContext.current.resources.getQuantityString(R.plurals.sessionmap_summary, pins.size, pins.size, pins.count { it.fixed != null }),
-                Modifier.align(Alignment.BottomCenter).padding(16.dp), size = 13.sp)
+        if (relocating && sel != null) {
+            // warnings only (the contributor decides): too far, on the road, across the street
+            val warn = centre?.let { io.github.tewnut.poicapture.core.MoveCheck.warnings(sel.gps, sel.cameraBearing, it, ways) }.orEmpty()
+            val pinColor = if (warn.isEmpty()) Palette.Blue else Palette.Amber
+            // edit mode: framed map, the pin stays in the middle of what is visible, the map moves under it
+            Box(Modifier.fillMaxSize().border(4.dp, Palette.Blue))
+            val liftDp = with(density) { (insetPx / 2).toDp() }
+            Column(Modifier.align(Alignment.Center).offset(y = -liftDp - 26.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Place, null, tint = pinColor,
+                    modifier = Modifier.size(52.dp))
+            }
+            Box(Modifier.align(Alignment.Center).offset(y = -liftDp).size(10.dp, 4.dp)
+                .background(Color(0x55000000), RoundedCornerShape(50)))   // the pin's shadow on the spot
+            Pill(stringResource(R.string.sessionmap_move_banner), Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 12.dp, end = 72.dp),
+                size = 14.sp, bg = Palette.Blue, bold = true)
+            MoveBar(sessionId, sel, pager.currentPage, pins.size, movedM = centre?.let { Geo.distanceM(sel.at, it).roundToInt() }, warn = warn,
+                Modifier.align(Alignment.BottomCenter).onSizeChanged { barPx = it.height },
+                onCancel = { relocating = false },
+                onPlace = { mapView?.let { m -> move(sel.id, pinPoint(m, insetPx)) } })
         }
 
-        if (sel != null) {
-            val idx = pins.indexOf(sel)
-            PhotoPanel(sessionId, sel, idx, pins.size, relocating,
-                onPrev = { if (idx > 0) { selected = pins[idx - 1].id; relocating = false } },
-                onNext = { if (idx < pins.size - 1) { selected = pins[idx + 1].id; relocating = false } },
-                onRelocate = { relocating = !relocating },
-                onReset = { move(sel.id, null) },
-                onClose = { selected = null; relocating = false },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp))
+        if (!relocating) Column(Modifier.align(Alignment.TopCenter).padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (noGps > 0) Pill(ctx.resources.getQuantityString(R.plurals.sessionmap_no_gps, noGps, noGps), size = 13.sp, dot = Palette.Red)
+        }
+
+        if (relocating) Unit
+        else if (pins.isEmpty()) {
+            Pill(stringResource(if (live) R.string.sessionmap_no_photos_live else R.string.sessionmap_no_photos),
+                Modifier.align(Alignment.BottomCenter).padding(16.dp))
+        } else {
+            androidx.compose.foundation.pager.HorizontalPager(pager,
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 12.dp)
+                    .onSizeChanged { cardsPx = it.height + with(density) { 12.dp.roundToPx() } },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp),   // the next card peeks in
+                pageSpacing = 10.dp) { page ->
+                val p = pins[page]
+                PhotoCard(sessionId, p, page, pins.size,
+                    onOpen = { viewer = page },
+                    onRelocate = { if (page == pager.currentPage) relocating = true else scope.launch { pager.animateScrollToPage(page) } },
+                    onReset = { move(p.id, null) })
+            }
+        }
+    }
+    viewer?.let { start -> PhotoViewer(sessionId, pins, start, onClose = { i -> viewer = null; scope.launch { pager.scrollToPage(i) } }) }
+}
+
+/** One photo in the strip: the picture (tap = full screen), where it was taken, and how to fix its place. */
+@Composable
+private fun PhotoCard(sessionId: String, p: PhotoPin, idx: Int, count: Int,
+                      onOpen: () -> Unit, onRelocate: () -> Unit, onReset: () -> Unit) {
+    val thumb = rememberPhoto(sessionId, p.id, sample = 2)
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 10.dp) {
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF101828)).clickable(onClick = onOpen)) {
+                thumb?.let { b ->
+                    // a landscape photo fills the frame; a portrait one is shown whole
+                    Image(b, stringResource(R.string.sessionmap_photo_thumb_desc, idx + 1), Modifier.fillMaxSize(),
+                        contentScale = if (b.width >= b.height) ContentScale.Crop else ContentScale.Fit)
+                }
+                Pill(stringResource(R.string.sessionmap_counter, idx + 1, count), Modifier.align(Alignment.TopStart).padding(8.dp), size = 13.sp)
+                Pill(time(p.tMs), Modifier.align(Alignment.TopEnd).padding(8.dp), size = 13.sp)
+            }
+            Text(p.roadName ?: stringResource(R.string.sessionmap_no_road), fontWeight = FontWeight.Bold, color = Palette.Ink,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Hint(if (p.fixed != null) stringResource(R.string.sessionmap_moved)
+                    else p.accuracyM?.let { stringResource(R.string.sessionmap_gps_accuracy, it) } ?: stringResource(R.string.sessionmap_gps),
+                    Modifier.weight(1f), color = if (p.fixed != null) Palette.Amber else Palette.Muted)
+                if (p.fixed != null) TextButton(onClick = onReset, modifier = Modifier.height(40.dp)) {
+                    Text(stringResource(R.string.sessionmap_back_gps), maxLines = 1)
+                }
+                Button(onClick = onRelocate, modifier = Modifier.height(40.dp)) {
+                    Text(stringResource(R.string.sessionmap_move), maxLines = 1)
+                }
+            }
         }
     }
 }
 
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+/** Move mode, at the bottom instead of the cards: which photo, how far it moved, cancel or place it under the pin. */
 @Composable
-private fun PhotoPanel(sessionId: String, p: PhotoPin, idx: Int, count: Int, relocating: Boolean,
-                       onPrev: () -> Unit, onNext: () -> Unit, onRelocate: () -> Unit, onReset: () -> Unit, onClose: () -> Unit,
-                       modifier: Modifier) {
-    val ctx = LocalContext.current
-    var thumb by remember(p.id) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(p.id) {
-        thumb = withContext(Dispatchers.IO) {
-            val f = CaptureService.store(ctx).photoFile(sessionId, p.id)
-            BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = 4 })?.asImageBitmap()
+private fun MoveBar(sessionId: String, p: PhotoPin, idx: Int, count: Int, movedM: Int?, warn: Set<io.github.tewnut.poicapture.core.MoveWarning>,
+                    modifier: Modifier,
+                    onCancel: () -> Unit, onPlace: () -> Unit) {
+    val thumb = rememberPhoto(sessionId, p.id, sample = 4)
+    androidx.activity.compose.BackHandler(onBack = onCancel)
+    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), color = Color.White, shadowElevation = 12.dp) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(72.dp, 48.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF101828))) {
+                    thumb?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.sessionmap_move_title, idx + 1, count), fontWeight = FontWeight.Bold, color = Palette.Ink,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val w = warn.firstOrNull()
+                    when {
+                        w != null -> Hint("⚠ " + stringResource(when (w) {
+                            io.github.tewnut.poicapture.core.MoveWarning.FAR -> R.string.sessionmap_warn_far
+                            io.github.tewnut.poicapture.core.MoveWarning.ON_ROAD -> R.string.sessionmap_warn_road
+                            io.github.tewnut.poicapture.core.MoveWarning.ACROSS -> R.string.sessionmap_warn_across
+                        }, io.github.tewnut.poicapture.core.MoveCheck.MAX_M.toInt()), color = Palette.Amber)
+                        movedM != null && movedM >= 1 -> Hint(stringResource(R.string.sessionmap_move_distance, movedM), color = Palette.Blue)
+                        else -> Hint(stringResource(R.string.sessionmap_move_hint), color = Palette.Blue)
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(onClick = onCancel, modifier = Modifier.height(52.dp)) { Text(stringResource(R.string.sessionmap_cancel)) }
+                Button(onClick = onPlace, modifier = Modifier.weight(1f).height(52.dp)) {
+                    Text(stringResource(R.string.sessionmap_place_here), fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
-    var big by remember(p.id) { mutableStateOf(false) }
-    if (big) androidx.compose.ui.window.Dialog(onDismissRequest = { big = false },
+}
+
+/** Full screen, swipe between photos; closing returns to the photo last shown. */
+@Composable
+private fun PhotoViewer(sessionId: String, pins: List<PhotoPin>, start: Int, onClose: (Int) -> Unit) {
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = start) { pins.size }
+    androidx.compose.ui.window.Dialog(onDismissRequest = { onClose(pager.currentPage) },
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        Box(Modifier.fillMaxSize().background(Color.Black).clickable { big = false }) {
-            thumb?.let { Image(it, stringResource(R.string.sessionmap_photo_desc, idx + 1), Modifier.fillMaxSize(), contentScale = ContentScale.Fit) }
-            Pill(stringResource(R.string.sessionmap_tap_close), Modifier.align(Alignment.TopCenter).padding(16.dp))
-        }
-    }
-    Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 10.dp) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                Box(Modifier.size(112.dp, 63.dp).border(1.dp, Color(0xFFD0D5DD), RoundedCornerShape(8.dp)).clickable { big = true }) {
-                    thumb?.let { Image(it, stringResource(R.string.sessionmap_photo_thumb_desc, idx + 1), Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize(), pageSpacing = 16.dp) { page ->
+                val b = rememberPhoto(sessionId, pins[page].id, sample = 1)
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    if (b != null) Image(b, stringResource(R.string.sessionmap_photo_desc, page + 1), Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    else androidx.compose.material3.CircularProgressIndicator(color = Color.White)
                 }
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(stringResource(R.string.sessionmap_photo_title, idx + 1, count, time(p.tMs)), fontWeight = FontWeight.Bold, color = Palette.Ink)
-                    Text(p.roadName ?: stringResource(R.string.sessionmap_no_road), color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Hint(if (p.fixed != null) stringResource(R.string.sessionmap_moved)
-                        else p.accuracyM?.let { stringResource(R.string.sessionmap_gps_accuracy, it) } ?: stringResource(R.string.sessionmap_gps),
-                        color = if (p.fixed != null) Palette.Amber else Palette.Muted)
-                    p.facadeDistanceM?.let { Hint(stringResource(R.string.sessionmap_facade, it.toInt()), color = Palette.Muted) }
-                }
-                androidx.compose.material3.IconButton(onClick = onClose) { Text("✕", fontSize = 18.sp, color = Palette.Muted) }
             }
-            if (relocating) Hint(stringResource(R.string.sessionmap_relocate_hint), color = Palette.Blue)
-            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onPrev, enabled = idx > 0, modifier = Modifier.size(56.dp, 48.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("◀", fontSize = 18.sp) }
-                OutlinedButton(onClick = onNext, enabled = idx < count - 1, modifier = Modifier.size(56.dp, 48.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) { Text("▶", fontSize = 18.sp) }
-                Button(onClick = onRelocate, modifier = Modifier.height(48.dp)) { Text(stringResource(if (relocating) R.string.sessionmap_cancel_move else R.string.sessionmap_move), maxLines = 1) }
-                if (p.fixed != null && !relocating) TextButton(onClick = onReset, modifier = Modifier.height(48.dp)) { Text(stringResource(R.string.sessionmap_back_gps), maxLines = 1) }
+            Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().safeDrawingPadding().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Pill(stringResource(R.string.sessionmap_counter, pager.currentPage + 1, pins.size) + " · " + time(pins[pager.currentPage].tMs),
+                    size = 14.sp)
+                Box(Modifier.weight(1f))
+                androidx.compose.material3.IconButton(onClick = { onClose(pager.currentPage) }) {
+                    Text("✕", fontSize = 22.sp, color = Color.White)
+                }
             }
         }
     }
+}
+
+/** A photo from the session, decoded off the main thread ([sample] = 1 full size, 2 half, …). */
+@Composable
+private fun rememberPhoto(sessionId: String, id: String, sample: Int): ImageBitmap? {
+    val ctx = LocalContext.current
+    var b by remember(id, sample) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(id, sample) {
+        b = withContext(Dispatchers.IO) {
+            val f = CaptureService.store(ctx).photoFile(sessionId, id)
+            runCatching { BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap() }.getOrNull()
+        }
+    }
+    return b
 }
 
 private fun time(ms: Long) = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(ms))
@@ -221,12 +339,13 @@ private fun dot(color: Int, sizeDp: Int, density: Float) = GradientDrawable().ap
 }
 
 @Composable
-private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?, live: Boolean, relocating: Boolean,
-                    onSelect: (String) -> Unit, onMapTap: (LatLon) -> Unit, onDragged: (String, LatLon) -> Unit, modifier: Modifier) {
+private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?, live: Boolean, relocating: Boolean, bottomInsetPx: Int,
+                    moveCentre: LatLon?, onSelect: (String) -> Unit, onMap: (MapView) -> Unit, onCentre: (LatLon) -> Unit,
+                    modifier: Modifier) {
     val ctx = LocalContext.current
     val select by rememberUpdatedState(onSelect)
-    val tap by rememberUpdatedState(onMapTap)
-    val dragged by rememberUpdatedState(onDragged)
+    val centreTo by rememberUpdatedState(onCentre)
+    val inset by rememberUpdatedState(bottomInsetPx)
     val moving by rememberUpdatedState(relocating)
     val allPins by rememberUpdatedState(pins)
     val tileUrl = remember { Prefs.settings(ctx).tileUrl }
@@ -234,6 +353,12 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
     val icons = remember {
         mapOf("gps" to dot(Palette.Green.toArgb(), 14, density), "fixed" to dot(0xFFF79009.toInt(), 14, density),
             "sel" to dot(Palette.Blue.toArgb(), 22, density),
+            "origin" to GradientDrawable().apply {     // move mode: where the photo was before
+                shape = GradientDrawable.OVAL
+                setColor(0x331570EF)
+                setStroke((2.5f * density).toInt(), Palette.Blue.toArgb())
+                setSize((18 * density).toInt(), (18 * density).toInt())
+            },
             "facade" to GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 setColor(0xFF7A5AF8.toInt())
@@ -246,9 +371,12 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
             setTileSource(TemplateTileSource(tileUrl))
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-            maxZoomLevel = 19.0          // OSM tiles stop at 19: deeper zoom only blurs them
-            controller.setZoom(17.0)
-            controller.setCenter(GeoPoint(21.0285, 105.8542))
+            // OSM tiles stop at 19; deeper zoom stretches them (blurry) but lets a dot go on the right doorway
+            maxZoomLevel = 22.0
+            // until the session's own points are fitted: where this phone last was (no fixed city)
+            val here = lastKnownPosition(ctx)
+            controller.setZoom(if (here != null) 17.0 else 3.0)
+            controller.setCenter(here?.let { GeoPoint(it.lat, it.lon) } ?: GeoPoint(0.0, 0.0))
         }
     }
     val owner = LocalLifecycleOwner.current
@@ -263,7 +391,20 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
     var fitted by remember { mutableStateOf(false) }
     var lastCount by remember { mutableIntStateOf(0) }
 
-    AndroidView({ map }, modifier) { m ->
+    // the point under the pin (move mode): reported as the map is dragged
+    DisposableEffect(map) {
+        onMap(map)
+        val l = object : org.osmdroid.events.MapListener {
+            override fun onScroll(e: org.osmdroid.events.ScrollEvent?): Boolean { centreTo(pinPoint(map, inset)); return false }
+            override fun onZoom(e: org.osmdroid.events.ZoomEvent?): Boolean { centreTo(pinPoint(map, inset)); return false }
+        }
+        map.addMapListener(l)
+        onDispose { map.removeMapListener(l) }
+    }
+    var shownSel by remember { mutableStateOf<String?>(null) }   // the photo the map last centred on
+    var shownMoving by remember { mutableStateOf(false) }
+    Box(modifier) {
+    AndroidView({ map }, Modifier.fillMaxSize()) { m ->
         m.overlays.clear()
         m.overlays.add(MapEventsOverlay(object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint): Boolean {
@@ -280,19 +421,38 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
                         if (d <= 28 * density) { select(near.id); return true }
                     }
                 }
-                tap(LatLon(p.latitude, p.longitude)); return true
+                return false   // move mode: the map only pans, the pin stays in the middle
             }
             override fun longPressHelper(p: GeoPoint): Boolean = false
         }))
         if (track.size > 1) {
             m.overlays.add(Polyline(m).apply {
                 setPoints(track.map { GeoPoint(it.lat, it.lon) })
-                outlinePaint.color = 0xCC1570EF.toInt()
+                outlinePaint.color = if (relocating) 0x4498A2B3 else 0xCC1570EF.toInt()   // faded while moving a photo
                 outlinePaint.strokeWidth = 6f
             })
         }
+        val moving0 = pins.firstOrNull { it.id == selected }.takeIf { relocating }
+        if (moving0 != null) {
+            // edit mode: only this photo, where it was (ring) and a dashed line to the pin
+            m.overlays.add(Marker(m).apply {
+                position = GeoPoint(moving0.at.lat, moving0.at.lon)
+                icon = icons["origin"]
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                setInfoWindow(null)
+                setOnMarkerClickListener { _, _ -> true }
+            })
+            moveCentre?.let { c ->
+                m.overlays.add(Polyline(m).apply {
+                    setPoints(listOf(GeoPoint(moving0.at.lat, moving0.at.lon), GeoPoint(c.lat, c.lon)))
+                    outlinePaint.color = Palette.Blue.toArgb()
+                    outlinePaint.strokeWidth = 4 * density
+                    outlinePaint.pathEffect = android.graphics.DashPathEffect(floatArrayOf(10 * density, 8 * density), 0f)
+                })
+            }
+        }
         // estimated shop-front points (on the building side), with a line from the camera for the selected photo
-        for (p in pins.filter { it.id == selected }) {   // only for the selected photo: dozens of squares hide the dots
+        for (p in pins.filter { it.id == selected && !relocating }) {   // only for the selected photo: dozens of squares hide the dots
             val fc = p.facade ?: continue
             if (p.id == selected) m.overlays.add(Polyline(m).apply {
                 setPoints(listOf(GeoPoint(p.at.lat, p.at.lon), GeoPoint(fc.lat, fc.lon)))
@@ -308,35 +468,71 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
             })
         }
         // selected last so it is drawn on top
-        for (p in pins.sortedBy { it.id == selected }) {
+        for (p in pins.sortedBy { it.id == selected }.takeIf { !relocating }.orEmpty()) {
             val isSel = p.id == selected
             m.overlays.add(Marker(m).apply {
                 position = GeoPoint(p.at.lat, p.at.lon)
                 icon = icons[if (isSel) "sel" else if (p.fixed != null) "fixed" else "gps"]
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                 setInfoWindow(null)
-                isDraggable = isSel && relocating   // only in "Sửa vị trí": a long press while panning must not move a photo
                 setOnMarkerClickListener { _, _ -> select(p.id); true }
-                setOnMarkerDragListener(object : Marker.OnMarkerDragListener {
-                    override fun onMarkerDrag(marker: Marker) {}
-                    override fun onMarkerDragStart(marker: Marker) {}
-                    override fun onMarkerDragEnd(marker: Marker) = dragged(p.id, LatLon(marker.position.latitude, marker.position.longitude))
-                })
             })
         }
         val all = track + pins.map { it.at }
         if (!fitted && all.size > 1) {
             fitted = true
-            m.post { m.zoomToBoundingBox(BoundingBox.fromGeoPoints(all.map { GeoPoint(it.lat, it.lon) }).increaseByScale(1.3f), false, 60) }
+            shownSel = selected   // the whole session is in view: no jump to photo 1
+            m.post {
+                m.zoomToBoundingBox(BoundingBox.fromGeoPoints(all.map { GeoPoint(it.lat, it.lon) }).increaseByScale(1.3f), false, 60)
+                if (m.zoomLevelDouble > 19.0) m.controller.setZoom(19.0)   // sharp tiles first; zoom in further by hand
+            }
         } else if (!fitted && all.size == 1) {
             fitted = true
+            shownSel = selected   // the whole session is in view: no jump to photo 1
             m.controller.setCenter(GeoPoint(all[0].lat, all[0].lon))
         }
-        // live: keep the newest photo in view while nothing is selected
-        if (live && selected == null && pins.size != lastCount && pins.isNotEmpty()) {
-            m.controller.animateTo(GeoPoint(pins.last().at.lat, pins.last().at.lon))
+        // swiped to another photo (or a new one came in while recording): bring its dot to the centre;
+        // "Move": zoom in on it so it can be put on the right doorway
+        val sel = pins.firstOrNull { it.id == selected }
+        // (move mode waits until the move bar is measured, so the photo lands exactly under the pin)
+        if (sel != null && fitted && (sel.id != shownSel || (relocating && !shownMoving && bottomInsetPx > 0))) {
+            val z = if (relocating) maxOf(m.zoomLevelDouble, 20.0) else m.zoomLevelDouble
+            // the photo goes to the middle of what the cards / move bar leave visible (where the move pin is)
+            m.post { m.controller.animateTo(GeoPoint(sel.at.lat - shiftLat(sel.at.lat, z, bottomInsetPx / 2), sel.at.lon), z, 400L) }
+            shownSel = sel.id
         }
+        shownMoving = relocating && (shownMoving || bottomInsetPx > 0)
         lastCount = pins.size
         m.invalidate()
     }
+    // one-handed zoom, above the cards
+    Column(Modifier.align(Alignment.TopEnd).padding(top = 12.dp, end = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((label, inc) in listOf("+" to true, "−" to false)) {
+            Surface(onClick = { if (inc) map.controller.zoomIn() else map.controller.zoomOut() }, modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(12.dp), color = Color.White, shadowElevation = 4.dp) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(label, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
+                }
+            }
+        }
+    }
+    }
+}
+
+/** The phone's newest remembered position from any provider, or null (no permission / never had one). */
+@android.annotation.SuppressLint("MissingPermission")
+internal fun lastKnownPosition(ctx: android.content.Context): LatLon? = runCatching {
+    val lm = ctx.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+    lm.getProviders(true).mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+        .maxByOrNull { it.elapsedRealtimeNanos }?.let { LatLon(it.latitude, it.longitude) }
+}.getOrNull()
+
+/** Degrees of latitude for [px] screen pixels at this zoom (north-up map). */
+private fun shiftLat(lat: Double, zoom: Double, px: Int): Double =
+    px * org.osmdroid.util.TileSystem.GroundResolution(lat, zoom) / 111_320.0
+
+/** The point under the move pin: the middle of the map area left visible above the bottom panel. */
+private fun pinPoint(m: MapView, insetPx: Int): LatLon {
+    val c = m.mapCenter
+    return LatLon(c.latitude + shiftLat(c.latitude, m.zoomLevelDouble, insetPx / 2), c.longitude)
 }

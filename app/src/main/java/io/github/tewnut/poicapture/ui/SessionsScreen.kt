@@ -17,6 +17,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -56,19 +62,12 @@ import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.core.Exporter
 import io.github.tewnut.poicapture.core.Mode
 import io.github.tewnut.poicapture.core.Session
-import io.github.tewnut.poicapture.core.UploadState
-import io.github.tewnut.poicapture.capture.ServerApi
-import io.github.tewnut.poicapture.capture.Uploads
-import io.github.tewnut.poicapture.Prefs
-import org.json.JSONObject
-import kotlinx.coroutines.delay
-import androidx.compose.material3.LinearProgressIndicator
 import io.github.tewnut.poicapture.core.SessionKind
 import io.github.tewnut.poicapture.core.Side
 import io.github.tewnut.poicapture.core.TrackStats
-import io.github.tewnut.poicapture.core.Vehicle
 import io.github.tewnut.poicapture.core.iso
 import java.io.File
+import org.json.JSONObject
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -78,7 +77,7 @@ private data class SessionRow(val s: Session, val title: String, val photos: Int
                               val relocated: Int, val pois: Int = 0, val marks: Int = 0)
 
 @Composable
-fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
+fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> Unit, onOpenSettings: () -> Unit) {
     val ctx = LocalContext.current
     val store = remember { CaptureService.store(ctx) }
     val scope = rememberCoroutineScope()
@@ -90,10 +89,6 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
     var confirmDel by remember { mutableStateOf<Session?>(null) }
     var saving by remember { mutableStateOf<Session?>(null) }
     var reload by remember { mutableIntStateOf(0) }
-    val configured = remember { Uploads.configured(ctx) }
-    val wifiOnly = remember { !Prefs.settings(ctx).uploadOnMobileData }
-    var uploads by remember { mutableStateOf<Map<String, Pair<UploadState, Boolean>>>(emptyMap()) }   // state, changed since
-    var agent by remember { mutableStateOf<Map<String, JSONObject>>(emptyMap()) }
 
     LaunchedEffect(reload, active) {
         rows = withContext(Dispatchers.IO) {
@@ -101,11 +96,9 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
                 val items = store.items(s.id)
                 val pois = if (s.kind == SessionKind.POI) store.pois(s.id) else emptyList()
                 val names = pois.mapNotNull { it.optJSONObject("fields")?.optString("name")?.takeIf { n -> n.isNotBlank() } }
-                val title = when {
-                    s.kind == SessionKind.POI -> names.take(2).joinToString(", ").ifEmpty { ctx.plural(R.plurals.sessions_places, pois.size) }
-                    s.road.auto -> TrackStats.mainRoads(items).joinToString(", ").ifEmpty { ctx.getString(R.string.road_auto) }
-                    else -> roadText(ctx, s.road)
-                }
+                // saved sessions carry their name; older ones get the same "{street} [yymmdd]" from their photos
+                val title = s.name ?: TrackStats.sessionName(items, s.startedAt ?: s.createdAt,
+                    if (!s.road.auto && s.kind != SessionKind.POI) roadText(ctx, s.road) else ctx.getString(R.string.session_no_street))
                 SessionRow(s, title,
                     items.count { it.optString("kind") == "photo" },
                     items.count { it.optString("kind") == "video" && store.videoFile(s.id, it.getString("id")).length() > 0 },
@@ -114,27 +107,6 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
                     items.count { it.has("relocatedLat") && !it.isNull("relocatedLat") },
                     pois.size, if (s.kind == SessionKind.SWEEP) store.marks(s.id).size else 0)
             }
-        }
-    }
-
-    // background upload progress (written by the worker): refresh every 2 s while the list is visible
-    LaunchedEffect(rows, configured) {
-        if (!configured) return@LaunchedEffect
-        val ids = rows?.map { it.s.id } ?: return@LaunchedEffect
-        while (true) {
-            uploads = withContext(Dispatchers.IO) {
-                ids.associateWith { id -> store.uploadState(id).let { it to (it.state == "uploaded" && store.contentVersion(id) > it.uploadedVersion) } }
-            }
-            delay(2000)
-        }
-    }
-    // what the agent made of uploaded sessions (only with the optional server API)
-    LaunchedEffect(rows, configured, uploads.isNotEmpty()) {
-        if (!configured || uploads.isEmpty()) return@LaunchedEffect      // wait for the upload states first
-        while (true) {
-            val done = uploads.filterValues { it.first.state == "uploaded" }.keys
-            if (done.isNotEmpty()) agent = withContext(Dispatchers.IO) { done.mapNotNull { id -> ServerApi.status(ctx, id)?.let { id to it } }.toMap() }
-            delay(30_000)
         }
     }
 
@@ -180,21 +152,22 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
     }
 
     val list = rows
-    LazyColumn(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Box(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
+    Column(Modifier.fillMaxSize()) {
+    ScreenHeader(stringResource(R.string.sessions_title)) {
+        IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, stringResource(R.string.nav_settings), tint = Palette.Ink) }
+    }
+    if (list != null && list.isEmpty()) {
+        EmptySessions(onNew, Modifier.weight(1f))
+        if (msg.isNotEmpty()) Hint(msg, Modifier.padding(16.dp), color = if (msgError) Palette.Red else Palette.Green)
+        return@Column
+    }
+    // room at the bottom so the floating "New session" button never hides the last card
+    LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 104.dp)) {
         item {
-            Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(stringResource(R.string.sessions_title), fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
-                if (list != null && configured) {
-                    val pending = list.filter { it.photos + it.videos > 0 && active != it.s.id &&
-                        uploads[it.s.id]?.let { (u, changed) -> u.state != "uploaded" || changed } != false }
-                    Text(
-                        if (pending.isEmpty()) stringResource(R.string.sessions_all_uploaded)
-                        else ctx.plural(R.plurals.sessions_not_uploaded, pending.size, pending.size, mb(pending.sumOf { it.bytes })),
-                        color = if (pending.isEmpty()) Palette.Green else Palette.Amber, fontWeight = FontWeight.SemiBold,
-                    )
-                    Hint(stringResource(if (wifiOnly) R.string.sessions_auto_upload_wifi else R.string.sessions_auto_upload_any,
-                        mb(store.root.apply { mkdirs() }.usableSpace)))
-                } else if (list != null) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (list != null) {
                     val unsent = list.filter { it.s.exportedAt == null && it.photos + it.videos > 0 && active != it.s.id }
                     Text(
                         if (unsent.isEmpty()) stringResource(R.string.sessions_none_unsent)
@@ -212,24 +185,20 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
                 Hint(stringResource(R.string.sessions_loading))
             }
         }
-        if (list != null && list.isEmpty()) {
-            item {
-                Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(stringResource(R.string.sessions_empty), color = Palette.Muted)
-                    Button(onClick = onNew) { Text(stringResource(R.string.sessions_first)) }
-                }
-            }
-        }
         items(list ?: emptyList(), key = { it.s.id }) { r ->
-            SessionCard(r, active == r.s.id, busy == r.s.id, if (configured) uploads[r.s.id] else null, agent[r.s.id], wifiOnly,
-                onUpload = { scope.launch { withContext(Dispatchers.IO) { Uploads.enqueue(ctx, r.s.id) }; msgError = false; msg = ctx.getString(R.string.sessions_queued) } },
+            SessionCard(r, active == r.s.id, busy == r.s.id,
                 onSend = { send(r.s) },
-                onMap = { onOpenMap(r.s.id) },
+                onMap = { onOpenMap(r.s.id, r.title) },
                 onSave = { saving = r.s; saveLauncher.launch(Exporter.fileName(r.s)) },
                 onDelete = { confirmDel = r.s })
         }
-        item { Box(Modifier.padding(8.dp)) }
+    }
+    }
+    if (list != null && list.isNotEmpty()) androidx.compose.material3.ExtendedFloatingActionButton(
+        onClick = onNew, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp).height(60.dp),
+        containerColor = Palette.Green, contentColor = Color.White,
+        icon = { Icon(Icons.Filled.Add, null) },
+        text = { Text(stringResource(R.string.home_new_session), fontSize = 18.sp, fontWeight = FontWeight.Bold) })
     }
 
     confirmDel?.let { s ->
@@ -237,10 +206,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
             onDismissRequest = { confirmDel = null },
             title = { Text(stringResource(R.string.sessions_delete_title)) },
             text = {
-                val up = uploads[s.id]
                 Text(stringResource(when {
-                    up != null && up.first.state == "uploaded" && !up.second -> R.string.sessions_delete_uploaded
-                    up != null && up.first.state == "uploaded" -> R.string.sessions_delete_changed
                     s.exportedAt != null -> R.string.sessions_delete_sent
                     else -> R.string.sessions_delete_unsent
                 }))
@@ -249,7 +215,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
                 confirmDel = null
                 msgError = false; msg = ctx.getString(R.string.sessions_deleting)
                 scope.launch {
-                    withContext(Dispatchers.IO) { store.delete(s.id); Uploads.forget(ctx, s.id) }
+                    withContext(Dispatchers.IO) { store.delete(s.id) }
                     msg = ctx.getString(R.string.sessions_deleted)
                     reload++
                 }
@@ -260,8 +226,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (String) -> Unit) {
 }
 
 @Composable
-private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload: Pair<UploadState, Boolean>?, agentStatus: JSONObject?,
-                        wifiOnly: Boolean, onUpload: () -> Unit,
+private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean,
                         onSend: () -> Unit, onMap: () -> Unit, onSave: () -> Unit, onDelete: () -> Unit) {
     val ctx = LocalContext.current
     val s = r.s
@@ -275,23 +240,15 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                 Box {
                     IconButton(onClick = { menu = true }, enabled = !recording && !busy) { Icon(Icons.Filled.MoreVert, stringResource(R.string.sessions_more)) }
                     DropdownMenu(menu, { menu = false }) {
-                        if (!empty && upload != null) DropdownMenuItem({ Text(stringResource(R.string.sessions_send_other_app)) }, { menu = false; onSend() })
                         if (!empty) DropdownMenuItem({ Text(stringResource(R.string.sessions_save_zip)) }, { menu = false; onSave() })
                         DropdownMenuItem({ Text(stringResource(R.string.sessions_delete_session), color = Palette.Red) }, { menu = false; onDelete() })
                     }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val u = upload?.first
                 when {
                     recording -> Badge(stringResource(R.string.sessions_badge_recording), Palette.Blue, Color(0xFFD1E9FF))
                     empty -> Badge(stringResource(R.string.sessions_badge_empty), Palette.Muted, Color(0xFFF2F4F7))
-                    upload != null && upload.second -> Badge(stringResource(R.string.sessions_badge_reupload), Palette.Amber, Palette.AmberLight)
-                    u?.state == "uploaded" -> Badge(stringResource(R.string.sessions_badge_uploaded), Palette.Green, Palette.GreenLight)
-                    u?.state == "uploading" -> Badge(stringResource(R.string.sessions_badge_uploading, (u.progress * 100).toInt()), Palette.Blue, Color(0xFFD1E9FF))
-                    u?.state == "queued" -> Badge(stringResource(if (wifiOnly) R.string.sessions_badge_wait_wifi else R.string.sessions_badge_wait_network), Palette.Amber, Palette.AmberLight)
-                    u?.state == "failed" -> Badge(stringResource(R.string.sessions_badge_failed), Palette.Red, Color(0xFFFEE4E2))
-                    upload != null -> Badge(stringResource(R.string.sessions_badge_not_uploaded), Palette.Amber, Palette.AmberLight)
                     s.exportedAt != null -> Badge(stringResource(R.string.sessions_badge_sent), Palette.Green, Palette.GreenLight)
                     else -> Badge(stringResource(R.string.sessions_badge_not_sent), Palette.Amber, Palette.AmberLight)
                 }
@@ -308,39 +265,14 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                 ctx.getString(if (s.kind == SessionKind.POI) R.string.sessions_kind_poi else R.string.sessions_kind_sweep),
                 if (s.kind == SessionKind.POI) null else ctx.getString(if (s.sideOfTravel == Side.RIGHT) R.string.sessions_side_right else R.string.sessions_side_left)
                     .let { if (s.mount != null) ctx.getString(R.string.sessions_side_measured, it) else it },
-                when (s.vehicle) { Vehicle.CAR -> ctx.getString(R.string.sessions_vehicle_car); Vehicle.MOTORBIKE -> ctx.getString(R.string.sessions_vehicle_motorbike); else -> null },
                 if (s.kind == SessionKind.POI) null else ctx.getString(when (s.mode) {
                     Mode.PHOTO_AUTO -> R.string.sessions_mode_auto; Mode.PHOTO_MANUAL -> R.string.sessions_mode_manual; Mode.VIDEO -> R.string.sessions_mode_video }),
                 if (r.relocated > 0) ctx.plural(R.plurals.sessions_relocated, r.relocated) else null,
                 if (s.endedAt == null && !recording) ctx.getString(R.string.sessions_interrupted) else null,
             ).joinToString(" · "), color = if (s.endedAt == null && !recording) Palette.Amber else Palette.Muted)
-            upload?.first?.let { u ->
-                when {
-                    u.state == "uploading" || (u.state == "failed" && u.offset > 0) ->
-                        LinearProgressIndicator(progress = { u.progress.toFloat() }, modifier = Modifier.fillMaxWidth().padding(end = 12.dp, top = 4.dp))
-                    else -> {}
-                }
-                if (u.state == "failed" && u.error != null) Hint(stringResource(R.string.sessions_upload_error, u.error), color = Palette.Red)
-            }
-            agentStatus?.let { a ->
-                Hint(when (a.optString("state")) {
-                    "done" -> listOfNotNull(ctx.getString(R.string.sessions_agent_done),
-                        if (a.has("poisFound")) a.optInt("poisFound").let { ctx.plural(R.plurals.sessions_agent_found, it) } else null,
-                        a.optJSONArray("recapture")?.length()?.takeIf { it > 0 }?.let { ctx.plural(R.plurals.sessions_agent_recapture, it) },
-                    ).joinToString(" · ")
-                    "processing" -> stringResource(R.string.sessions_agent_processing)
-                    "failed" -> stringResource(R.string.sessions_agent_failed)
-                    else -> stringResource(R.string.sessions_agent_received)
-                }, color = Palette.Blue)
-            }
             if (!empty && !recording) {
                 Row(Modifier.padding(top = 6.dp, end = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (upload != null) {
-                        val (u, changed) = upload
-                        if (u.state == "none" || u.state == "failed" || changed) {
-                            Button(onClick = onUpload, modifier = Modifier.weight(1f)) { Text(stringResource(if (changed) R.string.sessions_reupload else R.string.sessions_upload_now), maxLines = 1) }
-                        }
-                    } else if (s.exportedAt == null) {
+                    if (s.exportedAt == null) {
                         Button(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(stringResource(if (busy) R.string.sessions_packing else R.string.sessions_send), maxLines = 1) }
                     } else {
                         OutlinedButton(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(stringResource(if (busy) R.string.sessions_packing else R.string.sessions_send_again), maxLines = 1) }
@@ -372,3 +304,26 @@ private fun Context.plural(id: Int, n: Int, vararg args: Any): String =
 private fun fmt(isoTime: String?): String = isoTime?.let {
     runCatching { DateTimeFormatter.ofPattern("dd/MM HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(it)) }.getOrNull()
 } ?: "–"
+
+/** No session yet: what a session is, and one big way to start the first. */
+@Composable
+private fun EmptySessions(onNew: () -> Unit, modifier: Modifier) {
+    Column(modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center) {
+        Box(Modifier.size(120.dp).background(Palette.GreenLight, CircleShape), contentAlignment = Alignment.Center) {
+            Text("📷", fontSize = 52.sp)
+        }
+        Box(Modifier.height(24.dp))
+        Text(stringResource(R.string.sessions_empty), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.Ink,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Box(Modifier.height(8.dp))
+        Text(stringResource(R.string.sessions_empty_text), fontSize = 16.sp, color = Palette.Muted,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Box(Modifier.height(28.dp))
+        Button(onClick = onNew, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+            Icon(Icons.Filled.Add, null)
+            Box(Modifier.size(8.dp))
+            Text(stringResource(R.string.home_new_session), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}

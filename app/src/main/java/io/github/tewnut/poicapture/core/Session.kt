@@ -31,36 +31,21 @@ enum class Mode(val json: String) {
 data class Settings(
     val tileUrl: String = "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     val overpassUrl: String = "https://overpass-api.de/api/interpreter",
-    val photoEveryMMotorbike: Int = 10,
-    val photoEveryMCar: Int = 15,
-    val maxSpeedKmhMotorbike: Int = 20,
-    val maxSpeedKmhCar: Int = 25,
     val maxAccuracyM: Double = 30.0,
     val offRoadWarnM: Double = 60.0,
     val photoLongEdge: Int = 2560,      // requested photo size (16:9, long edge); the camera picks the closest
     val jpegQuality: Int = 92,
-    val videoSegmentSec: Int = 30,      // a killed app loses at most the current segment
     val mountOffsetDeg: Double = 0.0,   // manual fallback when the app could not measure the camera direction
     val facadeDistanceM: Double = 6.0,  // expected camera -> shop front distance (profile default, adjustable per session)
-    val uploadUrl: String = "",         // tus endpoint of the capture server ("" = no background upload)
-    val uploadToken: String = "",       // bearer token for the server
-    val apiUrl: String = "",            // optional server API: processing status, team coverage
-    val uploadOnMobileData: Boolean = false,
     // catalogue (index.json) of offline road packs: the GitHub release built by .github/workflows/roadpacks.yml
     val roadPackIndexUrl: String = DEFAULT_ROADPACK_INDEX,
 ) {
-    fun photoEveryM(v: Vehicle) = if (v == Vehicle.CAR) photoEveryMCar else photoEveryMMotorbike
-    fun maxSpeedKmh(v: Vehicle) = if (v == Vehicle.CAR) maxSpeedKmhCar else maxSpeedKmhMotorbike
-
     fun toJson(): JSONObject = JSONObject()
         .put("tileUrl", tileUrl).put("overpassUrl", overpassUrl)
-        .put("photoEveryMMotorbike", photoEveryMMotorbike).put("photoEveryMCar", photoEveryMCar)
-        .put("maxSpeedKmhMotorbike", maxSpeedKmhMotorbike).put("maxSpeedKmhCar", maxSpeedKmhCar)
         .put("maxAccuracyM", maxAccuracyM).put("offRoadWarnM", offRoadWarnM)
         .put("photoLongEdge", photoLongEdge).put("jpegQuality", jpegQuality)
-        .put("videoSegmentSec", videoSegmentSec).put("mountOffsetDeg", mountOffsetDeg)
+.put("mountOffsetDeg", mountOffsetDeg)
         .put("facadeDistanceM", facadeDistanceM)
-        .put("uploadUrl", uploadUrl).put("uploadToken", uploadToken).put("apiUrl", apiUrl).put("uploadOnMobileData", uploadOnMobileData)
         .put("roadPackIndexUrl", roadPackIndexUrl)
 
     companion object {
@@ -70,21 +55,12 @@ data class Settings(
             return Settings(
                 tileUrl = o.optString("tileUrl", d.tileUrl),
                 overpassUrl = o.optString("overpassUrl", d.overpassUrl),
-                photoEveryMMotorbike = o.optInt("photoEveryMMotorbike", d.photoEveryMMotorbike),
-                photoEveryMCar = o.optInt("photoEveryMCar", d.photoEveryMCar),
-                maxSpeedKmhMotorbike = o.optInt("maxSpeedKmhMotorbike", d.maxSpeedKmhMotorbike),
-                maxSpeedKmhCar = o.optInt("maxSpeedKmhCar", d.maxSpeedKmhCar),
                 maxAccuracyM = o.optDouble("maxAccuracyM", d.maxAccuracyM),
                 offRoadWarnM = o.optDouble("offRoadWarnM", d.offRoadWarnM),
                 photoLongEdge = o.optInt("photoLongEdge", d.photoLongEdge),
                 jpegQuality = o.optInt("jpegQuality", d.jpegQuality),
-                videoSegmentSec = o.optInt("videoSegmentSec", d.videoSegmentSec),
                 mountOffsetDeg = o.optDouble("mountOffsetDeg", d.mountOffsetDeg),
                 facadeDistanceM = o.optDouble("facadeDistanceM", d.facadeDistanceM),
-                uploadUrl = o.optString("uploadUrl", d.uploadUrl),
-                uploadToken = o.optString("uploadToken", d.uploadToken),
-                apiUrl = o.optString("apiUrl", d.apiUrl),
-                uploadOnMobileData = o.optBoolean("uploadOnMobileData", d.uploadOnMobileData),
                 roadPackIndexUrl = o.optString("roadPackIndexUrl", d.roadPackIndexUrl),
             )
         }
@@ -116,24 +92,24 @@ class Session(
     val kind: SessionKind = SessionKind.SWEEP,
     val email: String = "",          // typed at onboarding, not verified; "" before app 0.8
     var photoRoles: PhotoRoles? = null,  // POI mode: the photo kinds offered (config at the start of the session)
+    var name: String? = null,        // "{street} [yymmdd]", given when the session is saved
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("schema", SCHEMA).put("kind", kind.json).put("createdAt", createdAt)
         .put("startedAt", startedAt.orNull()).put("endedAt", endedAt.orNull())
-        .put("contributor", contributor).put("email", email).put("note", note)
+        .put("contributor", contributor).put("email", email).put("note", note).put("name", name.orNull())
         .put("vehicle", vehicle.json).put("mode", mode.json)
         .put("sideOfTravel", sideOfTravel.json)
         .put("travel", travel?.json.orNull()).put("sideOfWay", sideOfWay?.json.orNull())
         .put("road", road.toJson())
         .put("settings", JSONObject()
-            .put("photoEveryM", plan?.optDouble("photoEveryM") ?: settings.photoEveryM(vehicle).toDouble())
-            .put("maxSpeedKmh", plan?.optInt("maxSpeedKmh") ?: settings.maxSpeedKmh(vehicle))
+            .put("photoEveryM", plan?.optDouble("photoEveryM") ?: legacyPhotoEveryM(vehicle))
+            .put("maxSpeedKmh", plan?.optInt("maxSpeedKmh") ?: legacyMaxSpeedKmh(vehicle))
             .put("facadeDistanceM", settings.facadeDistanceM)
             .put("maxAccuracyM", settings.maxAccuracyM)
-            .put("videoSegmentSec", settings.videoSegmentSec)
             .put("mountOffsetDeg", settings.mountOffsetDeg)
             .put("photoLongEdge", settings.photoLongEdge)
-            .put("all", settings.toJson().apply { remove("uploadToken") }))
+            .put("all", settings.toJson()))
         .put("device", device)
         .put("camera", camera.orNull())
         .put("counts", counts.orNull())
@@ -151,6 +127,7 @@ class Session(
             endedAt = o.optStr("endedAt"),
             contributor = o.optString("contributor"),
             note = o.optString("note"),
+            name = o.optStr("name"),
             vehicle = Vehicle.of(o.optString("vehicle")),
             mode = Mode.of(o.optString("mode")),
             sideOfTravel = Side.of(o.optString("sideOfTravel")) ?: Side.RIGHT,
@@ -171,6 +148,10 @@ class Session(
         )
     }
 }
+
+/** Sessions of app <= 0.3 have no plan: their photos were spaced (and the speed capped) per vehicle. */
+private fun legacyPhotoEveryM(v: Vehicle) = if (v == Vehicle.CAR) 15.0 else 10.0
+private fun legacyMaxSpeedKmh(v: Vehicle) = if (v == Vehicle.CAR) 25 else 20
 
 fun iso(ms: Long): String = Instant.ofEpochMilli(ms).toString()
 

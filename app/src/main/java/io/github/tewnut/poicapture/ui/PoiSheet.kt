@@ -91,8 +91,10 @@ fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: P
     val centre = remember { start ?: lastKnown(ctx) }
     val noFront = (roles[photoRoles.cover.id] ?: 0) == 0
 
-    Row(Modifier.fillMaxSize().background(Color.White).safeDrawingPadding()) {
-        Box(Modifier.weight(1f).fillMaxHeight()) {
+    // portrait: map on top, form below; landscape: side by side
+    val tall = androidx.compose.ui.platform.LocalConfiguration.current.let { it.screenHeightDp > it.screenWidthDp }
+    val mapPart: @Composable (Modifier) -> Unit = { m ->
+        Box(m) {
             PinMap(d.pin, centre, onPin = { d.pin = it; d.moved = true }, modifier = Modifier.fillMaxSize().clipToBounds())
             Pill(stringResource(when {
                     d.moved -> R.string.poi_pin_set
@@ -102,8 +104,10 @@ fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: P
                 Modifier.align(Alignment.TopCenter).padding(10.dp), size = 13.sp,
                 dot = if (d.moved) Color(0xFF47CD89) else Color(0xFFFEC84B))
         }
-        // everything scrolls (landscape screens are short, the keyboard takes half); the two actions stay pinned
-        Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    }
+    // everything scrolls (short screens, the keyboard takes half); the two actions stay pinned
+    val formPart: @Composable (Modifier) -> Unit = { m ->
+        Column(m.padding(horizontal = 16.dp, vertical = 8.dp)) {
           Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.poi_title, number), fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Palette.Ink)
             val tagged = roles.keys.any { it.isNotEmpty() }
@@ -154,6 +158,13 @@ fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: P
                 }
             }
         }
+    }
+    if (tall) Column(Modifier.fillMaxSize().background(Color.White).safeDrawingPadding()) {
+        mapPart(Modifier.weight(0.4f).fillMaxWidth())
+        formPart(Modifier.weight(0.6f).fillMaxWidth())
+    } else Row(Modifier.fillMaxSize().background(Color.White).safeDrawingPadding()) {
+        mapPart(Modifier.weight(1f).fillMaxHeight())
+        formPart(Modifier.weight(1f).fillMaxHeight())
     }
 }
 

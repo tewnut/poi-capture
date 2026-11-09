@@ -1,7 +1,6 @@
 # Handoff to the POI agent (`poi-capture/3`)
 
-A contributor sends one zip per session from the Android app (shared with **Send**, or uploaded in the background to a
-capture server, see [server-api.md](server-api.md)). The agent reads it, corrects positions, finds the places on the
+A contributor sends one zip per session from the Android app (shared with **Send**, or saved to a file). The agent reads it, corrects positions, finds the places on the
 photos and contributes them to the target map through that map's contribution tools. This file is the contract.
 
 ## Recent changes
@@ -16,8 +15,8 @@ photos and contributes them to the target map through that map's contribution to
 - **Photo kinds are optional.** By default the contributor is not asked what each photo shows: photos carry `poiId`
   but **no `role`**, `session.photoRoles` is absent and the place's `cover` is its first photo. Classify the photos
   yourself (front / sign / inside / menu / other) and pick the best cover.
-  When a team turns kinds on (Profile → Advanced settings, or its server sends a list), `session.photoRoles` is the list
-  offered, `[{id, label, hint, cover, advance}]` (from `GET {apiUrl}/config`, the contributor's own list or the default),
+  When the contributor turns kinds on (Settings → Advanced settings), `session.photoRoles` is the list offered,
+  `[{id, label, hint, cover, advance}]` (the contributor's own list or the default),
   `photo.role` is one of those ids (a team can add its own, e.g. `"menu"`, `"parking"`), and the `cover` is the first
   photo of the kind with `cover: true`. Older sessions: every photo has a role from the default list below.
 - **On-device reading** (place photos only): each photo item carries `ocr` = what ML Kit (Latin script, which covers
@@ -76,7 +75,7 @@ photos and contributes them to the target map through that map's contribution to
   items) as the way's identity.
 
 ### Earlier (web app `road-capture/1` → native app)
-- **Videos are MP4 segments** (`videos/<id>.mp4`, default 30 s each, one item per segment, `segment` = index). A
+- **Videos (older sessions only: video mode was removed, its frames were too blurry)** are MP4 segments (`videos/<id>.mp4`, default 30 s each, one item per segment, `segment` = index). A
   segment cut off by a crash is still exported with `incomplete: true`; its MP4 may lack the index (moov atom) and need
   repair (e.g. `untrunc`) before decoding.
 - **Files**: `gnss_raw.csv` (raw GNSS measurements, GnssLogger-style `Raw` rows; read the columns by the header line)
@@ -103,8 +102,11 @@ photos and contributes them to the target map through that map's contribution to
 - **Measured instead of asked**:
   - `session.vehicle` is `"unspecified"` (older sessions: `"motorbike"` / `"car"`). Photo spacing and the speed limit
     come from `session.plan`, the speed from the phone.
-  - `session.settings.facadeDistanceM`: expected camera → shop-front distance chosen by the contributor (4 / 6 / 8 /
-    12 m). `session.plan` = `{facadeDistanceM, hFovDeg, coverageM, photoEveryM, maxSpeedKmh, blurLimitKmh,
+  - The camera → shop-front distance is **not asked** (it changes from block to block): the app takes it from the type of
+    road being ridden (OSM `highway`: alleys and small streets 4 m, tertiary 5 m, secondary 6 m, primary / trunk 8 m,
+    unknown 4 m), on the near side so photos always overlap. Each item says which: `facadeDistanceM` and
+    `facadeRoadType`. `session.settings.facadeDistanceM` is the unknown-road value (older sessions: the contributor's
+    choice). `session.plan` (the last one in use) = `{facadeDistanceM, hFovDeg, coverageM, photoEveryM, maxSpeedKmh, blurLimitKmh,
     rateLimitKmh}`: one frame covers `coverageM` of facade, photos every `coverageM / 2` so each sign is on ≥ 2 photos,
     speed limited by motion blur and by how fast the camera can shoot.
   - **Camera direction is measured** from the linear acceleration while speeding up / braking on straight stretches
@@ -113,8 +115,18 @@ photos and contributes them to the target map through that map's contribution to
   - Per item: `cameraYawToTravelDeg` (clockwise from travel, right = +90) and `cameraBearingSource`: `"measured"`, or
     `"assumed"` (right side + manual mount offset). Items recorded before the measurement are corrected in place once it
     is known. With `"assumed"`, the agent can measure it from `imu.csv` + the track.
-  - Per item **estimated facade point**: `facadeLat`, `facadeLon`, `facadeDistanceM`, `facadeSource: "profile"` =
-    camera position + `facadeDistanceM` along `cameraBearing`. A prior to put the place on the building, not on the
+  - Per item **orientation**: `orientation` = `"landscape"` | `"portrait"` (how the phone was held), `targetRotationDeg`
+    (0 / 90 / 180 / 270, the image is written upright for it; see also `exifOrientation`) and `hFovDeg`, the horizontal
+    field of view of that frame (`session.camera.hFovDeg` in landscape, `session.camera.hFovPortraitDeg` in portrait).
+    `session.plan` follows the orientation in use at the end of the session.
+  - Per photo **blur**: `blur = {motionPx, maxMotionPx, sharpness, manualShutter, blurry}`. `motionPx` = speed ×
+    exposure × focal length (px) ÷ facade distance (street sweep), `maxMotionPx` the budget for that photo's width;
+    `sharpness` = variance of the Laplacian (scene dependent: compare within the session); `blurry` = too much motion
+    or far less detail than the session's recent photos. Prefer non-blurry photos when reading signs.
+    `session.camera.shutterGuard`: street sweep held the shutter at 1/500 s or faster (ISO raised instead), so photos
+    may be grainy rather than smeared. `session.name` = "{street} [yymmdd]".
+  - Per item **estimated facade point**: `facadeLat`, `facadeLon`, `facadeDistanceM`, `facadeSource: "roadType"`
+    (older sessions: `"profile"`) = camera position + `facadeDistanceM` along `cameraBearing`. A rough prior to put the place on the building, not on the
     road: snap it to the street-facing edge of the nearest building footprint, refine by triangulating the sign over
     consecutive photos and by the house number. When the photo was moved by hand, recompute it from
     `relocatedLat / Lon` + `cameraBearing` + `facadeDistanceM`.
@@ -154,7 +166,7 @@ videos/<id>.mp4      video segments (H.264, ≈1080p, no audio, landscape)
                   "geometry": [ { "lat": 21.0285, "lon": 105.804 }, … ] }, … ]
     },
     "settings": { "photoEveryM": 4.2, "maxSpeedKmh": 23, "facadeDistanceM": 6, "maxAccuracyM": 30,
-                  "videoSegmentSec": 30, "mountOffsetDeg": 0, "photoLongEdge": 2560, "all": { … } },
+                  "mountOffsetDeg": 0, "photoLongEdge": 2560, "all": { … } },
     "plan": { … }, "mount": { … } | null,
     "photoRoles": [ … ],                 // only when photo kinds were on
     "device": { "manufacturer": "Google", "model": "Pixel 9", "sdk": 35, "soc": "Google Tensor G4",
@@ -169,13 +181,13 @@ videos/<id>.mp4      video segments (H.264, ≈1080p, no audio, landscape)
   "items": [
     {
       "id": "p_…", "kind": "photo", "file": "photos/p_….jpg", "trigger": "auto" | "manual",
-      "t": "ISO capture time", "tMs": 1793…, "elapsedNanos": 81234…, "fixT": 1793…,   // fixT = time of the GPS fix used
+      "t": "ISO capture time", "tMs": 1793…, "elapsedNanos": 81234…, "fixT": 1793…,   // fixT = time of the GPS fix used (at most 5 s before the photo: the app records nothing without a fresh fix; older sessions may have older fixes)
       "lat": 21.02851, "lon": 105.80512, "accuracyM": 5, "altitudeM": null, "speedMps": 2.9,
       "travelBearing": 90.0,             // direction of travel, ° from north
       "cameraBearing": 180.0,            // travel bearing + cameraYawToTravelDeg
       "cameraYawToTravelDeg": 90.0,
       "cameraBearingSource": "measured" | "assumed" | "compass",
-      "facadeLat": 21.02845, "facadeLon": 105.80512, "facadeDistanceM": 6, "facadeSource": "profile",
+      "facadeLat": 21.02845, "facadeLon": 105.80512, "facadeDistanceM": 6, "facadeSource": "roadType", "facadeRoadType": "residential",
       "wayId": 123456, "roadName": "Phố Tràng Tiền", "distanceToRoadM": 3.2, "segmentBearing": 90,   // null without road data
       "travel": "forward", "sideOfTravel": "right", "sideOfWay": "right",   // per item: a U-turn flips the side
       "relocatedLat": 21.02853, "relocatedLon": 105.80519, "relocatedAt": "ISO",   // only when moved by hand

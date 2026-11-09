@@ -45,7 +45,7 @@ class PlanFacadeTest {
         assertEquals(6.0, Geo.distanceM(cam, fac), 0.01)
         assertEquals(180.0, Geo.bearing(cam, fac), 0.1)                   // south = right of eastward travel
         assertTrue(fac.lat < START.lat)                                    // off the road, on the building side
-        assertEquals("profile", item.getString("facadeSource"))
+        assertEquals("roadType", item.getString("facadeSource"))
         p.cameraYawDeg = 80.0                                              // measured: 10° toward the front
         val m = p.itemMeta("p2", "photo", 2L, Side.RIGHT)
         assertEquals("measured", m.getString("cameraBearingSource"))

@@ -6,7 +6,7 @@ import java.text.Normalizer
 
 /**
  * A kind of photo of a place in POI mode ("Mặt tiền", "Biển hiệu", …). Part of the app config, not of the code: the
- * team can change the list on its server, a contributor in Hồ sơ. The [id] goes into the export (`photo.role`), so
+ * team can change the list on its server, a contributor in Settings. The [id] goes into the export (`photo.role`), so
  * keep ids stable once data is flowing; [label] and [hint] are only shown.
  * - [cover]: the photo the agent uses as the place's cover (one role; the first one if none is marked).
  * - [advance]: one photo is usually enough, so after it the next role without a photo is selected by itself.
@@ -16,7 +16,7 @@ data class PhotoRole(val id: String, val label: String, val hint: String = "", v
         .put("cover", cover).put("advance", advance)
 }
 
-/** The photo kinds offered in POI mode, in shooting order. [source]: "default", "local" (Hồ sơ) or "server". */
+/** The photo kinds offered in POI mode, in shooting order. [source]: "default", "local" (Settings) or "server". */
 data class PhotoRoles(val roles: List<PhotoRole>, val source: String = "default") {
     val cover: PhotoRole get() = roles.firstOrNull { it.cover } ?: roles.first()
 
@@ -71,7 +71,7 @@ data class PhotoRoles(val roles: List<PhotoRole>, val source: String = "default"
 
         /**
          * True when [role] is a built-in kind whose label nobody changed (the default list, or a list a contributor only
-         * reordered / trimmed in Profile): the UI then shows its own translated label and hint. Server lists keep their text.
+         * reordered / trimmed in Settings): the UI then shows its own translated label and hint. Server lists keep their text.
          */
         fun isBuiltIn(role: PhotoRole, source: String): Boolean {
             val d = DEFAULT.roles.firstOrNull { it.id == role.id } ?: return false

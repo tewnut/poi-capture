@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +46,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,10 +90,11 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     var confirmEnd by remember { mutableStateOf(false) }
     val previewView = remember { PreviewView(ctx) }
 
-    // landscape (wider horizontal field of view for shop fronts), screen kept on, service started while visible
+    // portrait or landscape, as the phone is held or mounted (the rest of the app is portrait); screen kept on,
+    // service started while visible
     val view = LocalView.current
     DisposableEffect(sessionId) {
-        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
         view.keepScreenOn = true
         if (CaptureService.activeSession.value == null) CaptureService.start(ctx, sessionId)
         val conn = object : ServiceConnection {
@@ -105,7 +108,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             service?.attachPreview(null)
             runCatching { ctx.unbindService(conn) }
             view.keepScreenOn = false
-            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
     }
     // preview only while the screen is visible; capture itself keeps running in the service
@@ -121,14 +124,20 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
         if (owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) s?.attachPreview(previewView.surfaceProvider)
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
-    BackHandler { confirmEnd = true }
 
     val svc = service
     val ui: CaptureUi = svc?.state?.collectAsState()?.value ?: CaptureUi()
     val session: Session? = svc?.takeIf { CaptureService.activeSession.value != null }?.session
     val video = session?.mode == Mode.VIDEO
     val captured = ui.photos + ui.videos
-    val notStarted = !ui.running && captured == 0 && !ui.recording
+    // New session only lets Start through with a fresh GPS fix: recording begins as soon as the camera is open
+    var autoStarted by rememberSaveable(sessionId) { mutableStateOf(false) }
+    val notStarted = !autoStarted && !ui.running && captured == 0 && !ui.recording
+    // street sweep also waits for the light level: too dark for a fast shutter = no start (Place capture instead)
+    val lightOk = session?.kind == SessionKind.POI || (ui.exposureReady && !ui.tooDark)
+    LaunchedEffect(svc, ui.camera, ui.gpsFresh, lightOk) {
+        if (!autoStarted && svc != null && ui.camera == "on" && ui.gpsFresh && lightOk) { svc.start(); autoStarted = true }
+    }
     val poiMode = session?.kind == SessionKind.POI
     val askRole = session?.photoRoles != null          // POI: the contributor picks the kind of each photo (off by default)
     val photoRoles = session?.photoRoles ?: PhotoRoles.DEFAULT
@@ -159,10 +168,11 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
         s.finishSession()
         if (discardIfEmpty && captured == 0 && id != null) {
             CaptureService.store(ctx).delete(id)
-            io.github.tewnut.poicapture.capture.Uploads.forget(ctx, id)
             onCancel()
         } else onDone()
     }
+    // nothing recorded yet: leaving just drops the empty session (no "save?" question)
+    BackHandler { if (captured == 0) end(discardIfEmpty = true) else confirmEnd = true }
 
     if (reviewing && session != null) {
         val start = remember(ui.poiId) { svc?.poiStartPosition() }
@@ -224,7 +234,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                             .padding(horizontal = 12.dp, vertical = 8.dp))
                 }
             }
-            if (!notStarted) DarkButton(stringResource(R.string.capture_end)) { confirmEnd = true }
+            DarkButton(stringResource(R.string.capture_end)) { if (captured == 0) end(discardIfEmpty = true) else confirmEnd = true }
         }
 
         // ---------- right rail, under the thumb: the main actions ----------
@@ -313,9 +323,20 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                     .background(Color(0xCC0B6B4C), RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp))
         }
 
-        // ---------- get-ready overlay ----------
-        if (notStarted && session != null) ReadyCard(ui, session, photoRoles, Modifier.align(Alignment.Center),
-            onStart = { svc?.start() }, onCancel = { end(discardIfEmpty = true) })
+        // ---------- GPS lost: nothing is captured until it is back ----------
+        if (session != null && !ui.gpsFresh && (ui.camera == "on" || !notStarted)) GpsLostCard(ui, Modifier.align(Alignment.Center),
+            onEnd = { if (captured == 0) end(discardIfEmpty = true) else confirmEnd = true })
+
+        // ---------- street sweep in the dark: not started, say why and what to do ----------
+        if (notStarted && session != null && !poiMode && ui.camera == "on" && ui.tooDark) TooDarkCard(Modifier.align(Alignment.Center),
+            onEnd = { end(discardIfEmpty = true) })
+
+        // ---------- starting: the camera is opening (a second or two) ----------
+        if (notStarted && (session == null || ui.camera != "on")) Text(
+            stringResource(if (ui.camera == "error") R.string.capture_check_camera_error else R.string.capture_check_camera_opening),
+            color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Center).background(Color(0xCC000000), RoundedCornerShape(12.dp))
+                .padding(horizontal = 16.dp, vertical = 10.dp))
     }
 
     if (confirmEnd) EndDialog(ui, video, { confirmEnd = false }, { confirmEnd = false; end(discardIfEmpty = false) })
@@ -384,58 +405,44 @@ private fun Speed(ui: CaptureUi) {
     }
 }
 
+/**
+ * In front of the controls while the GPS is stale (no fix for 5 s): photos, marks and video are on hold, so the
+ * contributor fixes the GPS first. Goes away by itself when a fix comes back.
+ */
 @Composable
-private fun ReadyCard(ui: CaptureUi, s: Session, roles: PhotoRoles, modifier: Modifier, onStart: () -> Unit, onCancel: () -> Unit) {
-
-    // the checklist scrolls inside the card; the Start row is always visible (small phones, large system fonts)
-    Surface(modifier.width(440.dp).padding(vertical = 12.dp), shape = RoundedCornerShape(20.dp), color = Color.White, shadowElevation = 12.dp) {
-      Column(Modifier.padding(20.dp)) {
-        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val poi = s.kind == SessionKind.POI
-            Text(stringResource(if (poi) R.string.capture_ready_poi else R.string.capture_ready), fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink)
-            Check(ui.gps == "good", when (ui.gps) {
-                "good" -> stringResource(R.string.capture_check_gps_good, ui.accuracyM?.toString() ?: "?")
-                "weak" -> stringResource(R.string.capture_check_gps_weak)
-                else -> stringResource(R.string.capture_check_gps_waiting)
-            })
-            Check(ui.camera == "on", stringResource(when (ui.camera) {
-                "on" -> R.string.capture_check_camera_ready
-                "error" -> R.string.capture_check_camera_error
-                else -> R.string.capture_check_camera_opening
-            }))
-            when {
-                !s.road.auto -> Check(true, stringResource(R.string.capture_check_road, roadText(s.road)))
-                ui.roadName != null -> Check(true, stringResource(R.string.capture_check_on_road, ui.roadName))
-                else -> Check(null, stringResource(R.string.capture_check_no_road))
-            }
-            if (poi) {
-                if (s.photoRoles != null) {
-                    val ctx = LocalContext.current
-                    val others = roles.roles.filter { it.id != roles.cover.id }.joinToString(", ") { roleLabel(ctx, roles, it).lowercase() }
-                    Check(null, stringResource(R.string.capture_check_roles, roleLabel(roles, roles.cover).lowercase(), others))
-                }
-                else Check(null, stringResource(R.string.capture_check_poi_default))
-                Check(null, stringResource(R.string.capture_check_poi_flow))
-                Check(null, stringResource(R.string.capture_check_volume_shoot))
-            } else {
-                Check(null, stringResource(R.string.capture_check_mount))
-                Check(null, stringResource(if (s.mode == Mode.PHOTO_MANUAL) R.string.capture_check_keys_shoot else R.string.capture_check_keys_mark))
-                Check(null, if (s.mode == Mode.PHOTO_AUTO) stringResource(R.string.capture_check_plan_auto, s.settings.facadeDistanceM.toInt(),
-                        String.format(java.util.Locale.ROOT, "%.1f", ui.photoEveryM), ui.maxSpeedKmh)
-                    else stringResource(R.string.capture_check_plan, s.settings.facadeDistanceM.toInt(), ui.maxSpeedKmh))
-            }
-            if (ui.simulated) Hint(stringResource(R.string.capture_simulated_hint), color = Palette.Amber)
-        }
-            Spacer(Modifier.height(10.dp))
+private fun GpsLostCard(ui: CaptureUi, modifier: Modifier, onEnd: () -> Unit) {
+    val ctx = LocalContext.current
+    Box(Modifier.fillMaxSize().background(Color(0x99000000))
+        .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) {})
+    Surface(modifier.widthIn(max = 440.dp).padding(16.dp), shape = RoundedCornerShape(20.dp), color = Color.White, shadowElevation = 12.dp) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(stringResource(R.string.capture_gps_lost_title), fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Red)
+            Text(stringResource(R.string.capture_gps_lost_text), color = Palette.Ink)
+            Check(null, stringResource(R.string.capture_gps_lost_sky))
+            Check(null, stringResource(R.string.capture_gps_lost_location))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onCancel) { Text(stringResource(R.string.capture_cancel)) }
-                Button(onClick = onStart, enabled = ui.camera == "on", modifier = Modifier.weight(1f).height(52.dp)) {
-                    Text(stringResource(if (s.kind == SessionKind.POI) R.string.capture_start_poi else if (s.mode == Mode.VIDEO) R.string.capture_start_video
-                        else R.string.capture_start),
-                        fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                TextButton(onClick = onEnd) { Text(stringResource(R.string.capture_end)) }
+                Button(onClick = { ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)) },
+                    modifier = Modifier.weight(1f).height(52.dp)) {
+                    Text(stringResource(R.string.capture_gps_lost_settings), fontWeight = FontWeight.Bold)
                 }
             }
-      }
+            Hint(stringResource(R.string.capture_gps_lost_resume), color = Palette.Muted)
+        }
+    }
+}
+
+/** Street sweep could not start: too dark for a shutter fast enough to read signs while riding. */
+@Composable
+private fun TooDarkCard(modifier: Modifier, onEnd: () -> Unit) {
+    Surface(modifier.widthIn(max = 440.dp).padding(16.dp), shape = RoundedCornerShape(20.dp), color = Color.White, shadowElevation = 12.dp) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(stringResource(R.string.capture_too_dark_title), fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Amber)
+            Text(stringResource(R.string.capture_too_dark_text), color = Palette.Ink)
+            Button(onClick = onEnd, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                Text(stringResource(R.string.capture_too_dark_back), fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 
@@ -445,7 +452,7 @@ private fun Check(ok: Boolean?, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(when (ok) { true -> "✓"; false -> "…"; null -> "•" }, fontWeight = FontWeight.Bold, fontSize = 18.sp,
             color = when (ok) { true -> Palette.Green; false -> Palette.Amber; null -> Palette.Muted }, modifier = Modifier.width(18.dp))
-        Text(text, color = Palette.Ink)
+        Text(text, color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
