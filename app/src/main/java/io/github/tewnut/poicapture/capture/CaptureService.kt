@@ -69,7 +69,8 @@ import io.github.tewnut.poicapture.ui.UiText
 import io.github.tewnut.poicapture.ui.roadText
 import io.github.tewnut.poicapture.ui.wayLabel
 import io.github.tewnut.poicapture.ui.toUiText
-import io.github.tewnut.poicapture.core.AutoShutter
+import io.github.tewnut.poicapture.core.OverlapTrigger
+import io.github.tewnut.poicapture.core.RecentMedian
 import io.github.tewnut.poicapture.core.Coverage
 import io.github.tewnut.poicapture.core.CameraSide
 import io.github.tewnut.poicapture.core.CapturePlan
@@ -188,7 +189,15 @@ class CaptureService : LifecycleService() {
     lateinit var session: Session; private set
     private lateinit var store: SessionStore
     private lateinit var fp: FixProcessor
-    private lateinit var shutter: AutoShutter
+    // street sweep: a photo each time the scene slid ~30–45 % of the frame (measured on the camera frames)
+    private val trigger = OverlapTrigger()
+    private var watcher: FrameWatcher? = null
+    private var accountedNs = 0L                     // slide counted up to this time (elapsedRealtimeNanos)
+    private var lastFrameNs = 0L
+    private val frameSharpness = RecentMedian(30)
+    private val gyroRecent = RecentMedian(60)
+    @Volatile private var coverageM = 0.0            // facade width one photo covers (current plan)
+    private var pendingOverlap: JSONObject? = null
     private val io = Executors.newSingleThreadExecutor()
     private val ocr = Executors.newSingleThreadExecutor()   // on-device text reading of POI photos (~1 s each)
     private val poiReadings = HashMap<String, MutableList<SignReading>>()
@@ -262,7 +271,6 @@ class CaptureService : LifecycleService() {
             _state.update { it.copy(marks = store.marks(s.id).size) }
         }
         _state.update { it.copy(roadData = if (s.road.auto && s.road.ways.isEmpty()) "loading" else "ok") }
-        shutter = AutoShutter(plan.photoEveryM, st.maxAccuracyM)
         pm = getSystemService(POWER_SERVICE) as PowerManager
         wake = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "poicapture:capture")?.apply { acquire(12 * 3600_000L) }
         startSensors()
@@ -384,6 +392,7 @@ class CaptureService : LifecycleService() {
                 targetRotation = r
                 imageCapture?.targetRotation = r
                 if (portrait != wasPortrait) {
+                    watcher?.portrait = portrait
                     applyPlan(currentPlan())
                     _state.update { it.copy(portrait = portrait) }
                 }
@@ -481,11 +490,19 @@ class CaptureService : LifecycleService() {
             updateMatcher(f.ll, force = false)
             loadRoadsAround(f.ll)
         }
-        if (_state.value.running && session.mode == Mode.PHOTO_AUTO && shutter.due(f)) takePhoto("auto")
+        if (_state.value.running && session.mode == Mode.PHOTO_AUTO) {
+            // no camera frames (no analysis stream, or it stalled): count the slide from the GPS speed instead
+            val now = SystemClock.elapsedRealtimeNanos()
+            if (now - lastFrameNs > 1_000_000_000L) {
+                trigger.addSpeed(f.speedMps ?: fp.speedMps ?: 0.0, (now - accountedNs) / 1e9, coverageM)
+                accountedNs = now
+                maybeShoot(steady = false)
+            }
+        }
     }
 
     private fun applyPlan(plan: CapturePlan) {
-        if (::shutter.isInitialized) shutter.everyM = plan.photoEveryM
+        coverageM = plan.coverageM
         fp.maxSpeedKmh = plan.maxSpeedKmh
         session.plan = plan.toJson()
         _state.update { it.copy(maxSpeedKmh = plan.maxSpeedKmh, photoEveryM = plan.photoEveryM) }
@@ -592,7 +609,11 @@ class CaptureService : LifecycleService() {
                 val pv = pb.build()
                 preview = pv
                 val useCases = mutableListOf<UseCase>(pv)
-                g?.let { useCases += it.analysis(io) }
+                val fw = if (session.kind == SessionKind.SWEEP)
+                    FrameWatcher(onFrame = { fr -> onFrame(fr) }, onBrightness = { b -> guard?.brightness(b) }).also { it.portrait = portrait }
+                    else null
+                watcher = fw
+                fw?.let { useCases += it.analysis() }
                 run {
                     val long = st.photoLongEdge
                     val selector = ResolutionSelector.Builder()
@@ -608,12 +629,14 @@ class CaptureService : LifecycleService() {
                         .also { useCases += it }
                 }
                 provider.unbindAll()
-                // some cameras cannot run preview + photos + the brightness stream together: then no shutter guard
+                // some cameras cannot run preview + photos + the analysis stream together: then no shutter guard, and the
+                // photos follow the GPS speed instead of the frames
                 // (auto-exposure as before; each photo's blur check still applies)
                 val cam = runCatching { provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, *useCases.toTypedArray()) }
                     .getOrElse { e ->
-                        if (g == null) throw e
+                        if (fw == null) throw e
                         guard = null
+                        watcher = null; fw.release()
                         _state.update { it.copy(exposureReady = true) }
                         provider.unbindAll()
                         provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA,
@@ -623,6 +646,7 @@ class CaptureService : LifecycleService() {
                 guard?.attach(cam)
                 surfaceProvider?.let { pv.setSurfaceProvider(it) }
                 session.camera = cameraInfo(cam).put("shutterGuard", guard != null)
+                    .put("photoTrigger", if (watcher != null) "frameOverlap" else if (session.kind == SessionKind.SWEEP) "gpsSpeed" else "manual")
                 // the real field of view sets how much facade one photo covers: refine spacing / speed limit
                 applyPlan(currentPlan())
                 store.save(session)
@@ -680,6 +704,48 @@ class CaptureService : LifecycleService() {
         return o
     }
 
+    // ---------- when to shoot (street sweep) ----------
+
+    /**
+     * One analysis frame: add the slide since the previous one (or, when the frames cannot tell, the GPS speed over
+     * the time), then shoot when [OverlapTrigger] says so. Steady = the frame is as sharp as usual and the phone is
+     * not turning faster than usual; inside the window the photo waits for such a moment.
+     */
+    private fun onFrame(fr: FrameWatcher.Frame) {
+        lastFrameNs = fr.tNs
+        val gyro = imu?.gyroNow(fr.tNs)
+        val sharpMedian = frameSharpness.median
+        val gyroMedian = gyroRecent.median
+        val steady = (sharpMedian == null || fr.sharpness >= 0.9 * sharpMedian) && (gyro == null || gyroMedian == null || gyro <= gyroMedian)
+        frameSharpness.add(fr.sharpness)
+        gyro?.let { gyroRecent.add(it) }
+        if (!_state.value.running || session.mode != Mode.PHOTO_AUTO) { accountedNs = fr.tNs; return }
+        val dt = (fr.tNs - accountedNs) / 1e9
+        accountedNs = fr.tNs
+        val speed = if (freshFix() != null) fp.speedMps else null
+        when {
+            speed != null && speed < 0.7 -> {}                               // waiting (lights, traffic): passing vehicles are not new facade
+            fr.shift != null && dt < 0.4 -> trigger.addFrameShift(fr.shift)
+            else -> trigger.addSpeed(speed ?: 0.0, dt, coverageM)
+        }
+        maybeShoot(steady, gyro, fr.sharpness, sharpMedian)
+    }
+
+    private fun maybeShoot(steady: Boolean, gyro: Double? = null, sharp: Double? = null, sharpMedian: Double? = null) {
+        if (!trigger.due(steady)) return
+        if (shooting) {   // the previous photo is still being saved
+            if (trigger.behind) lastMissedShotMs = System.currentTimeMillis()
+            return
+        }
+        pendingOverlap = JSONObject()
+            .put("slide", Math.round(trigger.progress * 1000) / 1000.0)            // fraction of the frame since the last photo
+            .put("measured", Math.round(trigger.measuredShare * 100) / 100.0)      // share of it measured on the frames
+            .put("steady", steady)
+            .put("gyroRadS", gyro?.let { Math.round(it * 1000) / 1000.0 } ?: JSONObject.NULL)
+            .put("frameSharpness", sharp?.let { s -> sharpMedian?.let { m -> if (m > 0) Math.round(s / m * 100) / 100.0 else null } } ?: JSONObject.NULL)
+        takePhoto("auto")
+    }
+
     // ---------- photos ----------
 
     fun takePhoto(trigger: String, role: String? = null) {
@@ -705,7 +771,11 @@ class CaptureService : LifecycleService() {
             meta.put("cameraBearing", motion?.opt("cameraAzimuthDeg") ?: JSONObject.NULL).put("cameraBearingSource", "compass")
                 .put("sideOfWay", JSONObject.NULL).put("travel", JSONObject.NULL)
         }
-        fp.fix?.let { shutter.mark(it.ll) }
+        if (trigger == "auto") {
+            pendingOverlap?.let { meta.put("overlap", it) }
+            pendingOverlap = null
+            this.trigger.shot()
+        }
         val file = store.photoFile(session.id, id)
         ic.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), io, object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(r: ImageCapture.OutputFileResults) {
@@ -815,7 +885,8 @@ class CaptureService : LifecycleService() {
         if (session.startedAt == null) session.startedAt = iso(System.currentTimeMillis())
         store.save(session)
         _state.update { it.copy(running = true) }
-        shutter.reset()
+        trigger.start()
+        accountedNs = SystemClock.elapsedRealtimeNanos()
     }
 
     fun pause() {
@@ -830,6 +901,7 @@ class CaptureService : LifecycleService() {
         GpsKeeper.release()
         orientation?.disable()
         guard?.release()
+        watcher?.release()
         gnss?.let { session.gnss = it.summary(); it.stop() }
         imu?.stop()
         val ui = _state.value

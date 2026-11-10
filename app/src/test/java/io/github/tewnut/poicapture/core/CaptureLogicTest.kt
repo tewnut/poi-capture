@@ -88,18 +88,6 @@ class CaptureLogicTest {
         assertNull(p.travel)
     }
 
-    @Test fun autoShutterEveryNMetresWithGoodAccuracyOnly() {
-        val s = AutoShutter(everyM = 10.0, maxAccuracyM = 30.0)
-        val shots = mutableListOf<Int>()
-        for (i in 0..14) {
-            val f = fixAt(i, i * 0.0001, accuracy = if (i == 5) 50.0 else 5.0)  // ~10.4 m per step
-            if (s.due(f)) { shots += i; s.mark(f.ll) }
-        }
-        assertEquals((0..14).filter { it != 5 }, shots)   // step 5 has ±50 m accuracy: skipped, step 6 catches up
-        s.reset()
-        assertTrue(s.due(fixAt(0, 0.0)))
-    }
-
     @Test fun overpassParsingRankingAndSameRoadOrdering() {
         val body = """{"elements":[
           {"type":"way","id":2,"tags":{"name":"B","highway":"residential"},"geometry":[{"lat":21.0290,"lon":105.8040},{"lat":21.0290,"lon":105.8050}]},

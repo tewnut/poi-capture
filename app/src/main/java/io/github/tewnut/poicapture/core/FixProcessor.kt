@@ -228,19 +228,4 @@ object Remeasure {
     }
 }
 
-/** Auto photo trigger: one photo every `everyM` metres, only on fixes with usable accuracy. */
-class AutoShutter(var everyM: Double, private val maxAccuracyM: Double) {
-    private var last: LatLon? = null
-
-    fun reset() { last = null }
-
-    fun due(f: Fix): Boolean {
-        if (f.accuracyM > maxAccuracyM) return false
-        val l = last ?: return true
-        return Geo.distanceM(l, f.ll) >= everyM
-    }
-
-    fun mark(p: LatLon) { last = p }
-}
-
 internal fun Double.round1() = (this * 10).roundToInt() / 10.0

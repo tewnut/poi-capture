@@ -11,15 +11,15 @@ class PlanFacadeTest {
     @Test fun planFromFacadeDistance() {
         val p6 = CapturePlan.of(6.0)                      // default 70° field of view
         assertEquals(8.4, p6.coverageM, 0.05)             // 2 · 6 · tan(35°)
-        assertEquals(4.2, p6.photoEveryM, 0.05)           // every facade point on ≥ 2 photos
-        assertEquals(23, p6.rateLimitKmh)                 // 4.2 m × 1.5 shots/s
+        assertEquals(3.78, p6.photoEveryM, 0.05)          // at the latest every 45 % of a frame: each point on ≥ 2 photos
+        assertEquals(20, p6.rateLimitKmh)                 // 3.78 m × 1.5 shots/s
         assertEquals(24, p6.blurLimitKmh)                 // 8 px · 6 m / (1/250 s · 1828 px)
-        assertEquals(23, p6.maxSpeedKmh)
+        assertEquals(20, p6.maxSpeedKmh)
         val p4 = CapturePlan.of(4.0)
-        assertEquals(3.0, p4.photoEveryM, 0.01)           // clamped at 3 m
+        assertEquals(2.52, p4.photoEveryM, 0.01)          // no 3 m floor any more: the frames, not the GPS, time the photos
         assertTrue(p4.maxSpeedKmh < p6.maxSpeedKmh)
         val p12 = CapturePlan.of(12.0)
-        assertEquals(8.4, p12.photoEveryM, 0.05)
+        assertEquals(7.56, p12.photoEveryM, 0.05)
         assertEquals(CapturePlan.SPEED_CAP_KMH, p12.maxSpeedKmh)
         assertEquals(CapturePlan.of(6.0, 80.0).hFovDeg, 80.0, 0.0)
         assertTrue(CapturePlan.of(6.0, 80.0).photoEveryM > p6.photoEveryM)   // wider lens: fewer photos

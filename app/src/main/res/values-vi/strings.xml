@@ -165,7 +165,7 @@
     <string name="setup_facade_hint">Tự đặt theo loại đường bạn đang đi (hẻm, đường nhỏ 4 m, đường cấp 3 5 m, cấp 2 6 m, đường chính 8 m), chọn phía gần để các ảnh luôn chồng lên nhau. Vị trí từng cửa hàng được tính từ nhiều ảnh, không phải từ con số này.</string>
     <string name="setup_mode_auto">Ảnh tự động</string>
     <string name="setup_mode_manual">Bấm tay</string>
-    <string name="setup_mode_auto_hint">1 ảnh mỗi %1$s m (mỗi biển hiệu có trong ≥ 2 ảnh) · chạy tối đa %2$d km/h</string>
+    <string name="setup_mode_auto_hint">Chụp mỗi khi cảnh phố trôi ~⅓ khung hình (cách nhau ≤ %1$s m, mỗi biển hiệu có trong ≥ 2 ảnh) · chạy tối đa %2$d km/h</string>
     <string name="setup_mode_manual_hint">Chụp bằng nút âm lượng hoặc nút bấm Bluetooth trên tay lái, không cần chạm màn hình · chạy tối đa %1$d km/h</string>
     <string name="setup_mount_hint">Gắn máy chắc (nằm ngang thấy rộng hơn), camera nhìn sang dãy nhà cần ghi. App tự nhận bên (phải/trái) khi bạn chạy. Bấm ★ Đánh dấu khi đi qua cửa hàng đáng chú ý.</string>
     <string name="setup_enter_email">Nhập email</string>
@@ -446,7 +446,7 @@
     <string name="setup_sweep_sub">Chạy xe · tự chụp</string>
     <string name="setup_place_sub">Dừng ở từng cửa hàng</string>
     <string name="setup_mode_short">Cách ghi</string>
-    <string name="setup_plan_auto_short">%1$s m/ảnh · ≤ %2$d km/h</string>
+    <string name="setup_plan_auto_short">≤ %1$s m/ảnh · ≤ %2$d km/h</string>
     <string name="setup_plan_short">≤ %1$d km/h</string>
     <string name="setup_need_gps">Đang chờ GPS…</string>
     <string name="setup_need_email">Nhập email để bắt đầu</string>

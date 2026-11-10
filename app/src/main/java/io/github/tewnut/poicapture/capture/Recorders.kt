@@ -201,6 +201,11 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
         while (q.isNotEmpty() && t - q.first().first > 1_000_000_000L) q.removeFirst()
     }
 
+    /** Fastest turn rate (rad/s) over the 100 ms before `nowNanos`: shake right now; null without a gyroscope. */
+    @Synchronized
+    fun gyroNow(nowNanos: Long): Double? =
+        gyro.filter { nowNanos - it.first <= 100_000_000L }.maxOfOrNull { it.second.toDouble() }
+
     /** Shake around `nowNanos`: max gyro rate over the last 300 ms, accel std over the last second, device orientation. */
     @Synchronized
     fun snapshot(nowNanos: Long): JSONObject {

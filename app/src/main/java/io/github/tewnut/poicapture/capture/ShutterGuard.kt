@@ -15,7 +15,6 @@ import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.camera2.interop.CaptureRequestOptions
 import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
-import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import java.util.concurrent.Executor
 import kotlin.math.pow
@@ -24,7 +23,7 @@ import kotlin.math.pow
  * Street sweep: keeps the shutter at [MAX_EXPOSURE_NS] (1/500 s) or faster, so photos taken while riding are not
  * smeared. While the camera's own auto-exposure already picks a fast enough shutter (daylight) it is left alone; when
  * it wants a slower one, the exposure goes manual: shutter fixed at 1/500 s, sensitivity (ISO) raised instead and
- * kept right from the brightness of a small analysis stream. Grainy is readable, smeared is not. When even the
+ * kept right from the brightness of a small analysis stream (FrameWatcher). Grainy is readable, smeared is not. When even the
  * highest ISO is not enough, [State.tooDark].
  *
  * Phones without manual sensor control keep auto-exposure ([State.supported] = false); the blur check on each photo
@@ -54,26 +53,8 @@ class ShutterGuard(private val onState: (State) -> Unit) {
         })
     }
 
-    /** Brightness of each analysis frame (centre of the luma plane, sparsely sampled): steers the ISO when manual. */
-    fun analysis(executor: Executor): ImageAnalysis = ImageAnalysis.Builder()
-        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-        .build().also { a ->
-            a.setAnalyzer(executor) { img ->
-                try {
-                    val y = img.planes[0]
-                    val buf = y.buffer
-                    val w = img.width; val h = img.height; val stride = y.rowStride
-                    var sum = 0L; var n = 0
-                    var row = h / 4
-                    while (row < h * 3 / 4) {
-                        var col = w / 4
-                        while (col < w * 3 / 4) { sum += (buf.get(row * stride + col).toInt() and 0xFF); n++; col += 8 }
-                        row += 8
-                    }
-                    if (n > 0) { val mean = sum.toDouble() / n; main.post { onBrightness(mean) } }
-                } finally { img.close() }
-            }
-        }
+    /** Mean brightness of the centre of a small analysis frame (FrameWatcher, main thread): steers the ISO when manual. */
+    fun brightness(mean: Double) = onBrightness(mean)
 
     @SuppressLint("UnsafeOptInUsageError")
     fun attach(cam: Camera) {

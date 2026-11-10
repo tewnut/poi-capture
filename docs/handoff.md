@@ -110,8 +110,16 @@ photos and contributes them to the target map through that map's contribution to
     unknown 4 m), on the near side so photos always overlap. Each item says which: `facadeDistanceM` and
     `facadeRoadType`. `session.settings.facadeDistanceM` is the unknown-road value (older sessions: the contributor's
     choice). `session.plan` (the last one in use) = `{facadeDistanceM, hFovDeg, coverageM, photoEveryM, maxSpeedKmh, blurLimitKmh,
-    rateLimitKmh}`: one frame covers `coverageM` of facade, photos every `coverageM / 2` so each sign is on ≥ 2 photos,
+    rateLimitKmh}`: one frame covers `coverageM` of facade, `photoEveryM` = 45 % of it is the widest spacing to expect,
     speed limited by motion blur and by how fast the camera can shoot.
+  - **Auto photos are timed by the frames, not by metres** (from v0.13): a 640×360 analysis stream measures how far the
+    scene slid sideways (`session.camera.photoTrigger = "frameOverlap"`); a photo is taken after 30 % of a frame at a
+    steady moment, at 45 % at the latest, so consecutive photos overlap ≥ 55 % and each sign is on ≥ 2 photos whatever
+    the real facade distance. Waiting (GPS speed < 0.7 m/s) adds nothing. Where the frames cannot tell, the GPS speed
+    over the elapsed time is used (`"gpsSpeed"` when there is no analysis stream at all). Each auto photo carries
+    `overlap = {slide, measured, steady, gyroRadS, frameSharpness}`: slide since the previous photo (fraction of the
+    frame), share of it measured on frames, and the shake at the moment. Spacing in metres therefore varies: wider on
+    far facades, tighter on close ones.
   - **Camera direction is measured** from the linear acceleration while speeding up / braking on straight stretches
     (no compass): `session.mount = {yawToTravelDeg, side, consistency, events, source: "measured"}` once confident,
     else null. `sideOfTravel` follows the measurement.

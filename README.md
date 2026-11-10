@@ -98,8 +98,11 @@ Two kinds of session, chosen on **New**:
 1. **New** (one screen): live map with the GPS state and what to do when there is no position (grant the permission,
    switch on precise location or the phone's location, how many satellites are seen). Only a satellite fix counts as
    the position: a Wi-Fi / cell fix may centre the map ("waiting for GPS") but never names the road. The road the contributor is on
-   (recognised automatically, also offline), the sweep mode (auto photos or manual), then **Start**. Photo spacing (each sign on ≥ 2 photos) and the speed
-   limit follow from the type of road being ridden (expected distance to the shop fronts, on the near
+   (recognised automatically, also offline), the sweep mode (auto photos or manual), then **Start**. Auto photos are timed by
+   the camera itself: a small video stream measures how far the street slid across the frame, and a photo is taken
+   after ~30–45 % of a frame, at the steadiest moment (sharp frame, little shake), so every sign is on ≥ 2 photos at any
+   distance and speed, and nothing is shot while waiting at a light; without usable frames the GPS speed stands in. The speed
+   limit follows from the type of road being ridden (expected distance to the shop fronts, on the near
    side) and the camera's field of view; the side (right / left) is measured while
    riding.
 2. **Capture**: full-screen rear camera, portrait or landscape as the phone is held (the rest of the app is portrait;
@@ -182,7 +185,8 @@ reading on real Vietnamese signboards (diacritics are not always read right: the
 
 Defaults live in `core/Session.kt` (`Settings`) and are stored per device: tile URL (any XYZ tile server), Overpass
 URL, GPS accuracy limit, off-road distance, photo size, JPEG quality, mount offset, road pack
-catalogue URL. Photo spacing and the speed limit are not settings: they follow from the road type being ridden and the
+catalogue URL. Photo spacing and the speed limit are not settings: the photos follow the slide measured on the camera
+frames (`core/FrameShift.kt`, `capture/FrameWatcher.kt`), the speed limit the road type being ridden and the
 camera's field of view (`core/CapturePlan.kt`). Photos moved by hand are checked against the roads around (too far,
 on the road, across the street: warnings, `core/MoveCheck.kt`).
 
@@ -192,12 +196,13 @@ on the road, across the street: warnings, `core/MoveCheck.kt`).
 |---|---|
 | `core/Geo.kt` | distance, bearing, nearest point on a line, side model, camera bearing with mount offset |
 | `core/Road.kt` | OSM ways, heading-aware road matching, grid cells for automatic road loading, Overpass queries |
-| `core/FixProcessor.kt` | per-fix logic: travel bearing / speed, travel direction, U-turn, warnings, item metadata, auto-shot spacing |
+| `core/FixProcessor.kt` | per-fix logic: travel bearing / speed, travel direction, U-turn, warnings, item metadata |
+| `core/FrameShift.kt` (shared) | scene slide between camera frames, and `OverlapTrigger`: when the next sweep photo is due |
 | `core/Session.kt` | session model, settings, schema id |
 | `core/SessionStore.kt` | per-session folders, append-only files (crash-safe) |
 | `core/Exporter.kt` | streaming zip: manifest.json, track.geojson, gnss_raw.csv, imu.csv, photos, videos |
 | `core/TrackStats.kt` | distance / duration of a ride, main roads of a session |
-| `core/CapturePlan.kt` | photo spacing and speed limit from the road type (expected facade distance) and field of view |
+| `core/CapturePlan.kt` | expected widest photo spacing and speed limit from the road type (expected facade distance) and field of view |
 | `core/MountEstimator.kt` | camera direction relative to travel from acceleration / braking (no compass) |
 | `core/Poi.kt`, `core/PhotoRoles.kt` | session kinds (sweep / place), place records, optional photo kinds (config) |
 | `core/SignText.kt`, `capture/SignOcr.kt` | on-device sign reading: ML Kit OCR, then phone / house number / category / name rules |

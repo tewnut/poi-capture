@@ -170,7 +170,7 @@
     <string name="setup_facade_hint">Set by itself from the road you are on (alley or small street 4 m, tertiary 5 m, secondary 6 m, main road 8 m), on the near side so photos always overlap. Where each shop is gets worked out from several photos, not from this number.</string>
     <string name="setup_mode_auto">Auto photos</string>
     <string name="setup_mode_manual">Manual</string>
-    <string name="setup_mode_auto_hint">1 photo every %1$s m (each sign in ≥ 2 photos) · max %2$d km/h</string>
+    <string name="setup_mode_auto_hint">A photo each time the street slides ~⅓ of the frame (≤ %1$s m apart, each sign on ≥ 2 photos) · max %2$d km/h</string>
     <string name="setup_mode_manual_hint">Shoot with the volume keys or a Bluetooth button on the handlebar, no need to touch the screen · max %1$d km/h</string>
     <string name="setup_mount_hint">Mount the phone firmly (landscape sees more), camera facing the buildings to record. The app detects the side (right/left) as you ride. Tap ★ Mark when you pass a shop worth noting.</string>
     <string name="setup_enter_email">Enter email</string>
@@ -462,7 +462,7 @@
     <string name="setup_sweep_sub">Ride · auto photos</string>
     <string name="setup_place_sub">Stop at each shop</string>
     <string name="setup_mode_short">Record</string>
-    <string name="setup_plan_auto_short">Every %1$s m · ≤ %2$d km/h</string>
+    <string name="setup_plan_auto_short">≤ %1$s m apart · ≤ %2$d km/h</string>
     <string name="setup_plan_short">≤ %1$d km/h</string>
     <string name="setup_need_gps">Waiting for GPS…</string>
     <string name="setup_need_email">Add your email to start</string>

@@ -8,7 +8,8 @@ import kotlin.math.tan
  * How densely to photograph and how fast to ride, from the distance between the camera and the shop fronts
  * (not from the vehicle):
  * - one landscape frame covers `coverageM = 2 · d · tan(hFov/2)` of facade;
- * - every point of the facade should be on at least 2 photos (to triangulate signs), so photos every coverage/2;
+ * - every point of the facade should be on at least 2 photos (to triangulate signs): a photo at the latest every
+ *   45 % of the coverage (the photos themselves are triggered by the slide measured on the camera frames);
  * - motion blur in pixels = v · exposure · focalPx / d  → speed limit for a blur budget;
  * - the camera cannot shoot faster than `maxShotsPerSec`, so the speed must also let it keep the spacing.
  */
@@ -42,13 +43,16 @@ data class CapturePlan(
         const val MAX_BLUR_PX = 8.0           // at 2560 px width: small sign text still readable
         const val MAX_SHOTS_PER_SEC = 1.5     // sustained full-resolution shots on a mid-range phone
         const val SPEED_CAP_KMH = 30          // never suggest more on city streets
+        const val OVERLAP_LATEST = 0.45       // = OverlapTrigger.latest
 
         fun of(facadeDistanceM: Double, hFovDeg: Double? = null, imageWidthPx: Int = 2560): CapturePlan {
             val d = facadeDistanceM.coerceIn(2.0, 30.0)
             val fov = (hFovDeg ?: DEFAULT_HFOV).coerceIn(30.0, 120.0)
             val half = fov / 2 * PI / 180.0
             val coverage = 2 * d * tan(half)
-            val every = (coverage / 2).coerceIn(3.0, 10.0)
+            // the photos are triggered by how far the scene slid in the frames (OverlapTrigger), at the latest after
+            // 45 % of a frame: the widest spacing to expect, used for the speed the camera can keep up with
+            val every = (coverage * OVERLAP_LATEST).coerceIn(1.0, 10.0)
             val focalPx = (imageWidthPx / 2.0) / tan(half)
             val blurMps = MAX_BLUR_PX * d / (EXPOSURE_S * focalPx)
             val rateMps = every * MAX_SHOTS_PER_SEC
