@@ -1,5 +1,6 @@
 package io.github.tewnut.poicapture.core
 
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.atan2
@@ -14,8 +15,8 @@ data class LatLon(val lat: Double, val lon: Double)
 /** Small geodesy helpers (WGS84, spherical approximations are fine at street scale). */
 object Geo {
     private const val R = 6371008.8
-    private fun rad(d: Double) = Math.toRadians(d)
-    private fun deg(r: Double) = Math.toDegrees(r)
+    private fun rad(d: Double) = d * PI / 180.0
+    private fun deg(r: Double) = r * 180.0 / PI
 
     fun distanceM(a: LatLon, b: LatLon): Double {
         val dLat = rad(b.lat - a.lat)

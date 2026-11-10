@@ -1,5 +1,6 @@
 package io.github.tewnut.poicapture.core
 
+import kotlin.math.PI
 import kotlin.math.tan
 
 /**
@@ -15,7 +16,7 @@ object BlurCheck {
 
     fun motionPx(speedMps: Double, exposureS: Double, hFovDeg: Double, widthPx: Int, distanceM: Double): Double {
         if (distanceM <= 0 || widthPx <= 0 || hFovDeg <= 0) return 0.0
-        val focalPx = (widthPx / 2.0) / tan(Math.toRadians(hFovDeg / 2))
+        val focalPx = (widthPx / 2.0) / tan(hFovDeg / 2 * PI / 180.0)
         return speedMps * exposureS * focalPx / distanceM
     }
 

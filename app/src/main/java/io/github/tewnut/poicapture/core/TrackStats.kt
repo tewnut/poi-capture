@@ -42,10 +42,9 @@ data class TrackStats(val distanceM: Double, val durationMs: Long, val points: I
          */
         fun sessionName(items: List<JSONObject>, startedIso: String?, fallback: String,
                         zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
-            val street = mainRoads(items, max = 1).firstOrNull() ?: mainRoads(items, max = 1, minShare = 0.0).firstOrNull() ?: fallback
             val day = runCatching { java.time.format.DateTimeFormatter.ofPattern("yyMMdd").withZone(zone).format(java.time.Instant.parse(startedIso)) }
                 .getOrNull()
-            return if (day != null) "$street [$day]" else street
+            return SessionNaming.name(items.map { it.optString("roadName") }, day, fallback)
         }
 
         fun mainRoads(items: List<JSONObject>, max: Int = 2, minShare: Double = 0.2): List<String> =

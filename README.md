@@ -16,7 +16,29 @@ The UI is in English, with a Vietnamese translation used when the phone (or the 
 **[Latest APK](https://github.com/tewnut/poi-capture/releases/latest)** (`poi-capture-vX.Y.Z.apk`, Android 11+). Open it
 on the phone and allow installing from that source. New versions install over the old one and keep the sessions.
 
-## Why Android only
+## iPhone app (Place capture)
+
+`ios/` holds the iPhone app: Place capture (stop at each shop, photograph it), with the same rules and export as the
+Android app (GPS-grade fix at most 5 s old for every photo, "GPS lost" hold, sessions named "{street} [yymmdd]",
+sent as a `poi-capture/3` zip). On iPhones with LiDAR (Pro models) each photo also records the measured distance to
+the shop front (up to about 5 m, `facadeSource: "lidar"`). Street sweep stays Android only (see below).
+
+The logic both apps share (capture rules, geometry, photo spacing, blur checks, session naming, the Place capture
+manifest) lives in the Kotlin Multiplatform module `shared/`; the Android app uses it as a library, the iPhone app as
+`Shared.framework`. Platform code (camera, GPS, sensors, storage, screens) is native on each side.
+
+Build the iPhone app on a Mac with Xcode 16+ and a JDK 17+:
+
+```
+brew install xcodegen
+cd ios && xcodegen generate && open PoiCapture.xcodeproj
+```
+
+A build step runs `./gradlew :shared:embedAndSignAppleFrameworkForXcode`. Set your team for signing to run it on a
+phone. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) builds both apps on every push: the shared tests on
+the JVM and on the iOS simulator, the Android tests and APK, and the iPhone app for the simulator.
+
+## Why street sweep is Android only
 
 Placing a shop needs the phone's own measurements, unfiltered, and a capture that keeps going with the screen off.
 Android gives an app both; iOS does not:

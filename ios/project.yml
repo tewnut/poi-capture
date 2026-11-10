@@ -1,0 +1,45 @@
+# iPhone app (Place capture). Generate the Xcode project with XcodeGen, on a Mac:
+#   brew install xcodegen && cd ios && xcodegen generate && open PoiCapture.xcodeproj
+# The shared Kotlin logic (../shared) is built into Shared.framework by Gradle before each build (JDK 17+ needed).
+name: PoiCapture
+options:
+  bundleIdPrefix: io.github.tewnut
+  developmentLanguage: en
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "0.12.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO          # the Gradle step writes ../shared/build
+targets:
+  PoiCapture:
+    type: application
+    platform: iOS
+    scheme: {}
+    sources:
+      - path: PoiCapture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.tewnut.poicapture
+        PRODUCT_NAME: POI Capture
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: POI Capture
+        INFOPLIST_KEY_NSCameraUsageDescription: "Take photos of shopfronts and signs."
+        INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Know where each photo was taken and which street you are on."
+        INFOPLIST_KEY_NSMotionUsageDescription: "Know which way the camera looks when a photo is taken."
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UIRequiredDeviceCapabilities: "gps location-services still-camera"
+        INFOPLIST_KEY_CFBundleLocalizations: "en vi"
+        FRAMEWORK_SEARCH_PATHS: "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
+        OTHER_LDFLAGS: "$(inherited) -framework Shared"
+    preBuildScripts:
+      - name: Build Shared.framework (Kotlin)
+        script: |
+          cd "$SRCROOT/.."
+          ./gradlew :shared:embedAndSignAppleFrameworkForXcode
+        basedOnDependencyAnalysis: false

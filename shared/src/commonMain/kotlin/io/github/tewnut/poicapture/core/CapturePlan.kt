@@ -1,6 +1,6 @@
 package io.github.tewnut.poicapture.core
 
-import org.json.JSONObject
+import kotlin.math.PI
 import kotlin.math.roundToInt
 import kotlin.math.tan
 
@@ -21,11 +21,6 @@ data class CapturePlan(
     val blurLimitKmh: Int,
     val rateLimitKmh: Int,
 ) {
-    fun toJson(): JSONObject = JSONObject()
-        .put("facadeDistanceM", facadeDistanceM).put("hFovDeg", hFovDeg).put("coverageM", coverageM.round1())
-        .put("photoEveryM", photoEveryM.round1()).put("maxSpeedKmh", maxSpeedKmh)
-        .put("blurLimitKmh", blurLimitKmh).put("rateLimitKmh", rateLimitKmh)
-
     companion object {
         const val DEFAULT_HFOV = 70.0
 
@@ -51,7 +46,7 @@ data class CapturePlan(
         fun of(facadeDistanceM: Double, hFovDeg: Double? = null, imageWidthPx: Int = 2560): CapturePlan {
             val d = facadeDistanceM.coerceIn(2.0, 30.0)
             val fov = (hFovDeg ?: DEFAULT_HFOV).coerceIn(30.0, 120.0)
-            val half = Math.toRadians(fov / 2)
+            val half = fov / 2 * PI / 180.0
             val coverage = 2 * d * tan(half)
             val every = (coverage / 2).coerceIn(3.0, 10.0)
             val focalPx = (imageWidthPx / 2.0) / tan(half)
