@@ -16,6 +16,13 @@ class SharedTest {
         assertEquals("1969-12-31T23:59:59Z", IsoTime.format(-1000))
     }
 
+    @Test fun unnamedLanesNeverNameASession() {
+        val photos = listOf("Unnamed road (residential)", "Unnamed road (residential)", "Unnamed road (residential)", "Mai Chí Thọ", "Mai Chí Thọ")
+        assertEquals("Mai Chí Thọ [261111]", SessionNaming.name(photos, "261111", "No street name"))
+        assertEquals("Mai Chí Thọ [261111]", SessionNaming.name(listOf("Unnamed road (service)"), "261111", "No street name", nearby = "Mai Chí Thọ"))
+        assertEquals("No street name", SessionNaming.name(listOf("Unnamed road (service)"), null, "No street name"))
+    }
+
     @Test fun sessionIsNamedAfterItsMostCommonStreet() {
         assertEquals("Nguyễn Thanh Sơn [261110]",
             SessionNaming.name(listOf("Nguyễn Thanh Sơn", "Đường số 6", "Nguyễn Thanh Sơn", ""), "261110", "?"))

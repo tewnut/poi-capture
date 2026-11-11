@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.tewnut.poicapture"
         minSdk = 30            // Android 11+: raw GNSS, camera/location foreground-service types
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.13.0"
+        versionCode = 15
+        versionName = "0.14.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -30,6 +30,11 @@ android {
         }
     }
     buildTypes {
+        // debug installs next to the release app (own data), so testing never means uninstalling the real sessions
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("release")

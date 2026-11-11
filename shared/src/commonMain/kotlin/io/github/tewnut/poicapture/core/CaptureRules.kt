@@ -41,9 +41,19 @@ object IsoTime {
 
 /** A session's name: "{street} [yymmdd]", the street most of its photos were taken on, else [fallback]. */
 object SessionNaming {
-    fun name(streets: List<String>, yymmdd: String?, fallback: String): String {
-        val street = streets.mapNotNull { it.trim().takeIf { s -> s.isNotEmpty() && s != "null" } }
-            .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: fallback
+    /** How photos on a way without a name or ref are labelled (Road.kt `roadLabel`). */
+    const val UNNAMED_PREFIX = "Unnamed road"
+
+    fun isNamed(street: String): Boolean = street.isNotBlank() && street != "null" && !street.startsWith(UNNAMED_PREFIX)
+
+    /**
+     * "{street} [yymmdd]": the named street most photos were taken on. Unnamed lanes never name a session (first
+     * Place capture: 3 photos in an unnamed lane, 2 on Mai Chí Thọ → "Unnamed road (residential)"); without any named
+     * street, [nearby] (the nearest big named road), then [fallback].
+     */
+    fun name(streets: List<String>, yymmdd: String?, fallback: String, nearby: String? = null): String {
+        val street = streets.map { it.trim() }.filter { isNamed(it) }
+            .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: nearby?.takeIf { isNamed(it) } ?: fallback
         return if (yymmdd.isNullOrBlank()) street else "$street [$yymmdd]"
     }
 }

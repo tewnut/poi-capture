@@ -150,8 +150,6 @@ data class CaptureUi(
     val poiRead: SignReading? = null,  // what the phone read on its photos (hint)
     val reading: Int = 0,                // photos waiting for / in on-device text reading
     val readNote: UiText? = null,        // e.g. a sign photo with no readable text: shoot closer
-    // sweep mode: "Đánh dấu" taps
-    val marks: Int = 0,
 )
 
 /**
@@ -197,8 +195,12 @@ class CaptureService : LifecycleService() {
     private val frameSharpness = RecentMedian(30)
     private val gyroRecent = RecentMedian(60)
     @Volatile private var coverageM = 0.0            // facade width one photo covers (current plan)
+    private var coveragePerM = 0.0                   // frame width in metres of facade per metre of distance (lens)
+    private var junkDropped = 0                      // photos dropped as unusable (see BlurCheck.unusable)
     private var pendingOverlap: JSONObject? = null
-    private val io = Executors.newSingleThreadExecutor()
+    // never rejects: a late camera callback after the service stopped is dropped, not a crash
+    private val io = java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+        java.util.concurrent.LinkedBlockingQueue(), java.util.concurrent.ThreadPoolExecutor.DiscardPolicy())
     private val ocr = Executors.newSingleThreadExecutor()   // on-device text reading of POI photos (~1 s each)
     private val poiReadings = HashMap<String, MutableList<SignReading>>()
 
@@ -268,7 +270,7 @@ class CaptureService : LifecycleService() {
             val pois = store.pois(s.id)
             _state.update { it.copy(poiNumber = pois.size) }
         } else {
-            _state.update { it.copy(marks = store.marks(s.id).size) }
+            // (street sweep: nothing to count before the first photo)
         }
         _state.update { it.copy(roadData = if (s.road.auto && s.road.ways.isEmpty()) "loading" else "ok") }
         pm = getSystemService(POWER_SERVICE) as PowerManager
@@ -281,6 +283,9 @@ class CaptureService : LifecycleService() {
 
     override fun onDestroy() {
         if (activeSession.value != null) finishSession()
+        // release the camera while the photo executor still runs: CameraX reports a photo still in flight as failed
+        // on that executor, and a shut-down executor rejects it (crash after "End and save" mid-shot)
+        runCatching { ProcessCameraProvider.getInstance(this).get().unbindAll() }
         io.shutdown()
         ocr.shutdown()
         super.onDestroy()
@@ -339,7 +344,9 @@ class CaptureService : LifecycleService() {
             val gray = IntArray(px.size) { i -> val c = px[i]; ((c shr 16 and 0xFF) * 3 + (c shr 8 and 0xFF) * 6 + (c and 0xFF)) / 10 }
             BlurCheck.sharpness(gray, bw, bh)
         }.getOrNull()
+        var unusable = false
         val blurry = synchronized(sharpnessRecent) {
+            unusable = session.kind == SessionKind.SWEEP && BlurCheck.unusable(sharp, sharpnessRecent.toList())
             val b = BlurCheck.blurry(motion, w, sharp, sharpnessRecent.toList())
             if (sharp != null) { sharpnessRecent.addLast(sharp); while (sharpnessRecent.size > 15) sharpnessRecent.removeFirst() }
             blurRecent.addLast(b); while (blurRecent.size > 3) blurRecent.removeFirst()
@@ -351,6 +358,7 @@ class CaptureService : LifecycleService() {
             .put("sharpness", sharp?.let { Math.round(it) } ?: JSONObject.NULL)
             .put("manualShutter", _state.value.manualShutter)
             .put("blurry", blurry)
+            .put("unusable", unusable)
     }
 
     // ---------- portrait / landscape ----------
@@ -477,7 +485,7 @@ class CaptureService : LifecycleService() {
                 trackPoints = it.trackPoints + 1,
                 warnings = if (session.kind == SessionKind.POI) fp.warnings().filter { w -> w is CaptureWarning.WeakGps }.map { w -> w.toUiText() } +
                     lightWarnings() + (if (hot) listOf(UiText(R.string.service_hot)) else emptyList())
-                else lightWarnings() + mountWarning() + fp.warnings().map { w -> w.toUiText() } +
+                else lightWarnings() + portraitWarning() + mountWarning() + fp.warnings().map { w -> w.toUiText() } +
                     (if (System.currentTimeMillis() - lastMissedShotMs < 10_000) listOf(UiText(R.string.service_missed_shot)) else emptyList()) +
                     (if (hot) listOf(UiText(R.string.service_hot)) else emptyList()),
                 error = if (it.error?.res == R.string.service_gps_permission) null else it.error,
@@ -503,10 +511,15 @@ class CaptureService : LifecycleService() {
 
     private fun applyPlan(plan: CapturePlan) {
         coverageM = plan.coverageM
+        coveragePerM = if (plan.facadeDistanceM > 0) plan.coverageM / plan.facadeDistanceM else 0.0
         fp.maxSpeedKmh = plan.maxSpeedKmh
         session.plan = plan.toJson()
         _state.update { it.copy(maxSpeedKmh = plan.maxSpeedKmh, photoEveryM = plan.photoEveryM) }
     }
+
+    /** Street sweep held upright: half of each photo is road and sky, and the camera cannot keep up as well. */
+    private fun portraitWarning(): List<UiText> =
+        if (session.kind == SessionKind.SWEEP && portrait) listOf(UiText(R.string.service_turn_landscape)) else emptyList()
 
     private fun mountWarning(): List<UiText> = when (_state.value.mount) {
         "front" -> listOf(UiText(R.string.service_mount_front))
@@ -618,7 +631,9 @@ class CaptureService : LifecycleService() {
                     val long = st.photoLongEdge
                     val selector = ResolutionSelector.Builder()
                         .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
-                        .setResolutionStrategy(ResolutionStrategy(Size(long, long * 9 / 16), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER))
+                        // at least the asked size: a camera without 2560x1440 (e.g. OPPO Reno6 Z) gives the next size
+                        // up (3264x1840), not 1920x1080, where small sign text is no longer readable
+                        .setResolutionStrategy(ResolutionStrategy(Size(long, long * 9 / 16), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
                         .build()
                     imageCapture = ImageCapture.Builder()
                         .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
@@ -725,7 +740,10 @@ class CaptureService : LifecycleService() {
         val speed = if (freshFix() != null) fp.speedMps else null
         when {
             speed != null && speed < 0.7 -> {}                               // waiting (lights, traffic): passing vehicles are not new facade
-            fr.shift != null && dt < 0.4 -> trigger.addFrameShift(fr.shift)
+            fr.shift != null && dt < 0.4 -> {
+                trigger.addFrameShift(fr.shift)
+                trigger.floor(fr.shift, speed ?: 0.0, dt, coveragePerM)   // never as if the fronts were > 40 m away
+            }
             else -> trigger.addSpeed(speed ?: 0.0, dt, coverageM)
         }
         maybeShoot(steady, gyro, fr.sharpness, sharpMedian)
@@ -771,10 +789,11 @@ class CaptureService : LifecycleService() {
             meta.put("cameraBearing", motion?.opt("cameraAzimuthDeg") ?: JSONObject.NULL).put("cameraBearingSource", "compass")
                 .put("sideOfWay", JSONObject.NULL).put("travel", JSONObject.NULL)
         }
+        var shotSlide = 0.0
         if (trigger == "auto") {
             pendingOverlap?.let { meta.put("overlap", it) }
             pendingOverlap = null
-            this.trigger.shot()
+            shotSlide = this.trigger.shot()
         }
         val file = store.photoFile(session.id, id)
         ic.takePicture(ImageCapture.OutputFileOptions.Builder(file).build(), io, object : ImageCapture.OnImageSavedCallback {
@@ -790,6 +809,18 @@ class CaptureService : LifecycleService() {
                 }
                 meta.put("bytes", file.length())
                 runCatching { meta.put("blur", blurOf(meta, file)) }
+                // street sweep: a photo with almost no detail (a motorbike passing a metre away) is dropped, and the
+                // next one comes sooner so the stretch it should have covered is still on a photo
+                if (trigger == "auto" && meta.optJSONObject("blur")?.optBoolean("unusable") == true) {
+                    file.delete()
+                    shooting = false
+                    ContextCompat.getMainExecutor(this@CaptureService).execute {
+                        this@CaptureService.trigger.retake(shotSlide)
+                        junkDropped++
+                        session.camera?.put("unusableDropped", junkDropped)
+                    }
+                    return
+                }
                 store.appendItem(session.id, meta)
                 shooting = false
                 _state.update {
@@ -864,19 +895,6 @@ class CaptureService : LifecycleService() {
         _state.update { it.copy(poiId = null, poiRoles = emptyMap(), poiRead = null, readNote = null) }
     }
 
-    // ---------- sweep marks ----------
-
-    /** "Đánh dấu": the contributor points out a place while riding; the photos around it go with the mark. */
-    fun addMark() {
-        val now = System.currentTimeMillis()
-        val f = freshFix() ?: run { _state.update { it.copy(gpsFresh = false) }; return }
-        store.appendMark(session.id, JSONObject().put("id", uid("m_", now)).put("tMs", now).put("t", iso(now))
-            .put("elapsedNanos", SystemClock.elapsedRealtimeNanos())
-            .put("lat", f?.lat ?: JSONObject.NULL).put("lon", f?.lon ?: JSONObject.NULL)
-            .put("accuracyM", f?.accuracyM ?: JSONObject.NULL))
-        _state.update { it.copy(marks = it.marks + 1) }
-    }
-
     // ---------- session control ----------
 
     fun start() {
@@ -908,7 +926,8 @@ class CaptureService : LifecycleService() {
         session.endedAt = iso(System.currentTimeMillis())
         // saved with its name: the street it was recorded on and the day
         session.name = runCatching { TrackStats.sessionName(store.items(session.id),
-            session.startedAt ?: session.createdAt, getString(R.string.session_no_street)) }.getOrNull()
+            session.startedAt ?: session.createdAt, getString(R.string.session_no_street),
+            ways = session.road.ways + cellWays.values.flatten()) }.getOrNull()
         session.counts = JSONObject().put("photos", ui.photos).put("videos", ui.videos).put("trackPoints", ui.trackPoints)
         store.save(session)
         val sid = session.id

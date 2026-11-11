@@ -11,13 +11,14 @@ import kotlin.math.sqrt
  * Method: the frame is cut into horizontal bands; each band becomes a 1-D profile (the change of its column means,
  * so a brightness change does not matter and shop borders, pillars and sign edges stand out); the profiles of the
  * two frames are matched by normalised cross-correlation over the allowed shifts. Each band that matches well votes;
- * the median vote wins, so one band filled by a motorbike riding alongside (no shift) or passing close (big shift)
- * does not decide.
+ * the shift that most bands agree on wins (at least [MIN_AGREEING]), so one band filled by a motorbike riding
+ * alongside (no shift), passing close (big shift) or by near asphalt (noise) does not decide.
  */
 object FrameShift {
     const val BANDS = 5
     const val MAX_SHIFT = 0.35          // per frame: 35 % of the width (≈ 30 km/h at 10 frames/s on a narrow street)
-    const val MIN_CORRELATION = 0.6
+    const val MIN_CORRELATION = 0.7
+    const val MIN_AGREEING = 2          // bands that must agree on the shift
 
     class Profiles internal constructor(val width: Int, internal val bands: List<DoubleArray?>)
 
@@ -51,11 +52,16 @@ object FrameShift {
             val b = cur.bands[i] ?: continue
             match(a, b, (maxShift * prev.width).toInt())?.let { votes += it }
         }
-        if (votes.isEmpty()) return null
-        val sorted = votes.sortedBy { it.first }
-        val mid = sorted[(sorted.size - 1) / 2]
-        val agreeing = votes.count { abs(it.first - mid.first) <= 2.0 }
-        return Shift(mid.first / (prev.width - 1), mid.second, agreeing)
+        // the shift most bands agree on (within 2 samples); bands of near asphalt or passing traffic give scattered,
+        // unrelated answers, so a lone band never decides (first ride: half of each portrait frame was road)
+        var best: List<Pair<Double, Double>> = emptyList()
+        for (v in votes) {
+            val group = votes.filter { abs(it.first - v.first) <= 2.0 }
+            if (group.size > best.size || (group.size == best.size && group.sumOf { it.second } > best.sumOf { it.second })) best = group
+        }
+        if (best.size < MIN_AGREEING) return null
+        val shift = best.sumOf { it.first * it.second } / best.sumOf { it.second }
+        return Shift(shift / (prev.width - 1), best.maxOf { it.second }, best.size)
     }
 
     /** Best shift s (in samples) with b[x + s] ≈ a[x], refined below one sample; null under [MIN_CORRELATION]. */
@@ -86,6 +92,31 @@ object FrameShift {
             if (den < 0) s += 0.5 * (l - r) / den        // parabola through the peak
         }
         return s to bestScore
+    }
+}
+
+/**
+ * The slide of the scene frame after frame, measured against a reference frame rather than the previous one. Far
+ * shop fronts (20–30 m, wide roads) move 1–2 px per frame at 30 frames/s; matching consecutive frames rounds such
+ * small steps towards 0 and the error adds up over hundreds of frames (first ride: 35 m with no photo). Against a
+ * reference the error does not add up; the reference is renewed after [rebaseAt] of slide, or when it no longer
+ * matches (then that frame's slide is unknown: null, and the caller falls back to the GPS speed for it).
+ */
+class SlideTracker(private val rebaseAt: Double = 0.2) {
+    private var ref: FrameShift.Profiles? = null
+    private var sinceRef = 0.0
+
+    fun reset() { ref = null; sinceRef = 0.0 }
+
+    /** Slide since the previous call, as a fraction of the frame width (signed), or null when unknown. */
+    fun next(cur: FrameShift.Profiles): Double? {
+        val r = ref
+        if (r == null || r.width != cur.width) { ref = cur; sinceRef = 0.0; return null }
+        val s = FrameShift.between(r, cur)
+        if (s == null) { ref = cur; sinceRef = 0.0; return null }
+        val step = s.fraction - sinceRef
+        if (abs(s.fraction) >= rebaseAt) { ref = cur; sinceRef = 0.0 } else sinceRef = s.fraction
+        return step
     }
 }
 
@@ -123,8 +154,26 @@ class OverlapTrigger(val earliest: Double = 0.30, val latest: Double = 0.45, val
 
     fun due(steady: Boolean): Boolean = progress >= latest || (steady && progress >= earliest)
 
-    /** A photo was taken: start counting again. */
-    fun shot() { measured = 0.0; measuredAbs = 0.0; estimated = 0.0 }
+    /** A photo was taken: start counting again. Returns the slide it covered (to give back with [retake]). */
+    fun shot(): Double { val p = progress; measured = 0.0; measuredAbs = 0.0; estimated = 0.0; return p }
+
+    /** The photo turned out unusable (dropped): its slide still has to be covered, so the next photo comes sooner. */
+    fun retake(slide: Double) { estimated += slide }
+
+    /**
+     * GPS-speed floor: whatever the frames say, the slide over [dtS] is at least what shop fronts [FARTHEST_FRONT_M]
+     * away would give. Frames that wrongly read ~0 (asphalt, traffic, repeated patterns) can then never leave a long
+     * stretch without photos. [coveragePerM]: frame width in metres of facade per metre of distance.
+     */
+    fun floor(measuredStep: Double, speedMps: Double, dtS: Double, coveragePerM: Double) {
+        if (speedMps <= 0 || dtS <= 0 || coveragePerM <= 0) return
+        val min = speedMps * dtS.coerceAtMost(2.0) / (FARTHEST_FRONT_M * coveragePerM)
+        if (abs(measuredStep) < min) estimated += min - abs(measuredStep)
+    }
+
+    companion object {
+        const val FARTHEST_FRONT_M = 40.0
+    }
 }
 
 /** Keeps the recent values of a signal and says whether the latest one is good compared to them (median based). */

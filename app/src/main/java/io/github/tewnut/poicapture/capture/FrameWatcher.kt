@@ -11,12 +11,13 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import io.github.tewnut.poicapture.core.BlurCheck
 import io.github.tewnut.poicapture.core.FrameShift
+import io.github.tewnut.poicapture.core.SlideTracker
 import java.util.concurrent.Executors
 
 /**
  * Street sweep: a small 16:9 stream next to the preview (same field of view as the photos), read on its own thread:
- * - how far the scene slid since the previous frame, along the photo's horizontal ([FrameShift]): what triggers
- *   the photos (see OverlapTrigger);
+ * - how far the scene slid since the previous frame, along the photo's horizontal, measured against a reference
+ *   frame ([SlideTracker], [FrameShift]): what triggers the photos (see OverlapTrigger);
  * - how sharp the frame is (Laplacian variance): with the gyroscope, says when the camera is steady;
  * - mean brightness: steers the ISO of [ShutterGuard] when the shutter is held at 1/500 s.
  *
@@ -31,7 +32,7 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
 
     /** The phone is held upright: the photo's horizontal is the sensor's short side. */
     @Volatile var portrait = false
-    private var prev: FrameShift.Profiles? = null
+    private val tracker = SlideTracker()
     private var prevPortrait = false
     private var gray = IntArray(0)
 
@@ -50,9 +51,10 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
         val y = img.planes[0]
         val buf = y.buffer
         val stride = y.rowStride
-        val step = maxOf(1, img.width / 320)
-        val gw = img.width / step; val gh = img.height / step
+        // ~320 px along the photo's horizontal: landscape = the sensor's long side (halved), portrait = its short side
         val up = portrait
+        val step = if (up) maxOf(1, img.height / 360) else maxOf(1, img.width / 320)
+        val gw = img.width / step; val gh = img.height / step
         if (gray.size != gw * gh) gray = IntArray(gw * gh)
         // grayscale at ~320 px, turned so that the photo's horizontal runs along x (sensor buffers are landscape)
         val w = if (up) gh else gw
@@ -68,9 +70,9 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
         }
         val brightness = if (n > 0) sum.toDouble() / n else 0.0
         val profiles = FrameShift.profiles(gray, w, h)
-        val p = prev
-        val shift = if (p != null && prevPortrait == up) FrameShift.between(p, profiles)?.fraction else null
-        prev = profiles; prevPortrait = up
+        if (prevPortrait != up) tracker.reset()
+        prevPortrait = up
+        val shift = tracker.next(profiles)
         val sharp = BlurCheck.sharpness(gray, w, h)
         main.post { onBrightness(brightness); onFrame(Frame(t, shift, sharp, brightness)) }
     }

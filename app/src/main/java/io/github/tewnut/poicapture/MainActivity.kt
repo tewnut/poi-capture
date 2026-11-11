@@ -137,8 +137,8 @@ object Prefs {
 }
 
 /**
- * Hardware keys while capturing: the volume keys (and Bluetooth selfie remotes, which send volume-up) shoot or mark,
- * so a rider can point out a shop from the handlebar without touching the screen. Set by the capture screen.
+ * Hardware keys while capturing: the volume keys (and Bluetooth selfie remotes, which send volume-up) shoot, in Place
+ * capture and manual street sweep. Set by the capture screen.
  */
 object CaptureKeys {
     @Volatile var handler: (() -> Unit)? = null

@@ -179,17 +179,15 @@
 
     <!-- ==== Capture screen, place sheet, capture service ==== -->
     <!-- Capture screen -->
-    <string name="capture_marked">★ Marked</string>
     <string name="capture_place_saved">✓ Place %1$d saved. On to the next one.</string>
     <string name="capture_camera_busy">Camera taken by another app (a call…). Recording resumes when it\'s back.</string>
     <string name="capture_end">End</string>
     <string name="capture_last_photo">Last photo</string>
     <string name="capture_shoot">Shoot</string>
-    <string name="capture_done_place">Done with place</string>
+    <string name="capture_next_place">Next place</string>
     <string name="capture_pin_status">Pin &amp; status…</string>
     <string name="capture_pause">Pause</string>
     <string name="capture_resume">Resume</string>
-    <string name="capture_mark">★\nMark</string>
     <string name="capture_recording">● Recording</string>
     <string name="capture_paused">Ⅱ Paused</string>
     <string name="capture_side_right">SHOOTING RIGHT →</string>
@@ -255,6 +253,7 @@
     <string name="service_gps_permission">GPS: precise location not allowed</string>
     <string name="service_hot">Phone is overheating: shade it or take a break</string>
     <string name="service_missed_shot">Camera can\'t keep up: slow down so no shopfront is missed</string>
+    <string name="service_turn_landscape">Turn the phone sideways: in portrait half of each photo is road and sky</string>
     <string name="service_mount_front">Camera is facing FORWARD: turn it to the buildings you\'re recording</string>
     <string name="service_mount_back">Camera is facing BACKWARD: turn it to the buildings you\'re recording</string>
     <string name="service_camera_failed">Couldn\'t open the camera: %1$s</string>
@@ -488,6 +487,16 @@
     <string name="sessionmap_move_title">Place of photo %1$d of %2$d</string>
     <string name="sessionmap_move_hint">The pin stays in the middle; zoom in for the exact door.</string>
     <string name="sessionmap_move_distance">%1$d m from where the photo was taken</string>
-    <string name="sessionmap_legend_photo">Photo taken</string>
-    <string name="sessionmap_legend_place">Shop</string>
+    <string name="sessionmap_legend_photo">Photo</string>
+    <string name="sessionmap_legend_place">Place</string>
+    <plurals name="sessionmap_place_title">
+        <item quantity="one">Place %1$d · %2$d photo</item>
+        <item quantity="other">Place %1$d · %2$d photos</item>
+    </plurals>
+    <string name="sessionmap_place_name">Name</string>
+    <string name="sessionmap_photo_text">Text on the photo</string>
+    <string name="sessionmap_photo_no_text">No text read</string>
+    <string name="sessionmap_place_no_name">No name yet</string>
+    <string name="sessionmap_edit_texts">Edit name and texts</string>
+    <string name="sessionmap_save">Save</string>
 </resources>

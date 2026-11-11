@@ -35,6 +35,17 @@ object BlurCheck {
         return sum2 / n - m * m
     }
 
+    /**
+     * Unusable: almost no detail compared to the session's recent photos (under [UNUSABLE_SHARE] of their median), e.g.
+     * a motorbike passing a metre from the lens, or a fully smeared frame. Plain scenes (a blank wall) keep far more.
+     */
+    fun unusable(sharpness: Double?, recent: List<Double>): Boolean {
+        if (sharpness == null || recent.size < 5) return false
+        val median = recent.sorted()[recent.size / 2]
+        return sharpness < UNUSABLE_SHARE * median
+    }
+    const val UNUSABLE_SHARE = 0.08
+
     /** Blurry: too much motion, or far less detail than the session's recent photos (median of [recent]). */
     fun blurry(motionPx: Double?, widthPx: Int, sharpness: Double?, recent: List<Double>): Boolean {
         if (motionPx != null && motionPx > maxMotionPx(widthPx)) return true

@@ -41,10 +41,55 @@ data class TrackStats(val distanceM: Double, val durationMs: Long, val points: I
          * dominates, [fallback] when none is known) and the local day it started.
          */
         fun sessionName(items: List<JSONObject>, startedIso: String?, fallback: String,
-                        zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): String {
+                        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(), ways: List<Way> = emptyList()): String {
             val day = runCatching { java.time.format.DateTimeFormatter.ofPattern("yyMMdd").withZone(zone).format(java.time.Instant.parse(startedIso)) }
                 .getOrNull()
-            return SessionNaming.name(items.map { it.optString("roadName") }, day, fallback)
+            val streets = items.map { it.optString("roadName") }
+            val nearby = if (streets.none { SessionNaming.isNamed(it) }) nearestBigRoad(items, ways) else null
+            return SessionNaming.name(streets, day, fallback, nearby)
+        }
+
+        /**
+         * The named road that best describes where the photos are when none of them was taken on a named street: the
+         * nearest one to their centre, bigger roads counting as nearer (a primary road 150 m away beats a named lane
+         * 60 m away), within 500 m.
+         */
+        fun nearestBigRoad(items: List<JSONObject>, ways: List<Way>): String? {
+            val pts = items.mapNotNull { i -> i.optDouble("lat").takeIf { !it.isNaN() }?.let { LatLon(it, i.optDouble("lon")) } }
+                .filter { !it.lon.isNaN() }
+            if (pts.isEmpty()) return null
+            val c = LatLon(pts.map { it.lat }.average(), pts.map { it.lon }.average())
+            return ways.mapNotNull { w ->
+                val name = roadNameOf(w) ?: return@mapNotNull null
+                val d = distanceToWayM(c, w)
+                if (d > 500) null else name to d / roadWeight(w.highway)
+            }.minByOrNull { it.second }?.first
+        }
+
+        private fun roadWeight(highway: String): Double = when (highway.removeSuffix("_link")) {
+            "motorway", "trunk" -> 3.0
+            "primary" -> 2.5
+            "secondary" -> 2.0
+            "tertiary" -> 1.5
+            else -> 1.0
+        }
+
+        /** Distance from a point to a way's polyline (local flat approximation, fine within a few km). */
+        private fun distanceToWayM(p: LatLon, w: Way): Double {
+            val kx = 111_320.0 * kotlin.math.cos(Math.toRadians(p.lat)); val ky = 110_540.0
+            var best = Double.MAX_VALUE
+            for (k in 0 until w.geometry.size) {
+                val a = w.geometry[k]
+                val ax = (a.lon - p.lon) * kx; val ay = (a.lat - p.lat) * ky
+                if (k == w.geometry.size - 1) { best = minOf(best, kotlin.math.hypot(ax, ay)); break }
+                val b = w.geometry[k + 1]
+                val bx = (b.lon - p.lon) * kx; val by = (b.lat - p.lat) * ky
+                val dx = bx - ax; val dy = by - ay
+                val len2 = dx * dx + dy * dy
+                val t = if (len2 == 0.0) 0.0 else (-(ax * dx + ay * dy) / len2).coerceIn(0.0, 1.0)
+                best = minOf(best, kotlin.math.hypot(ax + t * dx, ay + t * dy))
+            }
+            return best
         }
 
         fun mainRoads(items: List<JSONObject>, max: Int = 2, minShare: Double = 0.2): List<String> =

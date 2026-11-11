@@ -6,10 +6,10 @@ photos and contributes them to the target map through that map's contribution to
 ## Recent changes
 
 ### App 0.9 / 0.10
-- **Place capture without typing.** The contributor shoots a few photos per place and taps **Done with place**. Name,
+- **Place capture without typing.** The contributor shoots a few photos per place and taps **Next place**. Name,
   address / house number, phone and category are for the agent to read from the photos. `pois[].fields` are only hints
   for what a photo cannot show (sign hidden, no sign); when present they win over the reading, and `note` is free text.
-- **One-tap "Done with place"**: the place keeps the GPS position where it was started (`position.source: "gps"`:
+- **One-tap "Next place"**: the place keeps the GPS position where it was started (`position.source: "gps"`:
   snap it to the building), unless the contributor opened **Pin & status…** to pin it (`"pin"`) or mark it closed /
   moved.
 - **Photo kinds are optional.** By default the contributor is not asked what each photo shows: photos carry `poiId`
@@ -32,8 +32,8 @@ photos and contributes them to the target map through that map's contribution to
   - The agent decides: name vs brand, category, address normalisation, dedup against the map.
   - Missing `ocr` = not read on the phone (sweep photos, reading still running when the zip was made, a phone without
     Google Play services, old app).
-- **Hardware keys**: in a sweep the volume keys or a Bluetooth remote on the handlebar add a **★ Mark** (`marks`), or
-  shoot in manual mode; nothing changes in the format.
+- **Hardware keys**: the volume keys or a Bluetooth remote on the handlebar shoot (Place capture, manual sweep);
+  nothing changes in the format.
 
 ### App 0.8 (renamed POI Capture)
 - The schema id is `poi-capture/3` (same format as `road-capture/3`; accept both). Zips are named
@@ -64,9 +64,21 @@ photos and contributes them to the target map through that map's contribution to
 - **Photo role** (place sessions with kinds on): `"facade"` (straight-on front, the cover), `"sign"`, `"side"`,
   `"inside"`, `"info"` (hours, menu, phone), `"context"`, or a team's own id. A place photo's `cameraBearing` comes
   from the orientation sensor (`cameraBearingSource: "compass"`), not from travel; no facade estimate.
-- **`marks`** (sweeps): each **★ Mark**, `{id, tMs, t, elapsedNanos, lat, lon, accuracyM, photoIds}` with `photoIds` =
-  photos taken within ±5 s: a place the contributor pointed out while riding. Use it as a strong hint when grouping
-  frames.
+- **`marks`** (sweeps up to v0.13 only; empty from v0.14, the ★ Mark button is gone): each **★ Mark**,
+  `{id, tMs, t, elapsedNanos, lat, lon, accuracyM, photoIds}` with `photoIds` = photos taken within ±5 s. Riders
+  tapped it every few seconds, so treat it as a weak hint at most.
+- **Photo size** (from v0.14): at least 2560 px on the long side; a camera without that exact size gives the next
+  size up (OPPO Reno6 Z: 3264×1840). v0.13 photos on such phones are 1920×1088.
+- **Text corrected by hand** (Place capture, from v0.14): on Photo locations the contributor sees each place with its
+  photos and the text the phone read on each one, and can correct it before sending. A corrected photo carries
+  `textEdited` (use it instead of `ocr.text`); a corrected place name is `fields.name` on the place. Moving a place
+  there sets the place's `position` with `source: "pin"`.
+- **Session names** (from v0.14): never an unnamed lane; with no named street on any photo, the nearest big named road
+  (main roads count as nearer, within 500 m).
+- **Unusable sweep photos are dropped on the phone** (from v0.14): a photo with under 8 % of the session's usual detail
+  (a motorbike passing a metre from the lens) is deleted and the next one is taken sooner; their count is
+  `session.camera.unusableDropped`. Every photo's `blur` now also says `unusable` (always false for kept sweep
+  photos).
 - **`privacy`**: `{ "blurred": false, "required": ["faces", "plates"] }`. Nothing is blurred on the phone (step 0).
 - **Road data sources** (app 0.7): `session.road.sources` lists where the road data came from: `"pack:<region>@<OSM
   extract date>"` (offline pack, one per province since app 0.10), `"cache"` (an Overpass answer stored on the phone
@@ -119,7 +131,9 @@ photos and contributes them to the target map through that map's contribution to
     over the elapsed time is used (`"gpsSpeed"` when there is no analysis stream at all). Each auto photo carries
     `overlap = {slide, measured, steady, gyroRadS, frameSharpness}`: slide since the previous photo (fraction of the
     frame), share of it measured on frames, and the shake at the moment. Spacing in metres therefore varies: wider on
-    far facades, tighter on close ones.
+    far facades, tighter on close ones. From v0.14 the slide is measured against a reference frame and only where
+    several bands of the frame agree, and it never counts less than shop fronts 40 m away would give at the GPS speed
+    (v0.13 could undercount on wide roads: gaps of up to 35 m between photos).
   - **Camera direction is measured** from the linear acceleration while speeding up / braking on straight stretches
     (no compass): `session.mount = {yawToTravelDeg, side, consistency, events, source: "measured"}` once confident,
     else null. `sideOfTravel` follows the measurement.

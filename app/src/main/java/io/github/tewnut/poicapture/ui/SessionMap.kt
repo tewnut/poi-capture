@@ -15,6 +15,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
@@ -36,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import kotlin.math.roundToInt
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.ui.layout.onSizeChanged
@@ -80,13 +86,34 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** XYZ tile URL template ({z}/{x}/{y}), e.g. OpenStreetMap or any other XYZ tile server. */
+/**
+ * XYZ tile URL template ({z}/{x}/{y}), e.g. OpenStreetMap or any other XYZ tile server. Some networks block
+ * openstreetmap.org outright (an office Wi-Fi in Ho Chi Minh City: the name does not resolve, the map stays an empty
+ * grid), so when the configured server's host can't be looked up the tiles come from [FALLBACK] (same OSM data).
+ */
 internal class TemplateTileSource(private val template: String) :
     OnlineTileSourceBase("tiles-${template.hashCode()}", 0, 19, 256, "", arrayOf(template), "© OpenStreetMap contributors") {
-    override fun getTileURLString(index: Long): String = template
+    // (called on osmdroid's download threads, so the name lookup never blocks the screen)
+    override fun getTileURLString(index: Long): String = (if (reachable(template)) template else FALLBACK)
         .replace("{z}", MapTileIndex.getZoom(index).toString())
         .replace("{x}", MapTileIndex.getX(index).toString())
         .replace("{y}", MapTileIndex.getY(index).toString())
+
+    companion object {
+        /** CARTO's OSM basemap, served from a CDN that resolves where openstreetmap.org does not. */
+        const val FALLBACK = "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+        private val checked = java.util.concurrent.ConcurrentHashMap<String, Pair<Boolean, Long>>()
+
+        /** Whether the template's host resolves; remembered for a minute (a failed lookup is retried after that). */
+        fun reachable(template: String): Boolean {
+            val host = runCatching { java.net.URI(template.replace(Regex("\\{[^}]*}"), "0")).host }.getOrNull() ?: return true
+            val now = System.currentTimeMillis()
+            checked[host]?.let { (ok, at) -> if (ok || now - at < 60_000) return ok }
+            val ok = runCatching { java.net.InetAddress.getByName(host); true }.getOrDefault(false)
+            checked[host] = ok to now
+            return ok
+        }
+    }
 }
 
 /**
@@ -94,7 +121,9 @@ internal class TemplateTileSource(private val template: String) :
  * contributor ([placed]), else the app's estimate (camera + facade distance along the camera direction).
  */
 data class PhotoPin(val id: String, val gps: LatLon, val legacyFix: LatLon?, val placed: LatLon?, val tMs: Long, val roadName: String?,
-                    val accuracyM: Int?, val cameraBearing: Double?, val facadeDistanceM: Double?, val hFovDeg: Double?) {
+                    val accuracyM: Int?, val cameraBearing: Double?, val facadeDistanceM: Double?, val hFovDeg: Double?,
+                    /** Place capture: the place this photo belongs to, and the text read on it (as corrected by hand) */
+                    val poiId: String? = null, val text: String? = null) {
     /** where the photo was taken (sessions before 0.12 could correct it by hand: [legacyFix]) */
     val camera: LatLon get() = legacyFix ?: gps
     val at: LatLon get() = camera
@@ -112,10 +141,19 @@ data class PhotoPin(val id: String, val gps: LatLon, val legacyFix: LatLon?, val
             return PhotoPin(o.getString("id"), LatLon(o.getDouble("lat"), o.getDouble("lon")), o.ll("relocatedLat", "relocatedLon"),
                 o.ll("placeLat", "placeLon"), o.optLong("tMs"),
                 o.optString("roadName").takeIf { it.isNotBlank() && it != "null" },
-                o.d("accuracyM")?.toInt(), o.d("cameraBearing"), o.d("facadeDistanceM"), o.d("hFovDeg"))
+                o.d("accuracyM")?.toInt(), o.d("cameraBearing"), o.d("facadeDistanceM"), o.d("hFovDeg"),
+                o.optString("poiId").takeIf { it.isNotBlank() && it != "null" },
+                (o.optString("textEdited").takeIf { o.has("textEdited") && !o.isNull("textEdited") }
+                    ?: o.optJSONObject("ocr")?.optString("text"))?.takeIf { it.isNotBlank() })
         }
     }
 }
+
+/**
+ * Place capture: one place on the map and in the cards. [pin] stands for the place on the map (camera = where its first
+ * photo was taken, place = where it was put by hand, else in front of that camera), so Move works as for a photo.
+ */
+data class PlaceGroup(val id: String, val number: Int, val name: String, val fields: JSONObject, val photos: List<PhotoPin>, val pin: PhotoPin)
 
 /**
  * Map of one session: the track, a dot where each photo was taken (orange when moved by hand), and a strip of photo
@@ -134,13 +172,20 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
     var relocating by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
     var viewer by remember { mutableStateOf<Int?>(null) }   // full-screen photo, by index
+    var viewerPins by remember { mutableStateOf<List<PhotoPin>>(emptyList()) }
+    var places by remember { mutableStateOf<List<PlaceGroup>>(emptyList()) }
 
     LaunchedEffect(sessionId, refresh, reload) {
         val (items, t) = withContext(Dispatchers.IO) { store.items(sessionId) to store.trackPoints(sessionId) }
+        val pois = if (live) emptyList() else withContext(Dispatchers.IO) { store.pois(sessionId) }
         pins = items.mapNotNull { PhotoPin.of(it) }.sortedBy { it.tMs }
         noGps = items.count { it.optString("kind") == "photo" } - pins.size
         track = t
+        places = pois.mapIndexedNotNull { i, poi -> placeGroup(poi, i + 1, pins) }
     }
+    // Place capture: the cards and the map show places (their photos grouped), not single photos
+    val placeMode = places.isNotEmpty()
+    val shown: List<PhotoPin> = if (placeMode) places.map { it.pin } else pins
 
     // roads around the photos (offline packs / saved data, no network): for the Move warnings
     var ways by remember { mutableStateOf<List<io.github.tewnut.poicapture.core.Way>>(emptyList()) }
@@ -152,17 +197,37 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
                 .distinctBy { it.key }
         }
     }
-    val pager = androidx.compose.foundation.pager.rememberPagerState { pins.size }
-    val selected = pins.getOrNull(pager.currentPage)?.id
+    val pager = androidx.compose.foundation.pager.rememberPagerState { shown.size }
+    val selected = shown.getOrNull(pager.currentPage)?.id
     // another photo on screen: stop moving the previous one
     LaunchedEffect(pager.currentPage) { relocating = false }
     // recording: show the newest photo as it comes in
-    LaunchedEffect(pins.size) { if (live && pins.isNotEmpty()) pager.animateScrollToPage(pins.size - 1) }
+    LaunchedEffect(shown.size) { if (live && shown.isNotEmpty()) pager.animateScrollToPage(shown.size - 1) }
 
     fun move(id: String, to: LatLon?) {
         scope.launch {
-            withContext(Dispatchers.IO) { store.placeAt(sessionId, id, to) }
+            withContext(Dispatchers.IO) {
+                val place = places.firstOrNull { it.id == id }
+                if (place == null) store.placeAt(sessionId, id, to)
+                else {
+                    // a place: its position, put by hand ("pin"), or back to where its first photo was taken ("gps")
+                    val p = to ?: place.pin.gps
+                    store.patchPoi(sessionId, id, JSONObject().put("position", JSONObject().put("lat", p.lat).put("lon", p.lon)
+                        .put("source", if (to != null) "pin" else "gps")))
+                }
+            }
             relocating = false
+            reload++
+        }
+    }
+
+    fun saveTexts(place: PlaceGroup, name: String, texts: Map<String, String>) {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                if (name.trim() != place.name) store.patchPoi(sessionId, place.id,
+                    JSONObject().put("fields", JSONObject(place.fields.toString()).put("name", name.trim())))
+                for ((id, text) in texts) store.patchItem(sessionId, id, JSONObject().put("textEdited", text.trim()))
+            }
             reload++
         }
     }
@@ -172,13 +237,13 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
     var barPx by remember { mutableIntStateOf(0) }     // height of the move bar
     var mapView by remember { mutableStateOf<MapView?>(null) }
     var centre by remember { mutableStateOf<LatLon?>(null) }   // under the pin while moving
-    val sel = pins.getOrNull(pager.currentPage)
+    val sel = shown.getOrNull(pager.currentPage)
     val insetPx = if (relocating) barPx else cardsPx
     // Move starts with the pin on the photo: 0 m until the map is dragged
     LaunchedEffect(relocating) { if (relocating) centre = sel?.place }   // Move starts with the pin on the place
     Box(modifier) {
-        PinsMap(pins, track, selected, live, relocating, bottomInsetPx = insetPx, moveCentre = if (relocating) centre else null,
-            onSelect = { id -> pins.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } },
+        PinsMap(shown, track, selected, live, relocating, bottomInsetPx = insetPx, moveCentre = if (relocating) centre else null,
+            onSelect = { id -> shown.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } },
             onMap = { mapView = it }, onCentre = { centre = it },
             modifier = Modifier.fillMaxSize().clipToBounds())
 
@@ -197,7 +262,7 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
                 .background(Color(0x55000000), RoundedCornerShape(50)))   // the pin's shadow on the spot
             Pill(stringResource(R.string.sessionmap_move_banner), Modifier.align(Alignment.TopStart).padding(start = 12.dp, top = 12.dp, end = 72.dp),
                 size = 14.sp, bg = Palette.Blue, bold = true)
-            MoveBar(sessionId, sel, pager.currentPage, pins.size, movedM = centre?.let { Geo.distanceM(sel.camera, it).roundToInt() }, warn = warn,
+            MoveBar(sessionId, places.getOrNull(pager.currentPage)?.photos?.firstOrNull() ?: sel, pager.currentPage, shown.size, movedM = centre?.let { Geo.distanceM(sel.camera, it).roundToInt() }, warn = warn,
                 Modifier.align(Alignment.BottomCenter).onSizeChanged { barPx = it.height },
                 onCancel = { relocating = false },
                 onPlace = { mapView?.let { m -> move(sel.id, pinPoint(m, insetPx)) } })
@@ -217,7 +282,7 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
         }
 
         if (relocating) Unit
-        else if (pins.isEmpty()) {
+        else if (shown.isEmpty()) {
             Pill(stringResource(if (live) R.string.sessionmap_no_photos_live else R.string.sessionmap_no_photos),
                 Modifier.align(Alignment.BottomCenter).padding(16.dp))
         } else {
@@ -226,15 +291,125 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
                     .onSizeChanged { cardsPx = it.height + with(density) { 12.dp.roundToPx() } },
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 24.dp),   // the next card peeks in
                 pageSpacing = 10.dp) { page ->
-                val p = pins[page]
-                PhotoCard(sessionId, p, page, pins.size,
-                    onOpen = { viewer = page },
-                    onRelocate = { if (page == pager.currentPage) relocating = true else scope.launch { pager.animateScrollToPage(page) } },
+                val p = shown[page]
+                val onRelocate = { if (page == pager.currentPage) relocating = true else scope.launch { pager.animateScrollToPage(page) } }
+                val place = places.getOrNull(page)
+                if (placeMode && place != null) PlaceCard(sessionId, place, page, shown.size,
+                    onOpen = { i -> viewerPins = place.photos; viewer = i },
+                    onRelocate = { onRelocate() }, onReset = { move(p.id, null) },
+                    onSave = { name, texts -> saveTexts(place, name, texts) })
+                else PhotoCard(sessionId, p, page, shown.size,
+                    onOpen = { viewerPins = pins; viewer = page },
+                    onRelocate = { onRelocate() },
                     onReset = { move(p.id, null) })
             }
         }
     }
-    viewer?.let { start -> PhotoViewer(sessionId, pins, start, onClose = { i -> viewer = null; scope.launch { pager.scrollToPage(i) } }) }
+    viewer?.let { start -> PhotoViewer(sessionId, viewerPins, start, onClose = { i ->
+        viewer = null
+        if (!placeMode) scope.launch { pager.scrollToPage(i) }
+    }) }
+}
+
+/** A place record with its photos, or null when none of its photos is on the map. */
+private fun placeGroup(poi: JSONObject, number: Int, pins: List<PhotoPin>): PlaceGroup? {
+    val id = poi.optString("id").takeIf { it.isNotBlank() } ?: return null
+    val photos = pins.filter { it.poiId == id }
+    val first = photos.firstOrNull() ?: return null
+    val pos = poi.optJSONObject("position")
+    val placed = pos?.takeIf { it.optString("source") == "pin" }?.let { LatLon(it.optDouble("lat"), it.optDouble("lon")) }
+        ?.takeIf { !it.lat.isNaN() && !it.lon.isNaN() }
+    val fields = poi.optJSONObject("fields") ?: JSONObject()
+    val name = fields.optString("name").takeIf { it.isNotBlank() }
+        ?: poi.optJSONObject("read")?.optString("name")?.takeIf { it.isNotBlank() && it != "null" } ?: ""
+    val pin = first.copy(id = id, placed = placed, legacyFix = null, tMs = poi.optLong("tMs", first.tMs), facadeDistanceM = null)
+    return PlaceGroup(id, number, name, fields, photos, pin)
+}
+
+/**
+ * One place in the strip (Place capture): its name and its photos side by side, each with the text the phone read on
+ * it, editable so mistakes are fixed before the session is sent; Move puts the place on the right building.
+ */
+@Composable
+private fun PlaceCard(sessionId: String, place: PlaceGroup, idx: Int, count: Int, onOpen: (Int) -> Unit,
+                      onRelocate: () -> Unit, onReset: () -> Unit, onSave: (String, Map<String, String>) -> Unit) {
+    var name by remember(place.id, place.name) { mutableStateOf(place.name) }
+    val texts = remember(place.id, place.photos) { androidx.compose.runtime.mutableStateMapOf<String, String>().apply {
+        place.photos.forEach { put(it.id, it.text.orEmpty()) } } }
+    // reading by default (compact); the pencil turns the name and texts into fields
+    var editing by remember(place.id) { mutableStateOf(false) }
+    val changed = name.trim() != place.name || place.photos.any { (texts[it.id] ?: "").trim() != it.text.orEmpty().trim() }
+    fun cancel() {
+        name = place.name
+        place.photos.forEach { texts[it.id] = it.text.orEmpty() }
+        editing = false
+    }
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp), color = Color.White, shadowElevation = 10.dp) {
+        Column(Modifier.padding(10.dp).heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(LocalContext.current.resources.getQuantityString(R.plurals.sessionmap_place_title, place.photos.size, place.number, place.photos.size),
+                    fontWeight = FontWeight.Bold, color = Palette.Ink, modifier = Modifier.weight(1f))
+                Hint(stringResource(R.string.sessionmap_counter, idx + 1, count))
+            }
+            if (editing) androidx.compose.material3.OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), singleLine = true,
+                label = { Text(stringResource(R.string.sessionmap_place_name)) })
+            else Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(name.ifBlank { stringResource(R.string.sessionmap_place_no_name) }, fontSize = 15.sp,
+                    color = if (name.isBlank()) Palette.Muted else Palette.Ink, fontWeight = if (name.isBlank()) FontWeight.Normal else FontWeight.SemiBold,
+                    maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                androidx.compose.material3.IconButton(onClick = { editing = true }, modifier = Modifier.size(36.dp)) {
+                    androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Edit,
+                        stringResource(R.string.sessionmap_edit_texts), tint = Palette.Blue)
+                }
+            }
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                place.photos.forEachIndexed { i, ph ->
+                    Column(Modifier.width(148.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        val thumb = rememberPhoto(sessionId, ph.id, sample = 4)
+                        Box(Modifier.fillMaxWidth().height(90.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF101828))
+                            .clickable { onOpen(i) }) {
+                            thumb?.let { Image(it, stringResource(R.string.sessionmap_photo_thumb_desc, i + 1), Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop) }
+                        }
+                        val t = texts[ph.id] ?: ""
+                        if (editing) androidx.compose.material3.OutlinedTextField(t, { texts[ph.id] = it }, Modifier.fillMaxWidth(),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp), minLines = 2, maxLines = 4,
+                            label = { Text(stringResource(R.string.sessionmap_photo_text), fontSize = 12.sp) },
+                            placeholder = { Text(stringResource(R.string.sessionmap_photo_no_text), fontSize = 12.sp) })
+                        else Text(t.trim().replace(Regex("\\s*\\n\\s*"), " · ").ifBlank { stringResource(R.string.sessionmap_photo_no_text) },
+                            fontSize = 12.sp, lineHeight = 15.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            color = if (t.isBlank()) Palette.Muted else Palette.Ink,
+                            fontStyle = if (t.isBlank()) androidx.compose.ui.text.font.FontStyle.Italic else null,
+                            modifier = Modifier.clickable { editing = true })
+                    }
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (editing) {
+                    Button(onClick = {
+                        if (changed) onSave(name, place.photos.filter { (texts[it.id] ?: "").trim() != it.text.orEmpty().trim() }
+                            .associate { it.id to (texts[it.id] ?: "") })
+                        editing = false
+                    }, modifier = Modifier.height(40.dp)) { Text(stringResource(R.string.sessionmap_save), maxLines = 1) }
+                    TextButton(onClick = { cancel() }, modifier = Modifier.height(40.dp)) {
+                        Text(stringResource(R.string.sessionmap_cancel), maxLines = 1)
+                    }
+                    return@Row
+                }
+                Hint(if (place.pin.placed != null) stringResource(R.string.sessionmap_moved)
+                    else place.pin.accuracyM?.let { stringResource(R.string.sessionmap_gps_accuracy, it) } ?: stringResource(R.string.sessionmap_gps),
+                    color = if (place.pin.placed != null) Palette.Amber else Palette.Muted)
+                Box(Modifier.weight(1f))
+                if (place.pin.placed != null) TextButton(onClick = onReset, modifier = Modifier.height(40.dp)) {
+                    Text(stringResource(R.string.sessionmap_back_gps), maxLines = 1)
+                }
+                OutlinedButton(onClick = onRelocate, modifier = Modifier.height(40.dp)) {
+                    Text(stringResource(R.string.sessionmap_move), maxLines = 1)
+                }
+            }
+        }
+    }
 }
 
 /** One photo in the strip: the picture (tap = full screen), where it was taken, and how to fix its place. */
@@ -450,6 +625,8 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
                 setPoints(track.map { GeoPoint(it.lat, it.lon) })
                 outlinePaint.color = if (relocating) 0x4498A2B3 else 0xCC1570EF.toInt()   // faded while moving a photo
                 outlinePaint.strokeWidth = 6f
+                infoWindow = null   // a tap on the line must not open osmdroid's empty callout
+                setOnClickListener { _, _, _ -> false }
             })
         }
         fun dot(p: LatLon, key: String, onTap: () -> Unit) = m.overlays.add(Marker(m).apply {
@@ -493,6 +670,8 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
                 setPoints(listOf(GeoPoint(cam.lat, cam.lon), GeoPoint(shop.lat, shop.lon)))
                 outlinePaint.color = 0xFFF79009.toInt()
                 outlinePaint.strokeWidth = 3 * density
+                infoWindow = null
+                setOnClickListener { _, _, _ -> false }
                 if (relocating || sp.placed == null) outlinePaint.pathEffect =
                     android.graphics.DashPathEffect(floatArrayOf(8 * density, 6 * density), 0f)   // dashed = estimate / being moved
             })

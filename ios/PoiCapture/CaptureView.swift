@@ -5,7 +5,7 @@ import Shared
 
 /**
  * Place capture: camera full screen. Every photo needs a GPS-grade fix from the last 5 s (else "GPS lost" and the
- * shutter waits). Photos go to the current place; "Done with place" starts the next one. "End" saves the session with
+ * shutter waits). Photos go to the current place; "Next place" starts the next one. "End" saves the session with
  * its name "{street} [yymmdd]" (street from reverse geocoding of the photos).
  */
 struct CaptureView: View {
@@ -49,7 +49,7 @@ struct CaptureView: View {
                 }
                 Spacer()
                 HStack(spacing: 16) {
-                    Button { donePlace() } label: { Text("Done with place").bold().padding(.horizontal, 6) }
+                    Button { donePlace() } label: { Text("Next place").bold().padding(.horizontal, 6) }
                         .buttonStyle(.borderedProminent).tint(.blue).disabled(currentPhotos == 0)
                     Spacer()
                     Button { shoot() } label: {

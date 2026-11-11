@@ -50,8 +50,7 @@ Android gives an app both; iOS does not:
   for a photo position (see the 5-second rule). iOS mixes the sources and does not say which one it used.
 - **Recording with the screen off.** A mounted phone records in a foreground service (camera + location) with the
   screen off or another app on top. iOS does not let an app use the camera in the background.
-- **Hands-free controls.** The volume keys and Bluetooth handlebar remotes take photos or mark places; iOS reserves
-  the volume keys.
+- **Hands-free controls.** The volume keys and Bluetooth handlebar remotes take photos; iOS reserves the volume keys.
 - **Distribution and cost.** The APK installs directly, with no app store review; contributors' phones are mostly
   Android, at every price.
 
@@ -72,14 +71,14 @@ phone has: `session.device.capabilities`, `session.gnss`):
 | **Wide main camera (≈ 70–80° horizontal), 12 MP or more** | more shop front per photo, readable signs; avoid phones that switch to a cropped or zoomed lens |
 | **Good heat handling, big battery** | full-resolution photos every few metres for an hour heat a phone; a power bank on the bike helps |
 | **Rigid handlebar mount with vibration damping** | sharp photos and a stable camera direction; landscape sees more of the street |
-| **Bluetooth remote (selfie button) on the handlebar** | ★ Mark or shoot without touching the screen |
+| **Bluetooth remote (selfie button) on the handlebar** | shoot (Place capture, manual sweep) without touching the screen |
 
 ## How it works
 
 Two kinds of session, chosen on **New**:
-- **Street sweep**: ride along a street; the app photographs the row of buildings automatically. **★ Mark** (or the
-  volume keys / a Bluetooth remote on the handlebar) points out a place while riding.
-- **Place capture**: stop at each place, **Shoot** a few photos (front, sign, inside, menu…), then **Done with place**
+- **Street sweep**: ride along a street with the phone mounted **sideways (landscape)**; the app photographs the row of
+  buildings automatically and needs no tap. To point out one place, stop and use Place capture.
+- **Place capture**: stop at each place, **Shoot** a few photos (front, sign, inside, menu…), then **Next place**
   and go on to the next one. Nothing to type: the phone reads the text on the photos (ML Kit, Latin script including
   Vietnamese) and shows "Read on the sign: name · phone · category", or asks to shoot the sign again when nothing is
   readable; the agent decides the name, address and category. The place keeps the GPS position where it was started;
@@ -107,12 +106,13 @@ Two kinds of session, chosen on **New**:
    riding.
 2. **Capture**: full-screen rear camera, portrait or landscape as the phone is held (the rest of the app is portrait;
    landscape sees more of the street, so portrait takes photos closer together), kept minimal. A get-ready checklist (GPS, camera, road data,
-   mounting) comes first; Start waits for a GPS fix. **Every photo and mark has a GPS fix from the last
+   mounting) comes first; Start waits for a GPS fix. **Every photo has a GPS fix from the last
    5 seconds**: when the GPS is lost the screen says so, nothing is recorded, and recording carries on by itself when
    the GPS is back. While recording: one line of status text (GPS · road; riding: the camera direction until it
    is measured, red if it looks forward / backward), one warning at a time (too fast, camera cannot keep up, weak GPS,
-   phone overheating) and **End**. Riding: speed against the limit, "● Recording", a big **★ Mark**. Places: **Shoot**
-   and **Done with place** on the right, under the thumb. Capture runs in a foreground service (camera + location), keeps
+   phone overheating) and **End**. Riding: speed against the limit, "● Recording", **Pause**, and a hint to turn the phone
+   sideways when it is upright. Places: **Shoot** and **Next place** under the thumb: on the right in landscape, in a
+   bar at the bottom in portrait. Capture runs in a foreground service (camera + location), keeps
    going with the screen off or another app on top, and resumes after a phone call.
 3. **Sessions**: what is left to send; per session date, duration, distance, counts and a badge; **Send** (share sheet:
    the contributor picks where it goes), **Map** (track and a dot per photo; swipe the photo cards; the selected photo shows where it was
@@ -120,7 +120,7 @@ Two kinds of session, chosen on **New**:
    building, **Reset place** undoes it), save the zip or
    delete in the ⋮ menu. Sessions cut off by a crash or a dead battery can still be sent.
 
-Safety: in a street sweep the phone is mounted and the app never needs a tap; marks can come from a handlebar remote.
+Safety: in a street sweep the phone is mounted and the app never needs a tap.
 
 ## Data and services
 

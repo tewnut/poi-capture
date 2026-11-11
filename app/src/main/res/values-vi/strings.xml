@@ -174,17 +174,15 @@
 
     <!-- ==== Capture screen, place sheet, capture service ==== -->
     <!-- Capture screen -->
-    <string name="capture_marked">★ Đã đánh dấu</string>
     <string name="capture_place_saved">✓ Đã lưu địa điểm %1$d. Chụp địa điểm tiếp theo.</string>
     <string name="capture_camera_busy">Camera đang bị app khác dùng (cuộc gọi…). Sẽ tự ghi tiếp khi camera trở lại.</string>
     <string name="capture_end">Kết thúc</string>
     <string name="capture_last_photo">Ảnh vừa chụp</string>
     <string name="capture_shoot">Chụp</string>
-    <string name="capture_done_place">Xong địa điểm</string>
+    <string name="capture_next_place">Địa điểm tiếp theo</string>
     <string name="capture_pin_status">Ghim, tình trạng…</string>
     <string name="capture_pause">Dừng</string>
     <string name="capture_resume">Tiếp</string>
-    <string name="capture_mark">★\nĐánh dấu</string>
     <string name="capture_recording">● Đang ghi</string>
     <string name="capture_paused">Ⅱ Tạm dừng</string>
     <string name="capture_side_right">GHI BÊN PHẢI →</string>
@@ -247,6 +245,7 @@
     <string name="service_gps_permission">GPS: chưa cấp quyền vị trí chính xác</string>
     <string name="service_hot">Máy đang nóng: che nắng hoặc nghỉ một lúc</string>
     <string name="service_missed_shot">Máy chụp không kịp: chạy chậm lại để không bỏ sót mặt tiền</string>
+    <string name="service_turn_landscape">Xoay ngang điện thoại: để dọc thì nửa ảnh là mặt đường và bầu trời</string>
     <string name="service_mount_front">Camera đang nhìn về phía TRƯỚC: xoay camera sang dãy nhà cần ghi</string>
     <string name="service_mount_back">Camera đang nhìn về phía SAU: xoay camera sang dãy nhà cần ghi</string>
     <string name="service_camera_failed">Không mở được camera: %1$s</string>
@@ -472,6 +471,15 @@
     <string name="sessionmap_move_title">Vị trí ảnh %1$d/%2$d</string>
     <string name="sessionmap_move_hint">Ghim luôn ở giữa; phóng to để đặt đúng cửa.</string>
     <string name="sessionmap_move_distance">Cách chỗ chụp %1$d m</string>
-    <string name="sessionmap_legend_photo">Chỗ chụp</string>
-    <string name="sessionmap_legend_place">Cửa hàng</string>
+    <string name="sessionmap_legend_photo">Ảnh</string>
+    <string name="sessionmap_legend_place">Địa điểm</string>
+    <plurals name="sessionmap_place_title">
+        <item quantity="other">Địa điểm %1$d · %2$d ảnh</item>
+    </plurals>
+    <string name="sessionmap_place_name">Tên</string>
+    <string name="sessionmap_photo_text">Chữ trên ảnh</string>
+    <string name="sessionmap_photo_no_text">Không đọc được chữ</string>
+    <string name="sessionmap_place_no_name">Chưa có tên</string>
+    <string name="sessionmap_edit_texts">Sửa tên và chữ</string>
+    <string name="sessionmap_save">Lưu</string>
 </resources>

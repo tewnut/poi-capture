@@ -49,6 +49,53 @@ class FrameShiftTest {
         assertEquals(30.0 / (w - 1), abs(s.fraction), 1.0 / w)
     }
 
+    /** A frame of a street whose columns are shifted by a fractional [offset], with fresh sensor noise. */
+    private fun frameAt(cols: DoubleArray, offset: Double, r: Random): IntArray = IntArray(w * h) { i ->
+        val x = i % w + offset; val x0 = x.toInt(); val f = x - x0
+        ((cols[x0] * (1 - f) + cols[x0 + 1] * f) + r.nextInt(9) - 4).toInt().coerceIn(0, 255)
+    }
+
+    @Test fun farFrontsMovingAPixelPerFrameAreNotLost() {
+        val r = Random(7)
+        val cols = DoubleArray(1200)
+        var x = 0
+        while (x < cols.size) { val run = 4 + r.nextInt(30); val v = 40.0 + r.nextInt(180); for (i in x until minOf(cols.size, x + run)) cols[i] = v; x += run }
+        // wide road: the fronts slide 1.3 px per frame, 300 frames (10 s at 30 frames/s) = 390 px ≈ 1.2 frame widths
+        val tracker = SlideTracker()
+        var total = 0.0
+        for (k in 0..300) tracker.next(FrameShift.profiles(frameAt(cols, k * 1.3, r), w, h))?.let { total += it }
+        assertEquals(390.0 / (w - 1), abs(total), 0.03 * 390.0 / (w - 1))   // within 3 %
+    }
+
+    @Test fun halfAFrameOfNearAsphaltDoesNotHideTheFronts() {
+        val r = Random(11)
+        val cols = DoubleArray(1200)
+        var x = 0
+        while (x < cols.size) { val run = 4 + r.nextInt(30); val v = 40.0 + r.nextInt(180); for (i in x until minOf(cols.size, x + run)) cols[i] = v; x += run }
+        // portrait held low: the bottom 3 of 5 bands are asphalt next to the bike, different on every frame
+        fun frame(offset: Double) = frameAt(cols, offset, r).also { f ->
+            for (y in h * 2 / 5 until h) for (c in 0 until w) f[y * w + c] = 90 + r.nextInt(60)
+        }
+        val tracker = SlideTracker()
+        var total = 0.0
+        for (k in 0..300) tracker.next(FrameShift.profiles(frame(k * 1.3), w, h))?.let { total += it }
+        assertEquals(390.0 / (w - 1), abs(total), 0.05 * 390.0 / (w - 1))
+    }
+
+    @Test fun gpsFloorAndRetake() {
+        val t = OverlapTrigger()
+        t.start(); t.shot()
+        // frames read nothing while riding 5 m/s for 10 s; portrait lens: 0.78 m of facade per metre of distance
+        repeat(100) { t.addFrameShift(0.0); t.floor(0.0, 5.0, 0.1, 0.78) }
+        assertEquals(50.0 / (40 * 0.78), t.progress, 1e-6)          // as if the fronts were 40 m away
+        val p = t.shot()
+        t.retake(p)                                                  // that photo was unusable
+        assertTrue(t.due(steady = false))
+        // a passing motorbike: almost no detail against the session's photos
+        assertTrue(BlurCheck.unusable(3.0, listOf(3000.0, 2500.0, 4000.0, 3500.0, 2800.0)))
+        assertFalse(BlurCheck.unusable(400.0, listOf(3000.0, 2500.0, 4000.0, 3500.0, 2800.0)))
+    }
+
     @Test fun aBlankFrameTellsNothing() {
         val grey = IntArray(w * h) { 128 }
         assertNull(FrameShift.between(FrameShift.profiles(grey, w, h), FrameShift.profiles(grey, w, h)))

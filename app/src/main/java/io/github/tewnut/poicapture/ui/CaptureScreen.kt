@@ -142,16 +142,10 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     val askRole = session?.photoRoles != null          // POI: the contributor picks the kind of each photo (off by default)
     val photoRoles = session?.photoRoles ?: PhotoRoles.DEFAULT
     var role by remember(session?.id) { mutableStateOf(photoRoles.roles.first().id) }   // POI mode: what the next photo shows
-    var reviewing by remember { mutableStateOf(false) }          // POI mode: "Xong địa điểm" sheet open
+    var reviewing by remember { mutableStateOf(false) }          // Place capture: "Pin & status" sheet open
     var draft by remember { mutableStateOf(PoiDraft()) }          // what was typed in the sheet, kept across "Chụp thêm"
     var saved by remember { mutableStateOf<String?>(null) }       // "Đã lưu địa điểm N" for a few seconds
     LaunchedEffect(saved) { if (saved != null) { kotlinx.coroutines.delay(3000); saved = null } }
-    val marks = svc?.state?.collectAsState()?.value?.marks ?: 0
-    var lastMarks by remember { mutableStateOf(-1) }
-    LaunchedEffect(marks) {
-        if (lastMarks >= 0 && marks > lastMarks) saved = ctx.getString(R.string.capture_marked)
-        lastMarks = marks
-    }
 
     var thumb by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(ui.lastPhoto) {
@@ -197,12 +191,12 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
         s.takePhoto("manual", role)
         role = photoRoles.next(role, ui.poiRoles + (role to ((ui.poiRoles[role] ?: 0) + 1)))
     }
-    // volume keys / Bluetooth remote: shoot (POI, manual) or mark (riding), only while the camera screen is live
+    // volume keys / Bluetooth remote: shoot (POI, manual), only while the camera screen is live; auto sweep: nothing
     val keyAction: (() -> Unit)? = when {
         svc == null || notStarted -> null
         poiMode -> { { shoot() } }
         manual -> { { if (ui.camera == "on") svc.takePhoto("manual") } }
-        else -> { { if (ui.running) svc.addMark() } }
+        else -> null
     }
     val latestKey = androidx.compose.runtime.rememberUpdatedState(keyAction)
     androidx.compose.runtime.SideEffect { CaptureKeys.handler = if (keyAction != null) ({ latestKey.value?.invoke() }) else null }
@@ -237,41 +231,63 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             DarkButton(stringResource(R.string.capture_end)) { if (captured == 0) end(discardIfEmpty = true) else confirmEnd = true }
         }
 
-        // ---------- right rail, under the thumb: the main actions ----------
-        if (!notStarted) Column(Modifier.align(Alignment.CenterEnd).safeDrawingPadding().padding(end = 16.dp, top = if (poiMode) 48.dp else 96.dp),
+        // ---------- the main actions, under the thumb: right rail in landscape, bottom bar in portrait ----------
+        val upright = ui.portrait
+        val nextPlace = {
+            svc?.finishPoi(draft.pin, draft.moved, draft.fields(), draft.status)
+            saved = ctx.getString(R.string.capture_place_saved, ui.poiNumber)
+            draft = PoiDraft()
+            role = photoRoles.roles.first().id
+            thumb = null
+        }
+        @Composable fun lastThumb() {
+            if (ui.poiId != null) thumb?.let { Image(it, stringResource(R.string.capture_last_photo), Modifier.size(84.dp, 47.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
+                ?: Spacer(Modifier.size(84.dp, 47.dp))
+        }
+        @Composable fun placeButtons() {
+            Button(onClick = nextPlace, enabled = ui.poiId != null, modifier = Modifier.height(48.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Palette.Blue)) { Text(stringResource(R.string.capture_next_place), fontWeight = FontWeight.Bold) }
+            // optional, when needed: pin on the right building, closed / moved, a note
+            if (ui.poiId != null) DarkButton(stringResource(R.string.capture_pin_status)) { reviewing = true }
+        }
+        @Composable fun pauseButton(size: androidx.compose.ui.unit.Dp) {
+            RoundButton(stringResource(if (ui.running) R.string.capture_pause else R.string.capture_resume),
+                if (ui.running) Palette.Red else Palette.Green, size, svc != null && ui.camera == "on") {
+                if (ui.running) svc?.pause() else svc?.start()
+            }
+        }
+        if (!notStarted && upright) Row(Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 20.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            when {
+                poiMode -> {
+                    lastThumb()
+                    Shutter(stringResource(R.string.capture_shoot), enabled = svc != null && ui.camera == "on", onClick = { shoot() })
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) { placeButtons() }
+                }
+                manual -> {
+                    pauseButton(56.dp)
+                    Shutter(stringResource(R.string.capture_shoot), enabled = ui.camera == "on", onClick = { svc?.takePhoto("manual") })
+                }
+                else -> pauseButton(64.dp)
+            }
+        }
+        if (!notStarted && !upright) Column(Modifier.align(Alignment.CenterEnd).safeDrawingPadding().padding(end = 16.dp, top = if (poiMode) 48.dp else 96.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             when {
                 poiMode -> {
                     if (ui.poiId != null) thumb?.let { Image(it, stringResource(R.string.capture_last_photo), Modifier.size(84.dp, 47.dp).border(2.dp, Color.White, RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop) }
                     Shutter(stringResource(R.string.capture_shoot), enabled = svc != null && ui.camera == "on", onClick = { shoot() })
-                    Button(onClick = {
-                        svc?.finishPoi(draft.pin, draft.moved, draft.fields(), draft.status)
-                        saved = ctx.getString(R.string.capture_place_saved, ui.poiNumber)
-                        draft = PoiDraft()
-                        role = photoRoles.roles.first().id
-                        thumb = null
-                    }, enabled = ui.poiId != null, modifier = Modifier.height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Palette.Blue)) { Text(stringResource(R.string.capture_done_place), fontWeight = FontWeight.Bold) }
-                    // optional, when needed: pin on the right building, closed / moved, a note
-                    if (ui.poiId != null) DarkButton(stringResource(R.string.capture_pin_status)) { reviewing = true }
+                    placeButtons()
                 }
                 manual -> {
-                    RoundButton(stringResource(if (ui.running) R.string.capture_pause else R.string.capture_resume),
-                        if (ui.running) Palette.Red else Palette.Green, 56.dp, svc != null) {
-                        if (ui.running) svc?.pause() else svc?.start()
-                    }
+                    pauseButton(56.dp)
                     Shutter(stringResource(R.string.capture_shoot), enabled = ui.camera == "on", onClick = { svc?.takePhoto("manual") })
-                    RoundButton("★", Color(0xCC000000), 56.dp, ui.running) { svc?.addMark() }
                 }
-                else -> {
-                    // riding: "Đánh dấu" is the frequent touch (biggest); stopping is rare
-                    RoundButton(stringResource(if (ui.running) R.string.capture_pause else R.string.capture_resume),
-                        if (ui.running) Palette.Red else Palette.Green, 64.dp,
-                        svc != null && ui.camera == "on") { if (ui.running) svc?.pause() else svc?.start() }
-                    RoundButton(stringResource(R.string.capture_mark), Color(0xCC000000), 96.dp, ui.running) { svc?.addMark() }
-                }
+                else -> pauseButton(64.dp)
             }
         }
+        // in portrait the bar takes the bottom: what sits there in landscape moves up above it
+        val aboveBar = if (upright && !notStarted) 128.dp else 0.dp
 
         // ---------- left: POI = kind of the next photo; riding = speed ----------
         if (poiMode && !notStarted) {
@@ -286,7 +302,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 }
             }
             val current = photoRoles.roles.firstOrNull { it.id == role }
-            Column(Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp).widthIn(max = 420.dp),
+            Column(Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp + aboveBar).widthIn(max = 420.dp),
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 saved?.let {
                     Text(it, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
@@ -299,7 +315,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                     modifier = Modifier.background(Color(0xB3000000), RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
             }
         }
-        Row(Modifier.align(Alignment.BottomStart).safeDrawingPadding().padding(12.dp), verticalAlignment = Alignment.Bottom,
+        Row(Modifier.align(Alignment.BottomStart).safeDrawingPadding().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp + aboveBar), verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             if (!poiMode && !notStarted) {
                 Speed(ui)
@@ -308,18 +324,11 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
             }
         }
 
-        // ---------- riding: confirmation of a mark ----------
-        if (!poiMode) saved?.let {
-            Text(it, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.Center).background(Color(0xCC000000), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 16.dp, vertical = 10.dp))
-        }
-
         // ---------- riding: which side is filmed ----------
         session?.takeIf { !poiMode && (ui.mount == "right" || ui.mount == "left") }?.let {
             Text(stringResource(if (it.sideOfTravel == Side.RIGHT) R.string.capture_side_right else R.string.capture_side_left),
                 color = Color.White, fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp)
+                modifier = Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(bottom = 12.dp + aboveBar)
                     .background(Color(0xCC0B6B4C), RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp))
         }
 
