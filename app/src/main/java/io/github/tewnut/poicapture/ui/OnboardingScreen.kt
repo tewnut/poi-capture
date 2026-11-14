@@ -12,6 +12,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.RadioButton
+import io.github.tewnut.poicapture.AppLanguage
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,7 +39,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -154,8 +159,44 @@ internal fun WhiteCard(content: @Composable () -> Unit) {
 private fun LanguageStep(onNext: () -> Unit) {
     StepFrame(stringResource(R.string.onboarding_language_title), stringResource(R.string.onboarding_language_lead),
         stringResource(R.string.onboarding_continue), onNext = onNext) {
-        WhiteCard { LanguageRow() }
+        WhiteCard { LanguageList() }
         Hint(stringResource(R.string.onboarding_language_later))
+    }
+}
+
+/**
+ * The languages as a list in the style of the other steps (icon, name, one line under it), the choice marked on the
+ * right. Each language is named in itself ("Tiếng Việt", "English"), so it is found whatever the phone's language;
+ * "the phone's language" says which one that is.
+ */
+@Composable
+private fun LanguageList() {
+    val ctx = LocalContext.current
+    var current by remember { mutableStateOf(AppLanguage.current(ctx)) }
+    val phone = remember {
+        android.content.res.Resources.getSystem().configuration.locales[0].let { l ->
+            l.getDisplayLanguage(l).replaceFirstChar { it.titlecase(l) }
+        }
+    }
+    val options = listOf(
+        Triple("vi", "🇻🇳", stringResource(R.string.language_vi) to stringResource(R.string.onboarding_language_vi_text)),
+        Triple("en", "🇬🇧", stringResource(R.string.language_en) to stringResource(R.string.onboarding_language_en_text)),
+        Triple(AppLanguage.SYSTEM, "📱", stringResource(R.string.onboarding_language_phone) to stringResource(R.string.onboarding_language_phone_text, phone)),
+    )
+    options.forEachIndexed { i, (tag, icon, texts) ->
+        val selected = current == tag
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Palette.GreenLight.copy(alpha = 0.45f) else Color.Transparent)
+            .selectable(selected, role = Role.RadioButton) {
+                current = tag
+                ctx.findActivity()?.let { AppLanguage.set(it, tag) }
+            }
+            .padding(vertical = 6.dp, horizontal = 4.dp)) {
+            IconRow(icon, texts.first, texts.second) {
+                RadioButton(selected = selected, onClick = null)
+            }
+        }
+        if (i < options.lastIndex) HorizontalDivider(color = Palette.House)
     }
 }
 

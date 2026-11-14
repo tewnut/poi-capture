@@ -23,7 +23,9 @@ enum class CameraSide(val json: String) {
  * yawDeg: camera direction relative to travel, clockwise from straight ahead (right = +90, left = −90).
  * consistency: 0–1, how well the acceleration events agree (1 = all point the same way).
  */
-data class MountEstimate(val yawDeg: Double, val side: CameraSide, val consistency: Double, val events: Int) {
+data class MountEstimate(val yawDeg: Double, val side: CameraSide, val consistency: Double, val events: Int,
+                         /** "measured" (acceleration, [MountEstimator]) or "compassMount" ([CompassYaw]) */
+                         val source: String = "measured") {
     /** Same convention as Settings.mountOffsetDeg: degrees the camera is turned toward the front. */
     val offsetTowardFrontDeg: Double get() = when (side) {
         CameraSide.RIGHT -> 90 - yawDeg
@@ -34,7 +36,40 @@ data class MountEstimate(val yawDeg: Double, val side: CameraSide, val consisten
     fun toJson(): JSONObject = JSONObject()
         .put("yawToTravelDeg", (yawDeg * 10).let { Math.round(it) / 10.0 })
         .put("side", side.json).put("consistency", (consistency * 100).let { Math.round(it) / 100.0 })
-        .put("events", events).put("source", "measured")
+        .put("events", events).put("source", source)
+}
+
+/**
+ * The camera's yaw relative to travel from the compass, when the acceleration method ([MountEstimator]) has not
+ * settled: on each sweep photo, the camera's compass azimuth minus the GPS travel bearing, at speed. One reading is
+ * unreliable on a motorbike (engine, steel buildings: ±20–40°), but the median of many is a good estimate of how
+ * the phone is mounted, and it is far better than assuming 90°. First ride on Mai Chí Thọ: the camera looked 32°
+ * forward of perpendicular (middle half of 68 photos within 28–36°); assuming 90° put every place 20–40 m behind
+ * the shop, the compass yaw halved the error.
+ */
+class CompassYaw(private val minSamples: Int = 15, private val maxSpreadDeg: Double = 25.0, private val minSpeedMps: Double = 2.0) {
+    private val samples = ArrayList<Double>()
+
+    /** A photo's camera azimuth and the travel bearing at that moment (degrees), and the speed (m/s). */
+    @Synchronized fun add(cameraAzimuthDeg: Double?, travelBearingDeg: Double?, speedMps: Double?) {
+        if (cameraAzimuthDeg == null || travelBearingDeg == null || speedMps == null || speedMps < minSpeedMps) return
+        samples += ((cameraAzimuthDeg - travelBearingDeg + 540) % 360) - 180      // -180..180, right = +90
+        if (samples.size > 400) samples.removeAt(0)
+    }
+
+    /** Median yaw once there are [minSamples] readings whose middle half spans at most [maxSpreadDeg]; else null. */
+    @Synchronized fun estimate(): MountEstimate? {
+        if (samples.size < minSamples) return null
+        // around the circular mean, so that readings near ±180 do not split
+        val sx = samples.sumOf { kotlin.math.sin(Math.toRadians(it)) }
+        val cx = samples.sumOf { kotlin.math.cos(Math.toRadians(it)) }
+        val mean = Math.toDegrees(atan2(sx, cx))
+        val rel = samples.map { ((it - mean + 540) % 360) - 180 }.sorted()
+        val q1 = rel[rel.size / 4]; val q3 = rel[rel.size * 3 / 4]
+        if (q3 - q1 > maxSpreadDeg) return null
+        val yaw = ((mean + rel[rel.size / 2] + 540) % 360) - 180
+        return MountEstimate(yaw, CameraSide.ofYaw(yaw), (1 - (q3 - q1) / 90).coerceIn(0.0, 1.0), samples.size, "compassMount")
+    }
 }
 
 /**

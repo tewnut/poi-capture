@@ -432,6 +432,10 @@
     <string name="onboarding_language_title">Language · Ngôn ngữ</string>
     <string name="onboarding_language_lead">Choose the app\'s language.</string>
     <string name="onboarding_language_later">You can change it later in Settings.</string>
+    <string name="onboarding_language_vi_text">Use the app in Vietnamese</string>
+    <string name="onboarding_language_en_text">Use the app in English</string>
+    <string name="onboarding_language_phone">Phone\'s language</string>
+    <string name="onboarding_language_phone_text">Follow the phone: now %1$s</string>
     <!-- capture: GPS lost -->
     <string name="capture_gps_lost_title">GPS lost: recording on hold</string>
     <string name="capture_gps_lost_text">Every photo needs a GPS position from the last 5 seconds. Nothing is recorded until the GPS is back.</string>

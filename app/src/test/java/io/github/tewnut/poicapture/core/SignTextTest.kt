@@ -56,6 +56,23 @@ class SignTextTest {
         assertEquals(5, back.lines.size)
     }
 
+    @Test fun nameSkipsSidewaysTextAndForRentNotices() {
+        // from the 11 Nov place capture on Mai Chí Thọ
+        val norman = listOf(
+            TextLine("IIHETLIIIII", 562, intArrayOf(128, 1554, 200, 2116)),       // a pillar, read sideways
+            TextLine("SHUTTERS.BUINDS.SHADE.", 270, intArrayOf(210, 1086, 952, 1356)),
+            TextLine("NORMAN", 36, intArrayOf(1176, 2016, 1272, 2052)))
+        assertEquals("SHUTTERS.BUINDS.SHADE.", SignText.name(norman))
+        val phucLong = listOf(
+            TextLine("U CHO THUẾ", 122, intArrayOf(-2, 726, 220, 848)),
+            TextLine("PHUC LONG", 84, intArrayOf(708, 1320, 1022, 1404)),
+            TextLine("LH: 098599936", 66))
+        assertEquals("PHUC LONG", SignText.name(phucLong))
+        // boxes survive the round trip, so merging several photos still skips sideways text
+        val back = SignReading.fromJson(SignText.read(norman).toJson())!!
+        assertEquals("SHUTTERS.BUINDS.SHADE.", SignText.merge(listOf(back))?.name)
+    }
+
     @Test fun mergesThePhotosOfAPlace() {
         val front = SignText.read(listOf(TextLine("TẠP HOÁ MINH ANH", 150)))
         val info = SignText.read(listOf(TextLine("Mở cửa 6h - 22h", 40), TextLine("ĐT 0987 654 321", 50)))

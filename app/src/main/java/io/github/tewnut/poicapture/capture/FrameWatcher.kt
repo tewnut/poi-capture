@@ -25,7 +25,9 @@ import java.util.concurrent.Executors
  */
 class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightness: (Double) -> Unit) {
     /** [shift]: fraction of the frame width, null when the frames could not tell (dark, blank, blurred, first frame). */
-    data class Frame(val tNs: Long, val shift: Double?, val sharpness: Double, val brightness: Double)
+    data class Frame(val tNs: Long, val shift: Double?, val sharpness: Double, val brightness: Double,
+                     /** how the frame matched its reference (for frames.csv); null = it became the first reference */
+                     val match: io.github.tewnut.poicapture.core.FrameShift.Match? = null, val portrait: Boolean = false)
 
     private val thread = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -73,7 +75,8 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
         if (prevPortrait != up) tracker.reset()
         prevPortrait = up
         val shift = tracker.next(profiles)
+        val match = tracker.last
         val sharp = BlurCheck.sharpness(gray, w, h)
-        main.post { onBrightness(brightness); onFrame(Frame(t, shift, sharp, brightness)) }
+        main.post { onBrightness(brightness); onFrame(Frame(t, shift, sharp, brightness, match, up)) }
     }
 }

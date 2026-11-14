@@ -135,7 +135,7 @@ internal fun LanguageRow() {
     }
 }
 
-private fun Context.findActivity(): Activity? {
+internal fun Context.findActivity(): Activity? {
     var c: Context = this
     while (c is ContextWrapper) {
         if (c is Activity) return c

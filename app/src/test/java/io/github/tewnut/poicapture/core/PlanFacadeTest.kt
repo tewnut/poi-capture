@@ -81,4 +81,27 @@ class PlanFacadeTest {
         assertNotNull(Session.fromJson(out))                               // round trip
         assertEquals(Vehicle.UNSPECIFIED, Vehicle.of(null))
     }
+
+    @Test fun compassYawFromTheFirstRide() {
+        // Mai Chí Thọ, 11 Nov: travel ~63°, camera compass ~121° (assumed 153°): 32° forward of perpendicular
+        val c = CompassYaw()
+        val rnd = java.util.Random(1)
+        repeat(14) { c.add(63.0 + 58 + rnd.nextGaussian() * 5, 63.0, 3.3) }
+        assertNull(c.estimate())                                 // not enough readings yet
+        c.add(121.0, 63.0, 1.0)                                  // too slow: ignored
+        repeat(20) { c.add(63.0 + 58 + rnd.nextGaussian() * 5, 63.0, 3.3) }
+        val e = c.estimate()!!
+        assertEquals(58.0, e.yawDeg, 3.0)
+        assertEquals(CameraSide.RIGHT, e.side)
+        assertEquals("compassMount", e.source)
+        // a compass-mount yaw on an assumed item is applied, and labelled as such
+        val item = JSONObject().put("cameraBearingSource", "assumed").put("travelBearing", 63.0).put("lat", 10.78).put("lon", 106.74)
+        val p = Remeasure.patch(item, e, 30.0)!!
+        assertEquals("compassMount", p.getString("cameraBearingSource"))
+        assertEquals(121.0, p.getDouble("cameraBearing"), 3.0)
+        // readings all over the place (a disturbed compass): no estimate
+        val bad = CompassYaw()
+        repeat(40) { bad.add(rnd.nextDouble() * 360, 63.0, 3.3) }
+        assertNull(bad.estimate())
+    }
 }

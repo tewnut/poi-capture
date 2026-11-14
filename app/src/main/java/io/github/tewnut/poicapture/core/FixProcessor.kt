@@ -59,6 +59,8 @@ class FixProcessor(
     /** measured camera yaw relative to travel (clockwise, right = +90); null = not measured, use side + mount offset */
     var cameraYawDeg: Double? = null
         set(v) { field = v; cameraBearing = camBearing(travelBearing) }
+    /** how [cameraYawDeg] was found: "measured" (acceleration) or "compassMount" (median compass, [CompassYaw]) */
+    var cameraYawSource: String = "measured"
 
     private fun camBearing(tb: Double?): Double? {
         val yaw = cameraYawDeg
@@ -184,7 +186,7 @@ class FixProcessor(
             .put("travelBearing", travelBearing?.round1().orNull())
             .put("cameraBearing", cameraBearing?.round1().orNull())
             .put("cameraYawToTravelDeg", effectiveYawDeg.round1())
-            .put("cameraBearingSource", if (cameraYawDeg != null) "measured" else "assumed")
+            .put("cameraBearingSource", if (cameraYawDeg != null) cameraYawSource else "assumed")
             .put("wayId", m?.wayId.orNull())
             .put("roadName", m?.let { byId[it.wayId]?.let { w -> roadLabel(w) } }.orNull())
             .put("distanceToRoadM", m?.distanceM?.round1().orNull())
@@ -209,6 +211,7 @@ fun facadeFields(at: LatLon?, cameraBearing: Double?, distanceM: Double?): JSONO
  */
 object Remeasure {
     fun patch(item: JSONObject, est: MountEstimate, facadeDistanceM: Double?): JSONObject? {
+        // measured by acceleration: final; a compass-mount yaw is replaced by a later or better estimate
         if (item.optString("cameraBearingSource") == "measured") return null
         // photos of a place (POI mode) are aimed by hand: their compass bearing is kept as is
         if (item.optString("cameraBearingSource") == "compass" || (item.has("poiId") && !item.isNull("poiId"))) return null
@@ -219,7 +222,7 @@ object Remeasure {
         val p = JSONObject()
             .put("cameraBearing", cb?.round1().orNull())
             .put("cameraYawToTravelDeg", est.yawDeg.round1())
-            .put("cameraBearingSource", "measured")
+            .put("cameraBearingSource", est.source)
             .put("sideOfTravel", side.json)
             .put("sideOfWay", travel?.let { sideOfWay(side, it).json }.orNull())
         val at = if (item.isNull("lat") || !item.has("lat")) null else LatLon(item.getDouble("lat"), item.getDouble("lon"))

@@ -416,6 +416,10 @@
     <string name="onboarding_language_title">Ngôn ngữ · Language</string>
     <string name="onboarding_language_lead">Chọn ngôn ngữ của app.</string>
     <string name="onboarding_language_later">Có thể đổi lại sau trong Cài đặt.</string>
+    <string name="onboarding_language_vi_text">Dùng app bằng tiếng Việt</string>
+    <string name="onboarding_language_en_text">Dùng app bằng tiếng Anh</string>
+    <string name="onboarding_language_phone">Theo điện thoại</string>
+    <string name="onboarding_language_phone_text">Ngôn ngữ của điện thoại: hiện là %1$s</string>
     <!-- capture: GPS lost -->
     <string name="capture_gps_lost_title">Mất GPS: tạm dừng ghi</string>
     <string name="capture_gps_lost_text">Mỗi ảnh cần vị trí GPS trong 5 giây gần nhất. Chưa ghi gì cho đến khi có lại GPS.</string>

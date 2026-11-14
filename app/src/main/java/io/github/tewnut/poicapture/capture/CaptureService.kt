@@ -84,6 +84,7 @@ import io.github.tewnut.poicapture.core.PoiStatus
 import io.github.tewnut.poicapture.core.Pois
 import io.github.tewnut.poicapture.core.SessionKind
 import io.github.tewnut.poicapture.core.Remeasure
+import io.github.tewnut.poicapture.core.CompassYaw
 import io.github.tewnut.poicapture.core.Side
 import io.github.tewnut.poicapture.core.Fix
 import io.github.tewnut.poicapture.core.BlurCheck
@@ -192,6 +193,9 @@ class CaptureService : LifecycleService() {
     private var watcher: FrameWatcher? = null
     private var accountedNs = 0L                     // slide counted up to this time (elapsedRealtimeNanos)
     private var lastFrameNs = 0L
+    // street sweep: one line per analysis frame (frames.csv), to see why the frames did or did not time the photos
+    private var framesLog: java.io.BufferedWriter? = null
+    private var framesLogged = 0
     private val frameSharpness = RecentMedian(30)
     private val gyroRecent = RecentMedian(60)
     @Volatile private var coverageM = 0.0            // facade width one photo covers (current plan)
@@ -227,6 +231,7 @@ class CaptureService : LifecycleService() {
 
     // camera direction (measured from acceleration / braking) and the capture plan derived from the facade distance
     private val mountEstimator = MountEstimator()
+    private val compassYaw = CompassYaw()   // fallback while the above has not settled
     private var appliedMount: MountEstimate? = null
 
     // auto road mode: road data loaded cell by cell around the ride, in the background; capture never waits for it.
@@ -443,6 +448,13 @@ class CaptureService : LifecycleService() {
             watchGps()
         }
         imu = ImuRecorder(getSystemService(SENSOR_SERVICE) as SensorManager, store.imuFile(session.id), mountEstimator).also { it.start() }
+        if (session.mode == Mode.PHOTO_AUTO && framesLog == null) framesLog = runCatching {
+            val f = store.framesFile(session.id)
+            val fresh = !f.exists() || f.length() == 0L
+            java.io.FileWriter(f, true).buffered().also {
+                if (fresh) it.write("elapsedNanos,portrait,shift,textured,votes,agreeing,bestCorrelation,sharpness,brightness,speedMps,used,slide,steady\n")
+            }
+        }.getOrNull()
     }
 
     private fun onLocation(l: Location) {
@@ -532,9 +544,12 @@ class CaptureService : LifecycleService() {
      * measured yaw for new items, earlier items corrected in the background. Front/back: warn, keep the assumption.
      */
     private fun checkMount() {
-        val est = mountEstimator.estimate() ?: return
+        // acceleration first; the compass median only while that has not settled (and never over it)
+        val est = mountEstimator.estimate()
+            ?: compassYaw.estimate()?.takeIf { appliedMount?.source != "measured" }
+            ?: return
         val prev = appliedMount
-        if (prev != null && prev.side == est.side && kotlin.math.abs(prev.yawDeg - est.yawDeg) < 5) return
+        if (prev != null && prev.source == est.source && prev.side == est.side && kotlin.math.abs(prev.yawDeg - est.yawDeg) < 5) return
         appliedMount = est
         session.mount = est.toJson()
         _state.update {
@@ -544,6 +559,7 @@ class CaptureService : LifecycleService() {
         val side = when (est.side) { CameraSide.RIGHT -> Side.RIGHT; CameraSide.LEFT -> Side.LEFT; else -> null }
         if (side != null) {
             fp.side = side
+            fp.cameraYawSource = est.source
             fp.cameraYawDeg = est.yawDeg
             session.sideOfTravel = side
             val sid = session.id
@@ -738,15 +754,28 @@ class CaptureService : LifecycleService() {
         val dt = (fr.tNs - accountedNs) / 1e9
         accountedNs = fr.tNs
         val speed = if (freshFix() != null) fp.speedMps else null
-        when {
-            speed != null && speed < 0.7 -> {}                               // waiting (lights, traffic): passing vehicles are not new facade
+        val used = when {
+            speed != null && speed < 0.7 -> "wait"                           // waiting (lights, traffic): passing vehicles are not new facade
             fr.shift != null && dt < 0.4 -> {
                 trigger.addFrameShift(fr.shift)
                 trigger.floor(fr.shift, speed ?: 0.0, dt, coveragePerM)   // never as if the fronts were > 40 m away
+                "frame"
             }
-            else -> trigger.addSpeed(speed ?: 0.0, dt, coverageM)
+            else -> { trigger.addSpeed(speed ?: 0.0, dt, coverageM); if (fr.shift != null) "gps-late" else "gps" }
         }
+        logFrame(fr, speed, used, steady)
         maybeShoot(steady, gyro, fr.sharpness, sharpMedian)
+    }
+
+    private fun logFrame(fr: FrameWatcher.Frame, speed: Double?, used: String, steady: Boolean) {
+        val w = framesLog ?: return
+        val m = fr.match
+        fun r(v: Double?, k: Int) = v?.let { "%.${k}f".format(java.util.Locale.ROOT, it) } ?: ""
+        runCatching {
+            w.write("${fr.tNs},${if (fr.portrait) 1 else 0},${r(fr.shift, 5)},${m?.textured ?: ""},${m?.votes ?: ""},${m?.agreeing ?: ""}," +
+                "${r(m?.bestCorrelation, 3)},${r(fr.sharpness, 1)},${r(fr.brightness, 0)},${r(speed, 2)},$used,${r(trigger.progress, 3)},${if (steady) 1 else 0}\n")
+            if (++framesLogged % 150 == 0) w.flush()
+        }
     }
 
     private fun maybeShoot(steady: Boolean, gyro: Double? = null, sharp: Double? = null, sharpMedian: Double? = null) {
@@ -781,6 +810,10 @@ class CaptureService : LifecycleService() {
         val meta = orientationMeta(fp.itemMeta(id, "photo", now, session.sideOfTravel, en).put("trigger", trigger))
         val motion = imu?.snapshot(en)
         motion?.let { meta.put("motion", it) }
+        if (poiId == null) {   // street sweep: the compass at each photo feeds the mount estimate (CompassYaw)
+            compassYaw.add(motion?.optDouble("cameraAzimuthDeg")?.takeIf { !it.isNaN() }, fp.travelBearing, fp.speedMps)
+            checkMount()
+        }
         if (poiId != null) {
             meta.put("poiId", poiId)
             // the kind of photo only when the contributor is asked for it; otherwise the agent tells it from the image
@@ -922,6 +955,8 @@ class CaptureService : LifecycleService() {
         watcher?.release()
         gnss?.let { session.gnss = it.summary(); it.stop() }
         imu?.stop()
+        framesLog?.let { runCatching { it.close() } }
+        framesLog = null
         val ui = _state.value
         session.endedAt = iso(System.currentTimeMillis())
         // saved with its name: the street it was recorded on and the day

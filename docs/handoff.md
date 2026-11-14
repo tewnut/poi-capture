@@ -67,6 +67,17 @@ photos and contributes them to the target map through that map's contribution to
 - **`marks`** (sweeps up to v0.13 only; empty from v0.14, the ★ Mark button is gone): each **★ Mark**,
   `{id, tMs, t, elapsedNanos, lat, lon, accuracyM, photoIds}` with `photoIds` = photos taken within ±5 s. Riders
   tapped it every few seconds, so treat it as a weak hint at most.
+- **`cameraBearingSource = "compassMount"`** (street sweeps, from v0.14): the mount yaw came from the median of the
+  compass over the sweep photos (the acceleration method had not settled). Bearing error about 5–10°, better than
+  `"assumed"` (90°: the first rides had the phone turned 30° forward, which put every place 20–40 m behind its shop).
+  Items recorded before the estimate are patched (`_patch` lines). For older sweeps with `"assumed"`, apply the same
+  correction yourself: the median of `motion.cameraAzimuthDeg − cameraBearing` over the photos.
+- **`frames.csv`** (street sweeps, from v0.14; `manifest.framesFile`): one row per camera analysis frame (~320 px,
+  up to 30/s): `elapsedNanos` (same clock as photos and imu.csv), `portrait`, `shift` (slide since the previous frame,
+  fraction of the frame width; empty = not matched), `textured` / `votes` / `agreeing` (bands with texture / that
+  matched / that agreed), `bestCorrelation`, `sharpness`, `brightness`, `speedMps`, `used` (`frame` = the slide came
+  from the image, `gps` / `gps-late` = from the GPS speed, `wait` = stopped), `slide` (since the last photo), `steady`.
+  A diagnostic for the photo timing; nothing else depends on it.
 - **Photo size** (from v0.14): at least 2560 px on the long side; a camera without that exact size gives the next
   size up (OPPO Reno6 Z: 3264×1840). v0.13 photos on such phones are 1920×1088.
 - **Text corrected by hand** (Place capture, from v0.14): on Photo locations the contributor sees each place with its

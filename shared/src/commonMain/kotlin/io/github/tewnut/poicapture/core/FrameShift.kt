@@ -25,6 +25,13 @@ object FrameShift {
     data class Shift(val fraction: Double, val confidence: Double, val bandsAgreeing: Int)
 
     /**
+     * How a match went, for the frame log (frames.csv): [textured] bands with a profile in both frames, [votes] bands
+     * that matched above [MIN_CORRELATION], [agreeing] of them on one shift, [bestCorrelation] the best band's score
+     * (also when under the threshold), [shift] the result (null = no match).
+     */
+    data class Match(val shift: Shift?, val textured: Int, val votes: Int, val agreeing: Int, val bestCorrelation: Double)
+
+    /**
      * Band profiles of a grayscale frame (values 0–255, row-major `w × h`), already turned so that the photo's
      * horizontal runs along x. A band with almost no texture (sky, a blank wall) gets no profile.
      */
@@ -44,13 +51,22 @@ object FrameShift {
     }
 
     /** Shift of [cur] relative to [prev] (positive: the scene moved towards +x), or null when nothing matched. */
-    fun between(prev: Profiles, cur: Profiles, maxShift: Double = MAX_SHIFT): Shift? {
-        if (prev.width != cur.width || prev.bands.size != cur.bands.size) return null
+    fun between(prev: Profiles, cur: Profiles, maxShift: Double = MAX_SHIFT): Shift? = evaluate(prev, cur, maxShift).shift
+
+    /** [between], with how the bands voted. */
+    fun evaluate(prev: Profiles, cur: Profiles, maxShift: Double = MAX_SHIFT): Match {
+        if (prev.width != cur.width || prev.bands.size != cur.bands.size) return Match(null, 0, 0, 0, 0.0)
         val votes = ArrayList<Pair<Double, Double>>()
+        var textured = 0
+        var bestCorrelation = 0.0
         for (i in prev.bands.indices) {
             val a = prev.bands[i] ?: continue
             val b = cur.bands[i] ?: continue
-            match(a, b, (maxShift * prev.width).toInt())?.let { votes += it }
+            textured++
+            match(a, b, (maxShift * prev.width).toInt())?.let { (s, c) ->
+                bestCorrelation = maxOf(bestCorrelation, c)
+                if (c >= MIN_CORRELATION) votes += s to c
+            }
         }
         // the shift most bands agree on (within 2 samples); bands of near asphalt or passing traffic give scattered,
         // unrelated answers, so a lone band never decides (first ride: half of each portrait frame was road)
@@ -59,12 +75,12 @@ object FrameShift {
             val group = votes.filter { abs(it.first - v.first) <= 2.0 }
             if (group.size > best.size || (group.size == best.size && group.sumOf { it.second } > best.sumOf { it.second })) best = group
         }
-        if (best.size < MIN_AGREEING) return null
+        if (best.size < MIN_AGREEING) return Match(null, textured, votes.size, best.size, bestCorrelation)
         val shift = best.sumOf { it.first * it.second } / best.sumOf { it.second }
-        return Shift(shift / (prev.width - 1), best.maxOf { it.second }, best.size)
+        return Match(Shift(shift / (prev.width - 1), best.maxOf { it.second }, best.size), textured, votes.size, best.size, bestCorrelation)
     }
 
-    /** Best shift s (in samples) with b[x + s] ≈ a[x], refined below one sample; null under [MIN_CORRELATION]. */
+    /** Best shift s (in samples) with b[x + s] ≈ a[x], refined below one sample, and its correlation (any score). */
     private fun match(a: DoubleArray, b: DoubleArray, maxS: Int): Pair<Double, Double>? {
         val n = a.size
         val minOverlap = n - maxS
@@ -85,7 +101,7 @@ object FrameShift {
             scores[k] = c
             if (c > bestScore) { bestScore = c; best = k }
         }
-        if (best < 0 || bestScore < MIN_CORRELATION) return null
+        if (best < 0) return null
         var s = (best - maxS).toDouble()
         if (best in 1 until scores.size - 1 && scores[best - 1] > -1 && scores[best + 1] > -1) {
             val l = scores[best - 1]; val r = scores[best + 1]; val den = l - 2 * bestScore + r
@@ -106,13 +122,19 @@ class SlideTracker(private val rebaseAt: Double = 0.2) {
     private var ref: FrameShift.Profiles? = null
     private var sinceRef = 0.0
 
+    /** How the last [next] went (null: there was no reference to match against). */
+    var last: FrameShift.Match? = null
+        private set
+
     fun reset() { ref = null; sinceRef = 0.0 }
 
     /** Slide since the previous call, as a fraction of the frame width (signed), or null when unknown. */
     fun next(cur: FrameShift.Profiles): Double? {
         val r = ref
-        if (r == null || r.width != cur.width) { ref = cur; sinceRef = 0.0; return null }
-        val s = FrameShift.between(r, cur)
+        if (r == null || r.width != cur.width) { ref = cur; sinceRef = 0.0; last = null; return null }
+        val m = FrameShift.evaluate(r, cur)
+        last = m
+        val s = m.shift
         if (s == null) { ref = cur; sinceRef = 0.0; return null }
         val step = s.fraction - sinceRef
         if (abs(s.fraction) >= rebaseAt) { ref = cur; sinceRef = 0.0 } else sinceRef = s.fraction

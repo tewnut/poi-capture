@@ -11,6 +11,7 @@ import java.io.File
  *   track.jsonl       every position fix
  *   gnss_raw.csv      raw GNSS measurements (GnssLogger-style "Raw" rows)
  *   imu.csv           gyroscope / accelerometer / rotation vector samples
+ *   frames.csv        street sweep: every camera analysis frame, its measured slide and what timed the photos
  *   photos/<id>.jpg, videos/<id>.mp4
  */
 class SessionStore(val root: File) {
@@ -20,6 +21,7 @@ class SessionStore(val root: File) {
     fun trackFile(sessionId: String) = File(dir(sessionId), "track.jsonl")
     fun gnssFile(sessionId: String) = File(dir(sessionId), "gnss_raw.csv")
     fun imuFile(sessionId: String) = File(dir(sessionId), "imu.csv")
+    fun framesFile(sessionId: String) = File(dir(sessionId), "frames.csv")
     fun waysFile(sessionId: String) = File(dir(sessionId), "ways.jsonl")   // auto road mode: ways loaded during the ride
     private fun itemsFile(sessionId: String) = File(dir(sessionId), "items.jsonl")
     private fun poisFile(sessionId: String) = File(dir(sessionId), "pois.jsonl")     // POI mode: one record per place

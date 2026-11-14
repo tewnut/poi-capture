@@ -66,6 +66,7 @@ object Exporter {
             .put("trackPoints", store.trackCount(sessionId))
             .put("gnssRawFile", if (store.gnssFile(sessionId).length() > 0) "gnss_raw.csv" else JSONObject.NULL)
             .put("imuFile", if (store.imuFile(sessionId).length() > 0) "imu.csv" else JSONObject.NULL)
+            .put("framesFile", if (store.framesFile(sessionId).length() > 0) "frames.csv" else JSONObject.NULL)
     }
 
     /**
@@ -125,7 +126,8 @@ object Exporter {
                 writeTrackGeoJson(store.trackFile(sessionId), w)
                 w.flush()
             }
-            for ((file, name) in listOf(store.gnssFile(sessionId) to "gnss_raw.csv", store.imuFile(sessionId) to "imu.csv")) {
+            for ((file, name) in listOf(store.gnssFile(sessionId) to "gnss_raw.csv", store.imuFile(sessionId) to "imu.csv",
+                    store.framesFile(sessionId) to "frames.csv")) {
                 if (file.length() > 0) entry(name, Deflater.DEFAULT_COMPRESSION) { o -> file.inputStream().use { it.copyTo(o) } }
             }
             val items = manifest.getJSONArray("items")

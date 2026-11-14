@@ -39,7 +39,10 @@ data class SignReading(
             o ?: return null
             val a = o.optJSONArray("lines") ?: JSONArray()
             return SignReading(
-                (0 until a.length()).map { a.getJSONObject(it).let { l -> TextLine(l.optString("text"), l.optInt("heightPx")) } },
+                (0 until a.length()).map { a.getJSONObject(it).let { l ->
+                    TextLine(l.optString("text"), l.optInt("heightPx"),
+                        l.optJSONArray("box")?.takeIf { it.length() == 4 }?.let { b -> IntArray(4) { k -> b.getInt(k) } })
+                } },
                 o.optString("name").takeIf { it.isNotBlank() && it != "null" },
                 o.optJSONArray("phones")?.let { p -> (0 until p.length()).map { p.getString(it) } } ?: emptyList(),
                 o.optString("houseNumber").takeIf { it.isNotBlank() && it != "null" },
@@ -122,14 +125,24 @@ object SignText {
         "nescafe", "g7", "trung nguyen", "omo", "unilever", "momo", "zalopay", "vnpay", "grab", "shopeefood", "be ", "gojek",
         "hotline", "dien thoai", "dt", "tel", "dc", "dia chi", "address")
 
+    /** Notices that are not the shop's name: for rent / for sale / contact ("U CHO THUẾ", "LH: 0985…"). */
+    private val NOTICE = Regex("\\b(?:cho thue|sang nhuong|sang quan|can ban|ban nha|for rent|for lease|lien he|lh|giay phep|dkkd)\\b")
+
     /**
-     * The shop's name: the tallest line that has letters, is not a phone / address / sponsor line. A guess; the agent
-     * checks it against the other photos and the map.
+     * Text read across its line: a line whose box is much taller than wide is text running down a wall or pillar,
+     * read sideways by the OCR ("IIHETLIIIII"), and its height is its length, not its letter size.
+     */
+    private fun upright(l: TextLine): Boolean = l.box?.let { b -> (b[3] - b[1]) <= 1.5 * (b[2] - b[0]) } ?: true
+
+    /**
+     * The shop's name: the tallest line that has letters, is not a phone / address / sponsor / for-rent line and
+     * is not text read sideways. A guess; the agent checks it against the other photos and the map.
      */
     fun name(lines: List<TextLine>): String? = lines
         .filter { l ->
             val f = fold(l.text).replace(Regex("[^a-z0-9/]+"), " ").trim()
             f.count { it.isLetter() } >= 3 &&
+                upright(l) && !NOTICE.containsMatchIn(f) &&
                 !PHONE.containsMatchIn(l.text) &&
                 SPONSORS.none { s -> f == s.trim() || f.startsWith(s) } &&
                 HOUSE_KEYWORD.find(f) == null && HOUSE_BEFORE_STREET.find(f) == null && HOUSE_LINE_START.find(f) == null
