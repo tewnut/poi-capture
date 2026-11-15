@@ -58,9 +58,15 @@ async function fromFiles(files: Map<string, Blob>, label: string): Promise<Impor
   throw new Error(`${label}: no result.json (agent output) or manifest.json (phone export) inside`)
 }
 
+/** Only image files are kept, always re-typed as images: a bundle cannot make the app serve HTML or script from
+ *  its own origin (photos are shown and opened in a new tab through object URLs). */
 function keepImages(files: Map<string, Blob>, wanted: Set<string>): Map<string, Blob> {
   const m = new Map<string, Blob>()
-  for (const [p, b] of files) if (wanted.has(p)) m.set(p, b.type ? b : new Blob([b], { type: 'image/jpeg' }))
+  for (const [p, b] of files) {
+    if (!wanted.has(p) || !IMAGE.test(p)) continue
+    const type = /\.png$/i.test(p) ? 'image/png' : /\.webp$/i.test(p) ? 'image/webp' : 'image/jpeg'
+    m.set(p, new Blob([b], { type }))
+  }
   return m
 }
 

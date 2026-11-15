@@ -20,6 +20,13 @@ LEAFLET = ('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/
            'crossorigin="anonymous" referrerpolicy="no-referrer"></script>')
 
 
+def script_json(data):
+    """JSON safe inside <script>: no '</script>' or HTML comment can end the script early."""
+    return (json.dumps(data, ensure_ascii=False)
+            .replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+            .replace('\u2028', '\\u2028').replace('\u2029', '\\u2029'))
+
+
 def median(v):
     v = sorted(v)
     return v[len(v) // 2] if v else None
@@ -87,7 +94,7 @@ const COL={found:'#1659c7',new:'#e8590c',todo:'#8a949c'};
 function gstat(p){if(!p.google)return 'todo';if(p.google.name)return 'found';return p.google.status?'new':'todo'}
 const GLABEL={found:'on Google Maps',new:'not on Google Maps nearby',todo:'Google not looked up'};
 function enc(path){return path.split('/').map(encodeURIComponent).join('/')}
-function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function makeMap(el){
   const m=L.map(el,{maxZoom:21,zoomSnap:.5});
   // Esri tiles: the page is opened from disk, and OpenStreetMap's tile servers refuse requests without a website
@@ -147,7 +154,7 @@ function initSession(S){
     document.querySelectorAll('section.place').forEach(e=>e.classList.toggle('on',e.id===p.folder));
     if(fly){const b=[[p.lat,p.lon],...p.sightings.map(s=>[s.lat,s.lon])];if(p.truth)b.push([p.truth.lat,p.truth.lon]);m.fitBounds(b,{padding:[60,60],maxZoom:20})}}
   for(const p of S.places){marks[p.folder]=L.marker([p.lat,p.lon],{icon:pinIcon(p,false),zIndexOffset:500}).addTo(m)
-    .bindTooltip(p.n+' · '+p.name).on('click',()=>{select(p,false);document.getElementById(p.folder).scrollIntoView({behavior:'smooth',block:'start'})})}
+    .bindTooltip(esc(p.n)+' · '+esc(p.name)).on('click',()=>{select(p,false);document.getElementById(p.folder).scrollIntoView({behavior:'smooth',block:'start'})})}
   document.querySelectorAll('section.place h2').forEach(h=>h.addEventListener('click',()=>{const p=S.places.find(q=>q.folder===h.parentNode.id);select(p,true)}));
   const b=bounds([S]);if(b.length)m.fitBounds(b,{padding:[30,30]});
   const id=decodeURIComponent(location.hash.slice(1));const p0=S.places.find(q=>q.folder===id);if(p0)setTimeout(()=>{select(p0,true);document.getElementById(id).scrollIntoView()},50);
@@ -176,7 +183,7 @@ function initHub(D){
       li.querySelector('input').onchange=e=>{e.target.checked?on.add(key(s)):on.delete(key(s));render(false)};list.appendChild(li);
       if(!chk)continue;const sv={...s,places:ps};vis.push(sv);drawRide(m,s,g);
       for(const p of ps){n++;if(gstat(p)==='new')nw++;if(p.truth&&p.truth.errorM!=null)errs.push(p.truth.errorM);drawTruth(p,g);
-        L.marker([p.lat,p.lon],{icon:pinIcon(p,false),zIndexOffset:500}).addTo(g).bindTooltip(p.n+' · '+p.name)
+        L.marker([p.lat,p.lon],{icon:pinIcon(p,false),zIndexOffset:500}).addTo(g).bindTooltip(esc(p.n)+' · '+esc(p.name))
           .bindPopup(popup(p,s.rel,enc(s.rel)+'index.html#'+encodeURIComponent(p.folder)),{maxWidth:280})
           .on('click',()=>{selg.clearLayers();drawPlace(p,selg,true)})}}
     errs.sort((a,b)=>a-b);
@@ -194,7 +201,7 @@ function initHub(D){
 def session_map_block(folder):
     """The <head> extras and the map <script> for a sweep's own index.html."""
     data = session_data(folder)
-    return (LEAFLET, f"<script>{JS}\ninitSession({json.dumps(data, ensure_ascii=False)});</script>")
+    return (LEAFLET, f"<script>{JS}\ninitSession({script_json(data)});</script>")
 
 
 HUB_CSS = """
@@ -237,7 +244,7 @@ updated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC</div>
 <div class="btns"><button id="all">Show all</button><button id="none">Hide all</button><button id="fit">Fit map</button></div>
 <div id="slist"></div></div>
 <div id="main"><div id="sum"></div><div id="map"></div></div>
-<script>{JS}\ninitHub({json.dumps(sessions, ensure_ascii=False)});</script></html>"""
+<script>{JS}\ninitHub({script_json(sessions)});</script></html>"""
     out = os.path.join(root, 'index.html')
     open(out, 'w', encoding='utf-8').write(page)
     return out
