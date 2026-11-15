@@ -136,8 +136,16 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
     private val acc = ArrayDeque<Pair<Long, Float>>()    // (t, |a| m/s²)
     private val rot = FloatArray(5)
     private var hasRot = false
-    private val game = FloatArray(5)          // game rotation vector: gyroscope + gravity, no compass (no north, no disturbance)
+    private val game = FloatArray(5)          // game rotation vector: meant to be gyroscope + gravity, no compass
     private var hasGame = false
+    // Camera turn from the raw gyroscope alone: its rate about the world vertical, integrated. Not the game rotation
+    // vector's azimuth: some phones (seen on the test phone, 0.15.0) blend the compass into it, which drags every turn
+    // towards the disturbed compass (a 65° pan came out as 46°).
+    private val up = FloatArray(3)            // world up in device axes (3rd row of the rotation matrix)
+    private var hasUp = false
+    private var gyroYaw = 0.0                 // degrees clockwise, arbitrary zero
+    private var lastGyroNs = 0L
+    private var hasYaw = false
     private var lastFuseNs = 0L
     /** Hand-held sweep: the camera direction from the gyro, set to north by the compass ([HeadingFusion]). */
     val heading = io.github.tewnut.poicapture.core.HeadingFusion()
@@ -173,17 +181,24 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
         }
         synchronized(this) {
             when (tag) {
-                "g" -> push(gyro, e.timestamp, sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
+                "g" -> {
+                    push(gyro, e.timestamp, sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
+                    val dt = (e.timestamp - lastGyroNs) / 1e9
+                    if (hasUp && lastGyroNs != 0L && dt > 0 && dt < 0.2) {
+                        val wUp = up[0] * v[0] + up[1] * v[1] + up[2] * v[2]   // rad/s, counter-clockwise from above
+                        gyroYaw = (gyroYaw - Math.toDegrees(wUp * dt) + 360) % 360
+                        hasYaw = true
+                    }
+                    lastGyroNs = e.timestamp
+                }
                 "a" -> push(acc, e.timestamp, sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
-                "r" -> { for (i in 0 until minOf(5, v.size)) rot[i] = v[i]; hasRot = true }
-                "q" -> { for (i in 0 until minOf(5, v.size)) game[i] = v[i]; hasGame = true }
+                "r" -> { for (i in 0 until minOf(5, v.size)) rot[i] = v[i]; hasRot = true; if (!hasGame) setUp(rot) }
+                "q" -> { for (i in 0 until minOf(5, v.size)) game[i] = v[i]; hasGame = true; setUp(game) }
             }
             // 4 times a second: one (compass, gyro) pair of camera azimuths for the hand-held heading
-            if (hasRot && hasGame && e.timestamp - lastFuseNs >= 250_000_000L) {
+            if (hasRot && hasYaw && e.timestamp - lastFuseNs >= 250_000_000L) {
                 lastFuseNs = e.timestamp
-                val c = cameraAzimuth(rot)
-                val g = cameraAzimuth(game)
-                if (c != null && g != null) heading.add(e.timestamp, c, g)
+                cameraAzimuth(rot)?.let { c -> heading.add(e.timestamp, c, gyroYaw) }
             }
             runCatching {
                 out.write(String.format(Locale.ROOT, "%s,%d,%.5f,%.5f,%.5f,%s\n", tag, e.timestamp, v[0], v[1], v[2],
@@ -219,6 +234,12 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
     @Synchronized
     fun gyroNow(nowNanos: Long): Double? =
         gyro.filter { nowNanos - it.first <= 100_000_000L }.maxOfOrNull { it.second.toDouble() }
+
+    private fun setUp(v: FloatArray) {
+        val rm = FloatArray(9)
+        SensorManager.getRotationMatrixFromVector(rm, v)
+        up[0] = rm[6]; up[1] = rm[7]; up[2] = rm[8]; hasUp = true
+    }
 
     /** Camera (−device Z) azimuth in a rotation vector's frame, degrees; null when the camera points up or down. */
     private fun cameraAzimuth(v: FloatArray): Double? {
@@ -265,8 +286,8 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
                 .put("devicePitchDeg", Math.toDegrees(ori[1].toDouble()).r3())
                 .put("deviceRollDeg", Math.toDegrees(ori[2].toDouble()).r3())
         }
-        if (hasGame) cameraAzimuth(game)?.let { g ->
-            o.put("gyroAzimuthDeg", g.r3())   // gyro frame: no north, only differences between photos mean something
+        if (hasYaw) gyroYaw.let { g ->
+            o.put("gyroAzimuthDeg", g.r3())   // integrated gyro: no north, only differences between photos mean something
             heading.offset()?.let { off ->
                 o.put("fusedAzimuthDeg", ((g + off.deg + 720) % 360).r3())
                     .put("fusedOffsetSpreadDeg", off.spreadDeg.r3()).put("fusedSamples", off.samples)

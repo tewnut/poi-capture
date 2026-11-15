@@ -28,3 +28,7 @@ tools/roadpack/.venv/
 # Claude Code: worktrees and personal settings
 .claude/worktrees/
 .claude/settings.local.json
+
+# browser test output, Python caches
+.playwright-mcp/
+__pycache__/

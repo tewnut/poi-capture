@@ -32,29 +32,44 @@ traffic signs, building names alone, banners, parking signs) note:
 - `sightings`: its sign centre `x` (0 = left edge, 1 = right) on 2–3 photos spread over its range (first part, cover,
   last part): these give the position by triangulation; one sighting only = rough position,
 - `confidence`: `high` (name fully readable) or `low`, and `signText` (the main text as read),
-- `best`: the 2 photos to keep (a place is often on 8–14 photos; the rest are dropped from its folder), and in
-  `bestWhy` one line on why. Pick:
-  1. the **cover**: the sign whole, sharp, as frontal as possible, not cut by the frame edge and not covered by a
-     tree, pole, umbrella, vehicle or person;
-  2. a **second view** that adds something: the whole storefront and entrance, the other end of a long frontage, or
-     a second sign (opening hours, phone, a side sign); not a near-copy of the cover (at least 2 photos apart).
-  Avoid blurry photos and photos with a face or a number plate close to the camera. Leave `best` out to let the script
-  choose (sign nearest the middle, sharpest, 2 photos apart); for a `low` place choose by hand, the script cannot see
-  what is covered.
+- `status`: `open`, or `closed` / `for_rent` ("cho thuê", "sang nhượng") / `under_construction` / `gone` when the
+  photos show it; these become removal tasks,
+- `fields`: **everything readable** about it, each `{"value", "photo", "sure": high|medium|low}`: `phone`,
+  `houseNumber`, `street`, `openingHours`, `website`, `signText`, `other` (services, prices, slogans). Crop the
+  full-size photo (`file` in `<work>/photos.json`) for small print: addresses and phones are rarely readable on the
+  sheets. Only what is written; never fill from Google.
+- `best`: **1 to N** photos to keep, each `{"photo", "why"}`; the cover first: the sign whole, sharp, frontal, not cut
+  by the frame edge or hidden by a tree, pole, umbrella, vehicle or person. Add a photo only if it adds something (the
+  entrance, the other end of a long frontage, a second sign with hours or phone); one is fine when the rest repeat
+  it. Avoid blurry photos and faces or number plates close to the camera. Left out: the script keeps 2 (sign nearest
+  the middle, sharpest, 2 photos apart); for a `low` place choose by hand.
+- `agentPin`: your suggested position, from the photos' evidence: `{"snap": "facade", "why"}` keeps the algorithm's
+  position along the street and puts the pin on the shopfront line (`"distanceM"` to override the street's facade
+  distance, e.g. 8 for a cart on the pavement), or `{"lat", "lon", "why"}`. Never copy Google's pin. On Nguyễn Thanh
+  Sơn the facade snap halved the distance to Google's pins on 20 of 25 places (median 11.6 → 8.5 m).
 
-When a name is only partly readable, open the full-size photo (`file` in `<work>/photos.json`) before giving up.
+Group sightings into places: the same sign sliding across consecutive photos is one place; a shop seen again after
+others were passed (approach and pass-by, or the other side when hand-held) joins its first sightings. Two places
+with the same words on the sign within ~30 m are probably one; the words alone never decide (the phone's OCR is
+not used for sweeps).
+
+Places no longer there go in `"removals"` at the top level: `{"name", "status": closed|for_rent|gone, "photo", "x",
+"why", "inView": true|false}` (`inView` false when the facade was hidden: it becomes a verify task, not a removal).
+
 Estimate `defaultFacadeDistanceM` (camera to shopfronts) from the photos: ~8 m on a narrow street with shops on the
 pavement, 20–35 m behind a service road or garden. Write `<work>/places.json`:
 
 ```json
-{"street": "Mai Chí Thọ", "defaultFacadeDistanceM": 30, "places": [
-  {"name": "Highlands Coffee", "category": "cafe", "signText": "HIGHLANDS COFFEE", "photos": [33, 45], "cover": 42,
-   "sightings": [{"photo": 36, "x": 0.15}, {"photo": 42, "x": 0.68}, {"photo": 45, "x": 0.9}],
-   "best": [42, 38], "bestWhy": "42: sign whole and central; 38: storefront with terrace and entrance",
-   "confidence": "high", "note": ""}]}
+{"street": "Nguyễn Thanh Sơn", "defaultFacadeDistanceM": 12, "removals": [], "places": [
+  {"name": "Bún Bò Huế Hương Cố Đô", "category": "restaurant", "status": "open", "confidence": "high",
+   "photos": [33, 39], "cover": 38,
+   "sightings": [{"photo": 36, "x": 0.43}, {"photo": 38, "x": 0.64}, {"photo": 39, "x": 0.52}],
+   "best": [{"photo": 38, "why": "sign whole and the dining room"}, {"photo": 37, "why": "address and phone readable"}],
+   "fields": {"phone": {"value": "0886673868", "photo": 37, "sure": "high"},
+              "houseNumber": {"value": "106", "photo": 37, "sure": "high"},
+              "street": {"value": "Nguyễn Thanh Sơn, P. Cát Lái, TP.HCM", "photo": 37, "sure": "high"}},
+   "agentPin": {"snap": "facade", "why": "pin on the shopfront line"}, "note": ""}]}
 ```
-
-`"bestPhotos": 3` at the top level keeps 3 per place instead of 2.
 
 ## 3. Build the place folders
 
@@ -73,6 +88,12 @@ seen on) and `otherPhotos` (ids of the photos not kept)), plus `index.html` (rev
 which took the median error against Google Maps from 40 to 27 m); `"bearingOffsetDeg"` in places.json overrides it.
 If it says the compass was too scattered, positions are as weak as before: say so. Check the printed positions look sane (all on the shop side of the road,
 in riding order); a triangulated point far from its neighbours usually means a wrong `x` or photo index.
+
+The folder also gets `result.json` (schema `poi-result/1`: places with their fields, the three pins
+algorithm / Google / agent, photos, and the task list: visits for Place capture, removals), `sweep.json` (the ride
+for the maps) and `removals.json`; `index.html` has a map, and the parent folder an `index.html` over all
+sessions. `--doors <place capture session>` adds the doors captured on site for comparison. The web app (`web/`,
+docs/pipeline.md) imports the folder or a zip of it for review and publishing.
 
 ## 4. Enrich from Google Maps
 

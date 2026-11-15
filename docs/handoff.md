@@ -38,7 +38,9 @@ photos and contributes them to the target map through that map's contribution to
 ### App 0.15: hand-held sweeps, contributor ID
 - **`session.holding`** (street sweeps): `"mount"` (phone fixed on the bike; also every session before 0.15) or
   `"hand"` (a passenger holds it and aims). Hand-held photos each carry their own direction:
-  `cameraBearingSource = "gyroCompass"`: the gyroscope's direction (game rotation vector, no magnetometer) plus the
+  `cameraBearingSource = "gyroCompass"`: the gyroscope's direction (0.15.0: the game rotation vector, which some phones
+  blend with the compass, so turns came out ~30% short; from 0.15.1: the raw gyroscope's rate about the vertical,
+  integrated) plus the
   median of (compass − gyro) over the last 2 minutes, which cancels the compass's ±20–40° disturbances on a motorbike
   while following the gyro's drift; expect about 5–10°. `"compass"` on the first photos, before that median exists
   (one raw compass reading: weak). Per photo, `cameraYawToTravelDeg` and `sideOfTravel` follow from it, and the
