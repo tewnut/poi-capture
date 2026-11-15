@@ -92,6 +92,8 @@ import io.github.tewnut.poicapture.core.toJson
 import io.github.tewnut.poicapture.core.TrackStats
 import io.github.tewnut.poicapture.core.FixProcessor
 import io.github.tewnut.poicapture.core.Mode
+import io.github.tewnut.poicapture.core.Holding
+import io.github.tewnut.poicapture.core.HandBearing
 import io.github.tewnut.poicapture.core.Overpass
 import io.github.tewnut.poicapture.core.Road
 import io.github.tewnut.poicapture.core.RoadCells
@@ -113,6 +115,12 @@ import kotlin.math.roundToInt
 
 /** A photo, mark or video segment needs a GPS fix at most this old. */
 const val GPS_MAX_AGE_MS = io.github.tewnut.poicapture.core.CaptureRules.GPS_MAX_AGE_MS
+/** Auto photos wait while the camera points lower than this (mounted: the phone is being put on or taken off). */
+const val MOUNT_MIN_ELEVATION_DEG = -45.0
+/** By hand: a passenger aims a little down at the pavement; lower than this is the road or their lap. */
+const val HAND_MIN_ELEVATION_DEG = -35.0
+/** By hand: turning faster than this (~70°/s) blurs the photo and shows the street sideways: wait. */
+const val HAND_SWING_RADS = 1.2
 
 /** What the capture screen shows. */
 data class CaptureUi(
@@ -141,7 +149,9 @@ data class CaptureUi(
     val maxSpeedKmh: Int = 20,
     val photoEveryM: Double = 0.0,
     val portrait: Boolean = false,       // how the phone is held now: the frame (and its field of view) follows
-    val mount: String = "measuring",     // measuring | right | left | front | back
+    val mount: String = "measuring",     // measuring | right | left | front | back | hand (held by a passenger)
+    val aimLow: Boolean = false,         // street sweep: the camera points at the road (auto photos wait)
+    val swinging: Boolean = false,       // hand-held sweep: the phone is turning fast (auto photos wait)
     val mountYawDeg: Double? = null,
     val mountOffsetFrontDeg: Int? = null,
     // POI mode ("Chụp địa điểm")
@@ -186,6 +196,8 @@ class CaptureService : LifecycleService() {
     val state: StateFlow<CaptureUi> = _state
 
     lateinit var session: Session; private set
+    /** street sweep held by a passenger ([Holding.HAND]) */
+    private val hand get() = session.kind == SessionKind.SWEEP && session.holding == Holding.HAND
     private lateinit var store: SessionStore
     private lateinit var fp: FixProcessor
     // street sweep: a photo each time the scene slid ~30–45 % of the frame (measured on the camera frames)
@@ -274,8 +286,8 @@ class CaptureService : LifecycleService() {
             fp.facadeDistanceM = null      // a place is pinned on its building: no facade estimate from the street
             val pois = store.pois(s.id)
             _state.update { it.copy(poiNumber = pois.size) }
-        } else {
-            // (street sweep: nothing to count before the first photo)
+        } else if (s.holding == Holding.HAND) {
+            _state.update { it.copy(mount = "hand") }   // no mount angle: each photo is measured ([HandBearing])
         }
         _state.update { it.copy(roadData = if (s.road.auto && s.road.ways.isEmpty()) "loading" else "ok") }
         pm = getSystemService(POWER_SERVICE) as PowerManager
@@ -447,12 +459,13 @@ class CaptureService : LifecycleService() {
             gnss = GnssRecorder(lm, store.gnssFile(session.id)).also { it.start(io) }
             watchGps()
         }
-        imu = ImuRecorder(getSystemService(SENSOR_SERVICE) as SensorManager, store.imuFile(session.id), mountEstimator).also { it.start() }
+        imu = ImuRecorder(getSystemService(SENSOR_SERVICE) as SensorManager, store.imuFile(session.id),
+            if (hand) null else mountEstimator).also { it.start() }
         if (session.mode == Mode.PHOTO_AUTO && framesLog == null) framesLog = runCatching {
             val f = store.framesFile(session.id)
             val fresh = !f.exists() || f.length() == 0L
             java.io.FileWriter(f, true).buffered().also {
-                if (fresh) it.write("elapsedNanos,portrait,shift,textured,votes,agreeing,bestCorrelation,sharpness,brightness,speedMps,used,slide,steady\n")
+                if (fresh) it.write("elapsedNanos,portrait,shift,textured,votes,agreeing,bestCorrelation,sharpness,brightness,speedMps,used,slide,steady,bufferW,bufferH\n")
             }
         }.getOrNull()
     }
@@ -556,7 +569,7 @@ class CaptureService : LifecycleService() {
             it.copy(mount = est.side.json, mountYawDeg = est.yawDeg,
                 mountOffsetFrontDeg = if (est.side == CameraSide.RIGHT || est.side == CameraSide.LEFT) est.offsetTowardFrontDeg.roundToInt() else null)
         }
-        val side = when (est.side) { CameraSide.RIGHT -> Side.RIGHT; CameraSide.LEFT -> Side.LEFT; else -> null }
+        val side = when (est.viewSide) { CameraSide.RIGHT -> Side.RIGHT; CameraSide.LEFT -> Side.LEFT; else -> null }
         if (side != null) {
             fp.side = side
             fp.cameraYawSource = est.source
@@ -748,6 +761,11 @@ class CaptureService : LifecycleService() {
         val sharpMedian = frameSharpness.median
         val gyroMedian = gyroRecent.median
         val steady = (sharpMedian == null || fr.sharpness >= 0.9 * sharpMedian) && (gyro == null || gyroMedian == null || gyro <= gyroMedian)
+        // the camera at the road (phone being mounted, taken down, or held low) or, by hand, swinging round: wait
+        val elevation = imu?.cameraElevationDeg()
+        val aimLow = elevation != null && elevation < (if (hand) HAND_MIN_ELEVATION_DEG else MOUNT_MIN_ELEVATION_DEG)
+        val swinging = hand && gyro != null && gyro > HAND_SWING_RADS
+        if (aimLow != _state.value.aimLow || swinging != _state.value.swinging) _state.update { it.copy(aimLow = aimLow, swinging = swinging) }
         frameSharpness.add(fr.sharpness)
         gyro?.let { gyroRecent.add(it) }
         if (!_state.value.running || session.mode != Mode.PHOTO_AUTO) { accountedNs = fr.tNs; return }
@@ -764,6 +782,7 @@ class CaptureService : LifecycleService() {
             else -> { trigger.addSpeed(speed ?: 0.0, dt, coverageM); if (fr.shift != null) "gps-late" else "gps" }
         }
         logFrame(fr, speed, used, steady)
+        if (aimLow || swinging) return   // the slide keeps counting: the photo comes as soon as the aim is back
         maybeShoot(steady, gyro, fr.sharpness, sharpMedian)
     }
 
@@ -773,7 +792,7 @@ class CaptureService : LifecycleService() {
         fun r(v: Double?, k: Int) = v?.let { "%.${k}f".format(java.util.Locale.ROOT, it) } ?: ""
         runCatching {
             w.write("${fr.tNs},${if (fr.portrait) 1 else 0},${r(fr.shift, 5)},${m?.textured ?: ""},${m?.votes ?: ""},${m?.agreeing ?: ""}," +
-                "${r(m?.bestCorrelation, 3)},${r(fr.sharpness, 1)},${r(fr.brightness, 0)},${r(speed, 2)},$used,${r(trigger.progress, 3)},${if (steady) 1 else 0}\n")
+                "${r(m?.bestCorrelation, 3)},${r(fr.sharpness, 1)},${r(fr.brightness, 0)},${r(speed, 2)},$used,${r(trigger.progress, 3)},${if (steady) 1 else 0},${fr.bufferW},${fr.bufferH}\n")
             if (++framesLogged % 150 == 0) w.flush()
         }
     }
@@ -810,7 +829,13 @@ class CaptureService : LifecycleService() {
         val meta = orientationMeta(fp.itemMeta(id, "photo", now, session.sideOfTravel, en).put("trigger", trigger))
         val motion = imu?.snapshot(en)
         motion?.let { meta.put("motion", it) }
-        if (poiId == null) {   // street sweep: the compass at each photo feeds the mount estimate (CompassYaw)
+        if (poiId == null && hand) {
+            // held by a passenger: this photo's own direction, gyro set to north by the compass; the compass alone
+            // until the fusion has enough readings (the first seconds)
+            val fused = motion?.optDouble("fusedAzimuthDeg")?.takeIf { !it.isNaN() }
+            val compass = motion?.optDouble("cameraAzimuthDeg")?.takeIf { !it.isNaN() }
+            HandBearing.apply(meta, fused ?: compass, if (fused != null) "gyroCompass" else "compass", fp.facadeDistanceM)
+        } else if (poiId == null) {   // street sweep on a mount: the compass at each photo feeds the mount estimate (CompassYaw)
             compassYaw.add(motion?.optDouble("cameraAzimuthDeg")?.takeIf { !it.isNaN() }, fp.travelBearing, fp.speedMps)
             checkMount()
         }

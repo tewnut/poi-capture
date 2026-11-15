@@ -66,6 +66,19 @@ data class Settings(
     }
 }
 
+/**
+ * Street sweep: how the phone is held. MOUNT: fixed on the motorbike, the camera keeps one angle to the road (measured
+ * once for the ride). HAND: a passenger holds it and aims, so the angle changes photo by photo and is measured on each
+ * (gyroscope, set to north by the compass: [HeadingFusion]); the passenger may film both sides.
+ */
+enum class Holding(val json: String) {
+    MOUNT("mount"), HAND("hand");
+
+    companion object {
+        fun of(s: String?) = entries.firstOrNull { it.json == s } ?: MOUNT
+    }
+}
+
 /** One capture session (one road, one side). Persisted as session.json. */
 class Session(
     val id: String,
@@ -92,12 +105,13 @@ class Session(
     val email: String = "",          // typed at onboarding, not verified; "" before app 0.8
     var photoRoles: PhotoRoles? = null,  // POI mode: the photo kinds offered (config at the start of the session)
     var name: String? = null,        // "{street} [yymmdd]", given when the session is saved
+    val holding: Holding = Holding.MOUNT,   // street sweep: on a mount or in a passenger's hand ("mount" before 0.15)
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("schema", SCHEMA).put("kind", kind.json).put("createdAt", createdAt)
         .put("startedAt", startedAt.orNull()).put("endedAt", endedAt.orNull())
         .put("contributor", contributor).put("email", email).put("note", note).put("name", name.orNull())
-        .put("vehicle", vehicle.json).put("mode", mode.json)
+        .put("vehicle", vehicle.json).put("mode", mode.json).put("holding", holding.json)
         .put("sideOfTravel", sideOfTravel.json)
         .put("travel", travel?.json.orNull()).put("sideOfWay", sideOfWay?.json.orNull())
         .put("road", road.toJson())
@@ -144,6 +158,7 @@ class Session(
             kind = SessionKind.of(o.optStr("kind")),
             email = o.optString("email"),
             photoRoles = PhotoRoles.fromJson(o.optJSONArray("photoRoles"), "session"),
+            holding = Holding.of(o.optStr("holding")),
         )
     }
 }

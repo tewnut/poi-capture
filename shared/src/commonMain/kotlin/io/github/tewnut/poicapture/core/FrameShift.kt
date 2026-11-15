@@ -43,7 +43,11 @@ object FrameShift {
             val mean = DoubleArray(w)
             for (y in y0 until y1) { val r = y * w; for (x in 0 until w) mean[x] += gray[r + x].toDouble() }
             val n = (y1 - y0).toDouble()
-            val d = DoubleArray(w - 1) { x -> (mean[x + 1] - mean[x]) / n }
+            // smoothed (binomial 1-4-6-4-1) before the difference: the difference alone is mostly pixel noise, and a
+            // tilt of the phone by a fraction of a degree changed it enough to fail the match (simulated on the 15 Nov
+            // photos: band correlation 0.75 -> 0.96 at 0.5 deg roll). Edges dropped where the kernel runs out.
+            val sm = DoubleArray(w - 4) { i -> val x = i + 2; (mean[x - 2] + 4 * mean[x - 1] + 6 * mean[x] + 4 * mean[x + 1] + mean[x + 2]) / 16 }
+            val d = DoubleArray(sm.size - 1) { x -> (sm[x + 1] - sm[x]) / n }
             var s2 = 0.0; for (v in d) s2 += v * v
             out += if (sqrt(s2 / d.size) < 0.3) null else d      // < 0.3 grey level per column on average: no texture
         }

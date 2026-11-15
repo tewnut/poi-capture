@@ -118,8 +118,7 @@ private fun deviceJson(ctx: Context): JSONObject {
 fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val settings = remember { Prefs.settings(ctx) }
-    val email = remember { Prefs.email(ctx) }
-    val contributor = remember { Onboarding.displayName(Prefs.contributor(ctx), email) }
+    val contributor = remember { Prefs.contributorId(ctx) }   // optional: "" = none
     val loc = rememberLocationState()
     val live = loc.live   // a current fix: road, suggestions; the map may show a remembered one
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
@@ -141,6 +140,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     }
     var mode by remember { mutableStateOf(Mode.PHOTO_AUTO) }
     var kind by remember { mutableStateOf(SessionKind.SWEEP) }
+    var holding by remember { mutableStateOf(Prefs.holding(ctx)) }
     var recenter by remember { mutableIntStateOf(0) }
     var nearWays by remember { mutableStateOf<List<Way>?>(null) }
     var roadStatus by remember { mutableStateOf<Int?>(null) }   // string resource of the road data status, null = fine
@@ -188,12 +188,11 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     // spacing and speed as the capture will start: from the type of this road (see CapturePlan.facadeForRoad)
     val plan = CapturePlan.of(CapturePlan.facadeForRoad(currentWay?.highway))
 
-    val emailOk = Onboarding.isEmail(email)
-    // the same rule as the capture: Start only with a GPS fix from the last 5 s (and an email)
-    val ready = emailOk && live != null
+    // the same rule as the capture: Start only with a GPS fix from the last 5 s
+    val ready = live != null
 
     androidx.activity.compose.BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
+    Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
         var info by remember { mutableStateOf(false) }
         ScreenHeader(stringResource(R.string.home_new_session), onBack = onBack) {
             androidx.compose.material3.IconButton(onClick = { info = true }) {
@@ -262,6 +261,16 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                         }
                     }
                     if (kind == SessionKind.SWEEP) {
+                        Text(stringResource(R.string.setup_holding_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            KindCard("🛵 " + stringResource(R.string.setup_holding_mount), stringResource(R.string.setup_holding_mount_sub),
+                                holding == io.github.tewnut.poicapture.core.Holding.MOUNT, Modifier.weight(1f)) {
+                                holding = io.github.tewnut.poicapture.core.Holding.MOUNT; Prefs.saveHolding(ctx, holding) }
+                            KindCard("🙋 " + stringResource(R.string.setup_holding_hand), stringResource(R.string.setup_holding_hand_sub),
+                                holding == io.github.tewnut.poicapture.core.Holding.HAND, Modifier.weight(1f)) {
+                                holding = io.github.tewnut.poicapture.core.Holding.HAND; Prefs.saveHolding(ctx, holding) }
+                        }
+                        if (holding == io.github.tewnut.poicapture.core.Holding.HAND) Hint(stringResource(R.string.setup_holding_hand_hint))
                         Text(stringResource(R.string.setup_mode_short), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(mode == Mode.PHOTO_AUTO, { mode = Mode.PHOTO_AUTO }, { Text(stringResource(R.string.setup_mode_auto)) })
@@ -272,13 +281,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     }
                 }
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    if (emailOk && live == null) Hint(stringResource(R.string.setup_need_gps), Modifier.padding(bottom = 6.dp), Palette.Amber)
-                    if (!emailOk) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Hint(stringResource(R.string.setup_need_email), Modifier.weight(1f), Palette.Amber)
-                            TextButton(onClick = onOpenSettings) { Text(stringResource(R.string.setup_enter_email)) }
-                        }
-                    }
+                    if (live == null) Hint(stringResource(R.string.setup_need_gps), Modifier.padding(bottom = 6.dp), Palette.Amber)
                     Button(
                         enabled = ready,
                         modifier = Modifier.fillMaxWidth().height(56.dp),
@@ -297,8 +300,9 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             val s = Session(id = uid("s_", now), createdAt = iso(now), contributor = contributor, note = "",
                                 vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else mode,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
-                                settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M), device = deviceJson(ctx), kind = kind, email = email,
-                                photoRoles = if (kind == SessionKind.POI && Prefs.askPhotoRole(ctx)) Prefs.photoRoles(ctx) else null)
+                                settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M), device = deviceJson(ctx), kind = kind, email = "",
+                                photoRoles = if (kind == SessionKind.POI && Prefs.askPhotoRole(ctx)) Prefs.photoRoles(ctx) else null,
+                                holding = if (kind == SessionKind.SWEEP) holding else io.github.tewnut.poicapture.core.Holding.MOUNT)
                             CaptureService.store(ctx).create(s)
                             onStart(s.id)
                         },
@@ -312,7 +316,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
 @Composable
 private fun KindCard(title: String, sub: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
     androidx.compose.material3.OutlinedCard(
-        onClick = onClick, modifier = modifier,
+        onClick = onClick, modifier = modifier, shape = RoundedCornerShape(16.dp),
         border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) Palette.Green else Color(0xFFD0D5DD)),
     ) {
         Column(Modifier.fillMaxWidth().background(if (selected) Palette.GreenLight else Color.Transparent).padding(12.dp)) {
@@ -411,18 +415,29 @@ private fun SetupInfo(photoEveryM: Double, maxSpeedKmh: Int, onClose: () -> Unit
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onClose, containerColor = Color.White) {
         Column(Modifier.verticalScroll(rememberScrollState()).navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(stringResource(R.string.setup_info_title), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
-            @Composable fun Item(title: String, text: String) = Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, fontWeight = FontWeight.Bold, color = Palette.Ink)
-                Text(text, color = Palette.Muted, fontSize = 15.sp)
+            Text(stringResource(R.string.setup_info_title), style = ScreenTitle.copy(fontSize = 24.sp))
+            @Composable fun Section(title: String) = Text(title.uppercase(Locale.getDefault()), fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                letterSpacing = 0.8.sp, color = Palette.Green, modifier = Modifier.padding(top = 6.dp))
+            @Composable fun Item(icon: String, title: String, text: String) = Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Box(Modifier.size(40.dp).background(Palette.GreenLight, androidx.compose.foundation.shape.CircleShape), contentAlignment = Alignment.Center) {
+                    Text(icon, fontSize = 19.sp)
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(title, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, color = Palette.Ink)
+                    Text(text, color = Palette.Muted, fontSize = 14.sp, lineHeight = 20.sp)
+                }
             }
-            Item(stringResource(R.string.setup_sweep_title), stringResource(R.string.setup_mount_hint))
-            Item(stringResource(R.string.setup_place_title), stringResource(R.string.setup_poi_hint))
-            Item(stringResource(R.string.setup_facade_title), stringResource(R.string.setup_facade_hint))
-            Item(stringResource(R.string.setup_mode_auto), stringResource(R.string.setup_mode_auto_hint, String.format(Locale.ROOT, "%.1f", photoEveryM), maxSpeedKmh))
-            Item(stringResource(R.string.setup_mode_manual), stringResource(R.string.setup_mode_manual_hint, maxSpeedKmh))
-            Item(stringResource(R.string.setup_you_are_on), stringResource(R.string.setup_road_auto_hint))
-            Item(stringResource(R.string.setup_info_gps_title), stringResource(R.string.setup_info_gps))
+            Section(stringResource(R.string.setup_sweep_title))
+            Item("🛵", stringResource(R.string.setup_holding_mount), stringResource(R.string.setup_mount_hint))
+            Item("🙋", stringResource(R.string.setup_holding_hand), stringResource(R.string.setup_hand_info))
+            Item("📸", stringResource(R.string.setup_mode_auto), stringResource(R.string.setup_mode_auto_hint, String.format(Locale.ROOT, "%.1f", photoEveryM), maxSpeedKmh))
+            Item("🔘", stringResource(R.string.setup_mode_manual), stringResource(R.string.setup_mode_manual_hint, maxSpeedKmh))
+            Item("📏", stringResource(R.string.setup_facade_title), stringResource(R.string.setup_facade_hint))
+            Section(stringResource(R.string.setup_place_title))
+            Item("🏪", stringResource(R.string.setup_place_title), stringResource(R.string.setup_poi_hint))
+            Section(stringResource(R.string.setup_info_both))
+            Item("🛣️", stringResource(R.string.setup_you_are_on), stringResource(R.string.setup_road_auto_hint))
+            Item("🛰️", stringResource(R.string.setup_info_gps_title), stringResource(R.string.setup_info_gps))
         }
     }
 }

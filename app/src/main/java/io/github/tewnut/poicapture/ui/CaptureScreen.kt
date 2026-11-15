@@ -395,8 +395,12 @@ private fun StatusText(ui: CaptureUi, session: Session?, poiMode: Boolean) {
         ShadowText(gps.take(1), color = dot)
         ShadowText(gps.drop(1) + (road?.let { " · $it" } ?: "") + (if (ui.simulated) " · " + stringResource(R.string.capture_simulated) else ""))
     }
+    // the auto photos are waiting: say why
+    if (!poiMode && ui.running && ui.aimLow) ShadowText(stringResource(R.string.capture_aim_low), color = Color(0xFFFF6B6B))
+    else if (!poiMode && ui.running && ui.swinging) ShadowText(stringResource(R.string.capture_hand_swinging), color = Palette.AmberLight)
     if (!poiMode) when (ui.mount) {
         "right", "left" -> {}
+        "hand" -> ShadowText(stringResource(R.string.capture_hand_hint), color = Palette.AmberLight, size = 13.sp, bold = false)
         "front", "back" -> ShadowText(stringResource(if (ui.mount == "front") R.string.capture_mount_front else R.string.capture_mount_back),
             color = Color(0xFFFF6B6B))
         else -> ShadowText(stringResource(R.string.capture_mount_measuring), color = Palette.AmberLight, size = 13.sp, bold = false)

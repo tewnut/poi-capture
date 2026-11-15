@@ -214,8 +214,9 @@ object Remeasure {
         // measured by acceleration: final; a compass-mount yaw is replaced by a later or better estimate
         if (item.optString("cameraBearingSource") == "measured") return null
         // photos of a place (POI mode) are aimed by hand: their compass bearing is kept as is
-        if (item.optString("cameraBearingSource") == "compass" || (item.has("poiId") && !item.isNull("poiId"))) return null
-        val side = when (est.side) { CameraSide.RIGHT -> Side.RIGHT; CameraSide.LEFT -> Side.LEFT; else -> return null }
+        // nor a hand-held sweep photo: measured one by one ([HandBearing])
+        if (item.optString("cameraBearingSource") in setOf("compass", "gyroCompass") || (item.has("poiId") && !item.isNull("poiId"))) return null
+        val side = when (est.viewSide) { CameraSide.RIGHT -> Side.RIGHT; CameraSide.LEFT -> Side.LEFT; else -> return null }
         val tb = if (item.isNull("travelBearing") || !item.has("travelBearing")) null else item.getDouble("travelBearing")
         val cb = tb?.let { Geo.norm360(it + est.yawDeg) }
         val travel = Travel.of(item.optStr("travel"))
@@ -228,6 +229,38 @@ object Remeasure {
         val at = if (item.isNull("lat") || !item.has("lat")) null else LatLon(item.getDouble("lat"), item.getDouble("lon"))
         facadeFields(at, cb, facadeDistanceM)?.let { fj -> for (k in fj.keys()) p.put(k, fj.get(k)) }
         return p
+    }
+}
+
+/**
+ * Hand-held street sweep: each photo gets its own camera direction (measured when it was taken) instead of the ride's
+ * single mount angle, and with it its side of travel (a passenger may film both sides), side of way and facade point.
+ * [bearing] null (no orientation sensor): the item keeps what [FixProcessor.itemMeta] gave it, marked "assumed".
+ */
+object HandBearing {
+    /** Within this many degrees of straight ahead or behind, the side is not clear: the item says "front" / "back". */
+    const val AHEAD_DEG = 20.0
+
+    fun apply(meta: JSONObject, bearing: Double?, source: String, facadeDistanceM: Double?): JSONObject {
+        if (bearing == null) return meta
+        val b = Geo.norm360(bearing)
+        meta.put("cameraBearing", b.round1()).put("cameraBearingSource", source)
+        val tb = if (meta.has("travelBearing") && !meta.isNull("travelBearing")) meta.getDouble("travelBearing") else null
+        if (tb != null) {
+            val yaw = ((b - tb + 540) % 360) - 180
+            meta.put("cameraYawToTravelDeg", yaw.round1())
+            val side = when {
+                yaw >= AHEAD_DEG && yaw <= 180 - AHEAD_DEG -> Side.RIGHT
+                yaw <= -AHEAD_DEG && yaw >= -180 + AHEAD_DEG -> Side.LEFT
+                else -> null
+            }
+            meta.put("sideOfTravel", side?.json ?: if (kotlin.math.abs(yaw) < 90) "front" else "back")
+            val travel = Travel.of(meta.optStr("travel"))
+            meta.put("sideOfWay", if (side != null && travel != null) sideOfWay(side, travel).json else JSONObject.NULL)
+        } else meta.put("cameraYawToTravelDeg", JSONObject.NULL)
+        val at = if (meta.has("lat") && !meta.isNull("lat")) LatLon(meta.getDouble("lat"), meta.getDouble("lon")) else null
+        facadeFields(at, b, facadeDistanceM)?.let { fj -> for (k in fj.keys()) meta.put(k, fj.get(k)) }
+        return meta
     }
 }
 

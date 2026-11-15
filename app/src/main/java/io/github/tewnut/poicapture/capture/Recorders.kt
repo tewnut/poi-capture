@@ -136,6 +136,11 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
     private val acc = ArrayDeque<Pair<Long, Float>>()    // (t, |a| m/s²)
     private val rot = FloatArray(5)
     private var hasRot = false
+    private val game = FloatArray(5)          // game rotation vector: gyroscope + gravity, no compass (no north, no disturbance)
+    private var hasGame = false
+    private var lastFuseNs = 0L
+    /** Hand-held sweep: the camera direction from the gyro, set to north by the compass ([HeadingFusion]). */
+    val heading = io.github.tewnut.poicapture.core.HeadingFusion()
     private var lastFlush = 0L
 
     init { out.write("sensor,elapsedNanos,x,y,z,w\n") }
@@ -143,7 +148,7 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
     fun start() {
         val h = Handler(thread.looper)
         for (type in listOf(Sensor.TYPE_GYROSCOPE, Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_ROTATION_VECTOR,
-            Sensor.TYPE_GRAVITY, Sensor.TYPE_LINEAR_ACCELERATION)) {
+            Sensor.TYPE_GAME_ROTATION_VECTOR, Sensor.TYPE_GRAVITY, Sensor.TYPE_LINEAR_ACCELERATION)) {
             sm.getDefaultSensor(type)?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME, h) }
         }
     }
@@ -163,6 +168,7 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
             Sensor.TYPE_GYROSCOPE -> "g"
             Sensor.TYPE_ACCELEROMETER -> "a"
             Sensor.TYPE_ROTATION_VECTOR -> "r"
+            Sensor.TYPE_GAME_ROTATION_VECTOR -> "q"
             else -> return          // gravity / linear acceleration only feed the estimator (derivable from the log)
         }
         synchronized(this) {
@@ -170,10 +176,18 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
                 "g" -> push(gyro, e.timestamp, sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
                 "a" -> push(acc, e.timestamp, sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
                 "r" -> { for (i in 0 until minOf(5, v.size)) rot[i] = v[i]; hasRot = true }
+                "q" -> { for (i in 0 until minOf(5, v.size)) game[i] = v[i]; hasGame = true }
+            }
+            // 4 times a second: one (compass, gyro) pair of camera azimuths for the hand-held heading
+            if (hasRot && hasGame && e.timestamp - lastFuseNs >= 250_000_000L) {
+                lastFuseNs = e.timestamp
+                val c = cameraAzimuth(rot)
+                val g = cameraAzimuth(game)
+                if (c != null && g != null) heading.add(e.timestamp, c, g)
             }
             runCatching {
                 out.write(String.format(Locale.ROOT, "%s,%d,%.5f,%.5f,%.5f,%s\n", tag, e.timestamp, v[0], v[1], v[2],
-                    if (tag == "r" && v.size > 3) String.format(Locale.ROOT, "%.5f", v[3]) else ""))
+                    if ((tag == "r" || tag == "q") && v.size > 3) String.format(Locale.ROOT, "%.5f", v[3]) else ""))
                 if (e.timestamp - lastFlush > 1_000_000_000L) { out.flush(); lastFlush = e.timestamp }
             }
         }
@@ -206,6 +220,25 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
     fun gyroNow(nowNanos: Long): Double? =
         gyro.filter { nowNanos - it.first <= 100_000_000L }.maxOfOrNull { it.second.toDouble() }
 
+    /** Camera (−device Z) azimuth in a rotation vector's frame, degrees; null when the camera points up or down. */
+    private fun cameraAzimuth(v: FloatArray): Double? {
+        val rm = FloatArray(9)
+        SensorManager.getRotationMatrixFromVector(rm, v)
+        val ce = -rm[2].toDouble()
+        val cn = -rm[5].toDouble()
+        if (ce * ce + cn * cn <= 0.25) return null   // more than 60° from level: the azimuth is meaningless
+        return (Math.toDegrees(kotlin.math.atan2(ce, cn)) + 360) % 360
+    }
+
+    /** Camera elevation now, degrees (0 = level, −90 = straight down); null without an orientation sensor. */
+    @Synchronized
+    fun cameraElevationDeg(): Double? {
+        val v = if (hasGame) game else if (hasRot) rot else return null
+        val rm = FloatArray(9)
+        SensorManager.getRotationMatrixFromVector(rm, v)
+        return Math.toDegrees(kotlin.math.asin((-rm[8].toDouble()).coerceIn(-1.0, 1.0)))
+    }
+
     /** Shake around `nowNanos`: max gyro rate over the last 300 ms, accel std over the last second, device orientation. */
     @Synchronized
     fun snapshot(nowNanos: Long): JSONObject {
@@ -227,9 +260,17 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
             val ce = -rm[2].toDouble()
             val cn = -rm[5].toDouble()
             if (ce * ce + cn * cn > 0.04) o.put("cameraAzimuthDeg", ((Math.toDegrees(kotlin.math.atan2(ce, cn)) + 360) % 360).r3())
+            o.put("cameraElevationDeg", Math.toDegrees(kotlin.math.asin((-rm[8].toDouble()).coerceIn(-1.0, 1.0))).r3())
             o.put("deviceAzimuthDeg", Math.toDegrees(ori[0].toDouble()).r3())
                 .put("devicePitchDeg", Math.toDegrees(ori[1].toDouble()).r3())
                 .put("deviceRollDeg", Math.toDegrees(ori[2].toDouble()).r3())
+        }
+        if (hasGame) cameraAzimuth(game)?.let { g ->
+            o.put("gyroAzimuthDeg", g.r3())   // gyro frame: no north, only differences between photos mean something
+            heading.offset()?.let { off ->
+                o.put("fusedAzimuthDeg", ((g + off.deg + 720) % 360).r3())
+                    .put("fusedOffsetSpreadDeg", off.spreadDeg.r3()).put("fusedSamples", off.samples)
+            }
         }
         return o
     }

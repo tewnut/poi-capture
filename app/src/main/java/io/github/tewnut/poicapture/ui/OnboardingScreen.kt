@@ -88,7 +88,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
     var step by rememberSaveable { mutableStateOf(Step.LANGUAGE) }
     BackHandler(enabled = step.ordinal > 0) { step = Step.entries[step.ordinal - 1] }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
+    Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
         // top bar: back + progress
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (step.ordinal > 0) TextButton(onClick = { step = Step.entries[step.ordinal - 1] }) { Text(stringResource(R.string.onboarding_back)) }
@@ -118,8 +118,8 @@ internal fun StepFrame(title: String, lead: String?, button: String, enabled: Bo
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(title, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Palette.Ink)
-            if (lead != null) Text(lead, fontSize = 16.sp, color = Palette.Muted)
+            Text(title, style = ScreenTitle)
+            if (lead != null) Text(lead, fontSize = 16.sp, lineHeight = 23.sp, color = Palette.Muted)
             content()
         }
         Column(Modifier.padding(horizontal = 20.dp, vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -147,7 +147,8 @@ internal fun IconRow(icon: String, title: String, text: String, trailing: (@Comp
 
 @Composable
 internal fun WhiteCard(content: @Composable () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(1.dp)) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Palette.Line), elevation = CardDefaults.cardElevation(0.dp)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
     }
 }
@@ -170,7 +171,7 @@ private fun LanguageStep(onNext: () -> Unit) {
  * "the phone's language" says which one that is.
  */
 @Composable
-private fun LanguageList() {
+internal fun LanguageList() {
     val ctx = LocalContext.current
     var current by remember { mutableStateOf(AppLanguage.current(ctx)) }
     val phone = remember {
@@ -196,7 +197,7 @@ private fun LanguageList() {
                 RadioButton(selected = selected, onClick = null)
             }
         }
-        if (i < options.lastIndex) HorizontalDivider(color = Palette.House)
+        if (i < options.lastIndex) HorizontalDivider(color = Palette.Line)
     }
 }
 
@@ -217,33 +218,30 @@ private fun WelcomeStep(onNext: () -> Unit) {
 
 // ---------------------------------------------------------------- 2. email
 
+/** The contributor ID the team gave (optional): no email, no name; Continue works with the field empty. */
 @Composable
 private fun EmailStep(ctx: Context, onNext: () -> Unit) {
-    var email by rememberSaveable { mutableStateOf(Prefs.email(ctx)) }
-    var name by rememberSaveable { mutableStateOf(Prefs.contributor(ctx)) }
-    var touched by rememberSaveable { mutableStateOf(false) }
-    val valid = Onboarding.isEmail(email)
-    fun next() {
-        if (!valid) { touched = true; return }
-        Prefs.saveEmail(ctx, email.trim())
-        Prefs.saveContributor(ctx, name.trim())
-        onNext()
-    }
+    var id by rememberSaveable { mutableStateOf(Prefs.contributorId(ctx)) }
+    fun next() { Prefs.saveContributorId(ctx, id); onNext() }
     StepFrame(stringResource(R.string.onboarding_email_title), stringResource(R.string.onboarding_email_lead),
-        stringResource(R.string.onboarding_continue), enabled = email.isNotBlank(), onNext = ::next) {
-        OutlinedTextField(email, { email = it.trim(); if (touched && Onboarding.isEmail(email)) touched = false },
-            label = { Text(stringResource(R.string.onboarding_email_label)) },
-            placeholder = { Text(stringResource(R.string.onboarding_email_placeholder)) }, singleLine = true,
-            isError = touched && !valid,
-            supportingText = { if (touched && !valid) Text(stringResource(R.string.onboarding_email_invalid)) },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-            modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.onboarding_name_label)) },
-            placeholder = { val ph = stringResource(R.string.onboarding_name_placeholder); Text(email.substringBefore('@').ifBlank { ph }) }, singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-            supportingText = { Text(stringResource(R.string.onboarding_name_help)) },
-            modifier = Modifier.fillMaxWidth())
+        stringResource(if (id.isBlank()) R.string.onboarding_id_skip else R.string.onboarding_continue), onNext = ::next) {
+        WhiteCard {
+            IconRow("🪪", stringResource(R.string.onboarding_id_card_title), stringResource(R.string.onboarding_id_card_text))
+            ContributorIdField(id, { id = it }, onDone = ::next)
+        }
     }
+}
+
+/** One line, no autocorrect, upper-case friendly: IDs are often like "HCM-024". */
+@Composable
+internal fun ContributorIdField(value: String, onChange: (String) -> Unit, onDone: () -> Unit = {}) {
+    OutlinedTextField(value, { onChange(it.take(64)) },
+        label = { Text(stringResource(R.string.onboarding_email_label)) },
+        placeholder = { Text(stringResource(R.string.onboarding_email_placeholder)) }, singleLine = true,
+        supportingText = { Text(stringResource(R.string.onboarding_id_help)) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, autoCorrectEnabled = false, imeAction = ImeAction.Done),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onDone() }),
+        shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
 }
 
 // ---------------------------------------------------------------- 3. permissions
@@ -404,8 +402,7 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
 @Composable
 private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
     var settings by remember { mutableStateOf(Prefs.settings(ctx)) }
-    val email = remember { Prefs.email(ctx) }
-    val name = remember { Onboarding.displayName(Prefs.contributor(ctx), email) }
+    val id = remember { Prefs.contributorId(ctx) }
     val missing = perms().filter { p -> !granted(ctx, p.names.first()) && p.icon != "🔔" }
     val packs = remember { RoadSource.packs(ctx).installed().map { it.name } }
     val plan = CapturePlan.of(settings.facadeDistanceM)
@@ -413,11 +410,14 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
     StepFrame(stringResource(R.string.onboarding_ready_title), null, stringResource(R.string.onboarding_ready_button),
         onNext = { Prefs.saveSettings(ctx, settings); onDone() }) {
         WhiteCard {
-            Text(stringResource(R.string.onboarding_mount_title), fontWeight = FontWeight.Bold, color = Palette.Ink)
-            Hint(stringResource(R.string.onboarding_mount_text))
+            Text(stringResource(R.string.onboarding_mount_title), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.Ink)
+            IconRow("🛵", stringResource(R.string.setup_holding_mount), stringResource(R.string.onboarding_mount_text))
+            HorizontalDivider(color = Palette.Line)
+            IconRow("🙋", stringResource(R.string.setup_holding_hand), stringResource(R.string.onboarding_hand_text))
         }
         WhiteCard {
-            Summary(true, stringResource(R.string.onboarding_summary_name, name), email)
+            Summary(true, if (id.isBlank()) stringResource(R.string.onboarding_summary_no_id) else stringResource(R.string.onboarding_summary_name, id),
+                if (id.isBlank()) stringResource(R.string.onboarding_summary_no_id_sub) else null)
             Summary(missing.isEmpty(), if (missing.isEmpty()) stringResource(R.string.onboarding_summary_perms_ok)
                 else stringResource(R.string.onboarding_summary_perms_missing, missing.joinToString(", ") { ctx.getString(it.title).lowercase(Locale.ROOT) }),
                 if (missing.isEmpty()) null else stringResource(R.string.onboarding_summary_perms_fix))

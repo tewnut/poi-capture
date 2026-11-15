@@ -79,10 +79,7 @@ class MainActivity : ComponentActivity() {
             userAgentValue = packageName   // OSM tile usage policy: identify the app
         }
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(
-                primary = Palette.Green, secondary = Color(0xFF35B385),
-                secondaryContainer = Palette.GreenLight, background = Color(0xFFF9FAFB), surface = Color.White,
-            )) { App() }
+            io.github.tewnut.poicapture.ui.PoiTheme { App() }
         }
     }
 
@@ -112,12 +109,15 @@ object Prefs {
     fun settings(ctx: Context): Settings =
         Settings.fromJson(sp(ctx).getString("settings", null)?.let { runCatching { JSONObject(it) }.getOrNull() })
     fun saveSettings(ctx: Context, s: Settings) = sp(ctx).edit().putString("settings", s.toJson().toString()).apply()
-    /** Display name typed by the contributor (may be blank: then the part of the email before @ is used). */
-    fun contributor(ctx: Context): String = sp(ctx).getString("contributor", "") ?: ""
-    fun saveContributor(ctx: Context, v: String) = sp(ctx).edit().putString("contributor", v).apply()
-    /** Email typed at onboarding (format checked, not verified). */
-    fun email(ctx: Context): String = sp(ctx).getString("email", "") ?: ""
-    fun saveEmail(ctx: Context, v: String) = sp(ctx).edit().putString("email", v).apply()
+    /**
+     * The contributor ID the team gave this person (optional, "" = none): goes with each session as `contributor`.
+     * Replaces the email and display name of app <= 0.14 (no personal data is asked any more).
+     */
+    fun contributorId(ctx: Context): String = sp(ctx).getString("contributorId", "") ?: ""
+    fun saveContributorId(ctx: Context, v: String) = sp(ctx).edit().putString("contributorId", cleanId(v))
+        .remove("email").remove("contributor").apply()
+    /** An ID as typed, kept to a sane length on one line. */
+    fun cleanId(v: String): String = v.replace(Regex("\\s+"), " ").trim().take(64)
     fun onboarded(ctx: Context): Boolean = sp(ctx).getBoolean("onboarded", false)
     fun setOnboarded(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("onboarded", v).apply()
 
@@ -129,6 +129,10 @@ object Prefs {
      * Ask the kind of each photo while shooting a place? Off by default (the agent tells a front from a sign or a menu
      * by itself); on when the contributor wants it.
      */
+    /** Street sweep: on a mount or in a passenger's hand, as last chosen. */
+    fun holding(ctx: Context): io.github.tewnut.poicapture.core.Holding =
+        io.github.tewnut.poicapture.core.Holding.of(sp(ctx).getString("holding", null))
+    fun saveHolding(ctx: Context, h: io.github.tewnut.poicapture.core.Holding) = sp(ctx).edit().putString("holding", h.json).apply()
     fun askPhotoRole(ctx: Context): Boolean = sp(ctx).getBoolean("askPhotoRole", false)
     fun setAskPhotoRole(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("askPhotoRole", v).apply()
     fun savePhotoRoles(ctx: Context, r: PhotoRoles?) = sp(ctx).edit().apply {
@@ -147,7 +151,7 @@ object CaptureKeys {
 @Composable
 private fun App() {
     val ctx = LocalContext.current
-    // first run: the onboarding (email, permissions, road data) comes first
+    // first run: the onboarding (contributor ID, permissions, road data) comes first
     var onboarded by rememberSaveable { mutableStateOf(Prefs.onboarded(ctx)) }
     // home (the sessions list) is the root; New session and Settings open on top of it and go back to it
     var screen by rememberSaveable { mutableStateOf("home") }   // home | new | settings
@@ -193,7 +197,7 @@ private fun App() {
     val ms = mapOf
     if (ms != null) {
         BackHandler { mapOf = null }
-        Column(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
+        Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
             io.github.tewnut.poicapture.ui.ScreenHeader(mapTitle.ifBlank { stringResource(R.string.map_title) }, onBack = { mapOf = null },
                 subtitle = stringResource(R.string.map_title).takeIf { mapTitle.isNotBlank() })
             SessionMap(ms, refresh = null, live = false, modifier = Modifier.weight(1f).fillMaxWidth())

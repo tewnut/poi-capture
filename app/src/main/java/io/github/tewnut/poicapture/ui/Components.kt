@@ -71,6 +71,10 @@ object Palette {
     val Muted = Color(0xFF667085)
     val Road = Color(0xFF98A2B3)
     val House = Color(0xFFE4E7EC)
+    /** screen background: a soft green-grey, so white cards stand out without heavy shadows */
+    val Canvas = Color(0xFFF3F6F4)
+    /** hairline borders and dividers */
+    val Line = Color(0xFFE3E8E5)
 }
 
 /**
@@ -315,7 +319,8 @@ fun ScreenHeader(title: String, onBack: (() -> Unit)? = null, subtitle: String? 
                 stringResource(R.string.nav_back), tint = Palette.Ink)
         }
         androidx.compose.foundation.layout.Column(Modifier.weight(1f).padding(start = if (onBack != null) 4.dp else 0.dp)) {
-            Text(title, fontSize = if (onBack != null) 20.sp else 26.sp, fontWeight = FontWeight.Bold, color = Palette.Ink, maxLines = 1,
+            Text(title, style = if (onBack != null) androidx.compose.ui.text.TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                color = Palette.Ink, letterSpacing = (-0.2).sp) else ScreenTitle, maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             if (subtitle != null) Text(subtitle, fontSize = 13.sp, color = Palette.Muted, maxLines = 1)
         }

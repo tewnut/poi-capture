@@ -6,6 +6,15 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -74,7 +83,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private data class SessionRow(val s: Session, val title: String, val photos: Int, val videos: Int, val stats: TrackStats, val bytes: Long,
-                              val relocated: Int, val pois: Int = 0, val marks: Int = 0)
+                              val relocated: Int, val pois: Int = 0, val marks: Int = 0, val previews: List<Preview> = emptyList())
 
 @Composable
 fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> Unit, onOpenSettings: () -> Unit) {
@@ -108,7 +117,8 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                     TrackStats.of(store.trackFile(s.id), s.settings.maxAccuracyM),
                     store.dir(s.id).walkTopDown().filter { it.isFile }.sumOf { it.length() },
                     items.count { (it.has("placeLat") && !it.isNull("placeLat")) || (it.has("relocatedLat") && !it.isNull("relocatedLat")) },
-                    pois.size, if (s.kind == SessionKind.SWEEP) store.marks(s.id).size else 0)
+                    pois.size, if (s.kind == SessionKind.SWEEP) store.marks(s.id).size else 0,
+                    previews(s.kind, items, pois))
             }
         }
     }
@@ -155,7 +165,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
     }
 
     val list = rows
-    Box(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
+    Box(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
     Column(Modifier.fillMaxSize()) {
     ScreenHeader(stringResource(R.string.sessions_title)) {
         IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, stringResource(R.string.nav_settings), tint = Palette.Ink) }
@@ -167,17 +177,24 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
     }
     // room at the bottom so the floating "New session" button never hides the last card
     LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 104.dp)) {
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 104.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (list != null) {
                     val unsent = list.filter { it.s.exportedAt == null && it.photos + it.videos > 0 && active != it.s.id }
-                    Text(
-                        if (unsent.isEmpty()) stringResource(R.string.sessions_none_unsent)
-                        else ctx.plural(R.plurals.sessions_unsent, unsent.size, unsent.size, km(unsent.sumOf { it.stats.distanceM }), mb(unsent.sumOf { it.bytes })),
-                        color = if (unsent.isEmpty()) Palette.Muted else Palette.Amber, fontWeight = FontWeight.SemiBold,
-                    )
-                    Hint(stringResource(R.string.sessions_local_only, mb(store.root.apply { mkdirs() }.usableSpace)))
+                    val free = stringResource(R.string.sessions_local_only, mb(store.root.apply { mkdirs() }.usableSpace))
+                    if (unsent.isEmpty()) Hint(stringResource(R.string.sessions_none_unsent) + " " + free)
+                    else Row(Modifier.fillMaxWidth().background(Palette.AmberLight, RoundedCornerShape(16.dp)).padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.size(36.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) {
+                            Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp), tint = Palette.Amber)
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(ctx.plural(R.plurals.sessions_unsent, unsent.size, unsent.size, km(unsent.sumOf { it.stats.distanceM }), mb(unsent.sumOf { it.bytes })),
+                                color = Palette.Amber, fontWeight = FontWeight.SemiBold)
+                            Text(free, fontSize = 13.sp, color = Palette.Amber.copy(alpha = 0.8f))
+                        }
+                    }
                 }
                 if (msg.isNotEmpty()) Hint(msg, color = if (msgError) Palette.Red else Palette.Green)
             }
@@ -199,7 +216,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
     }
     if (list != null && list.isNotEmpty()) androidx.compose.material3.ExtendedFloatingActionButton(
         onClick = onNew, modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp).height(60.dp),
-        containerColor = Palette.Green, contentColor = Color.White,
+        containerColor = Palette.Green, contentColor = Color.White, shape = RoundedCornerShape(50),
         icon = { Icon(Icons.Filled.Add, null) },
         text = { Text(stringResource(R.string.home_new_session), fontSize = 18.sp, fontWeight = FontWeight.Bold) })
     }
@@ -228,6 +245,10 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
     }
 }
 
+/**
+ * One session: its own photos on top (Place capture: one per place, with the name; street sweep: a strip from along the
+ * ride), then the name, what was recorded and the actions. Tapping the photos opens the map.
+ */
 @Composable
 private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean,
                         onSend: () -> Unit, onMap: () -> Unit, onSave: () -> Unit, onDelete: () -> Unit) {
@@ -235,52 +256,53 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean,
     val s = r.s
     val empty = r.photos + r.videos == 0
     var menu by remember { mutableStateOf(false) }
-    Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(1.dp)) {
-        Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Palette.Line), elevation = CardDefaults.cardElevation(0.dp)) {
+        Hero(r, recording, empty, onClick = if (r.photos > 0 && !recording) onMap else null)
+        Column(Modifier.padding(start = 16.dp, top = 10.dp, bottom = 14.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(r.title, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.Ink, maxLines = 2,
+                Text(r.title, fontWeight = FontWeight.Bold, fontSize = 18.sp, letterSpacing = (-0.2).sp, color = Palette.Ink, maxLines = 2,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 Box {
-                    IconButton(onClick = { menu = true }, enabled = !recording && !busy) { Icon(Icons.Filled.MoreVert, stringResource(R.string.sessions_more)) }
+                    IconButton(onClick = { menu = true }, enabled = !recording && !busy) {
+                        Icon(Icons.Filled.MoreVert, stringResource(R.string.sessions_more), tint = Palette.Muted)
+                    }
                     DropdownMenu(menu, { menu = false }) {
                         if (!empty) DropdownMenuItem({ Text(stringResource(R.string.sessions_save_zip)) }, { menu = false; onSave() })
                         DropdownMenuItem({ Text(stringResource(R.string.sessions_delete_session), color = Palette.Red) }, { menu = false; onDelete() })
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                when {
-                    recording -> Badge(stringResource(R.string.sessions_badge_recording), Palette.Blue, Color(0xFFD1E9FF))
-                    empty -> Badge(stringResource(R.string.sessions_badge_empty), Palette.Muted, Color(0xFFF2F4F7))
-                    s.exportedAt != null -> Badge(stringResource(R.string.sessions_badge_sent), Palette.Green, Palette.GreenLight)
-                    else -> Badge(stringResource(R.string.sessions_badge_not_sent), Palette.Amber, Palette.AmberLight)
-                }
-            }
+            // what was recorded, the numbers that matter first
+            Text(listOfNotNull(
+                if (s.kind == SessionKind.POI) ctx.plural(R.plurals.sessions_places, r.pois) else null,
+                if (s.mode == Mode.VIDEO) ctx.plural(R.plurals.sessions_videos, r.videos) else ctx.plural(R.plurals.sessions_photos, r.photos),
+                km(r.stats.distanceM).takeIf { r.stats.distanceM > 0 },
+                if (r.marks > 0) ctx.plural(R.plurals.sessions_marks, r.marks) else null,
+            ).joinToString("  ·  "), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink.copy(alpha = 0.8f))
             Hint(listOfNotNull(
                 fmt(s.startedAt ?: s.createdAt),
                 duration(ctx, r.stats.durationMs).takeIf { r.stats.durationMs > 0 },
-                km(r.stats.distanceM).takeIf { r.stats.distanceM > 0 },
-                if (s.kind == SessionKind.POI) ctx.plural(R.plurals.sessions_places, r.pois) else null,
-                if (s.mode == Mode.VIDEO) ctx.plural(R.plurals.sessions_videos, r.videos) else ctx.plural(R.plurals.sessions_photos, r.photos),
-                if (r.marks > 0) ctx.plural(R.plurals.sessions_marks, r.marks) else null,
-            ).joinToString(" · "))
-            Hint(listOfNotNull(
-                ctx.getString(if (s.kind == SessionKind.POI) R.string.sessions_kind_poi else R.string.sessions_kind_sweep),
                 if (s.kind == SessionKind.POI) null else ctx.getString(if (s.sideOfTravel == Side.RIGHT) R.string.sessions_side_right else R.string.sessions_side_left)
                     .let { if (s.mount != null) ctx.getString(R.string.sessions_side_measured, it) else it },
                 if (s.kind == SessionKind.POI) null else ctx.getString(when (s.mode) {
                     Mode.PHOTO_AUTO -> R.string.sessions_mode_auto; Mode.PHOTO_MANUAL -> R.string.sessions_mode_manual; Mode.VIDEO -> R.string.sessions_mode_video }),
                 if (r.relocated > 0) ctx.plural(R.plurals.sessions_relocated, r.relocated) else null,
-                if (s.endedAt == null && !recording) ctx.getString(R.string.sessions_interrupted) else null,
-            ).joinToString(" · "), color = if (s.endedAt == null && !recording) Palette.Amber else Palette.Muted)
+            ).joinToString(" · "))
+            if (s.endedAt == null && !recording) Hint(ctx.getString(R.string.sessions_interrupted), color = Palette.Amber)
             if (!empty && !recording) {
-                Row(Modifier.padding(top = 6.dp, end = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.padding(top = 8.dp, end = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val sendText = stringResource(if (busy) R.string.sessions_packing else if (s.exportedAt == null) R.string.sessions_send else R.string.sessions_send_again)
                     if (s.exportedAt == null) {
-                        Button(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(stringResource(if (busy) R.string.sessions_packing else R.string.sessions_send), maxLines = 1) }
+                        Button(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f).height(44.dp)) { SendLabel(sendText) }
                     } else {
-                        OutlinedButton(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f)) { Text(stringResource(if (busy) R.string.sessions_packing else R.string.sessions_send_again), maxLines = 1) }
+                        OutlinedButton(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f).height(44.dp)) { SendLabel(sendText) }
                     }
-                    if (r.photos > 0) OutlinedButton(onClick = onMap, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.sessions_map), maxLines = 1) }
+                    if (r.photos > 0) FilledTonalButton(onClick = onMap, modifier = Modifier.weight(1f).height(44.dp)) {
+                        Icon(Icons.Filled.Place, null, Modifier.size(18.dp))
+                        Box(Modifier.size(8.dp))
+                        Text(stringResource(R.string.sessions_map), maxLines = 1)
+                    }
                 }
             }
         }
@@ -288,9 +310,95 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean,
 }
 
 @Composable
-private fun Badge(text: String, fg: Color, bg: Color) =
-    Text(text, color = fg, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-        modifier = Modifier.background(bg, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 3.dp))
+private fun SendLabel(text: String) {
+    Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp))
+    Box(Modifier.size(8.dp))
+    Text(text, maxLines = 1)
+}
+
+/**
+ * The top of a session card. Place capture: up to three places side by side, each its first photo with its name, "+N"
+ * on the last when there are more. Street sweep: four photos spread over the ride. Video or no photo: the kind's
+ * symbol. The kind and the sent state sit on top.
+ */
+@Composable
+private fun Hero(r: SessionRow, recording: Boolean, empty: Boolean, onClick: (() -> Unit)?) {
+    val poi = r.s.kind == SessionKind.POI
+    val shown = r.previews.take(if (poi) 3 else 4)
+    Box(Modifier.fillMaxWidth().height(if (shown.isEmpty()) 96.dp else 152.dp).background(Palette.House)
+        .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)) {
+        if (shown.isEmpty()) {
+            Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Palette.GreenLight, Palette.Canvas))),
+                contentAlignment = Alignment.Center) {
+                Text(if (r.s.mode == Mode.VIDEO && !poi) "🎬" else if (poi) "📍" else "🛵", fontSize = 36.sp)
+            }
+        } else Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            shown.forEachIndexed { i, p ->
+                Tile(r.s.id, p, Modifier.weight(1f).fillMaxHeight(), label = poi,
+                    more = if (poi && i == shown.lastIndex) r.previews.size - shown.size else 0)
+            }
+        }
+        if (shown.isNotEmpty()) Box(Modifier.fillMaxWidth().height(52.dp)
+            .background(Brush.verticalGradient(listOf(Color(0x59000000), Color.Transparent))))
+        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Pill((if (poi) "📍 " else "🛵 ") + stringResource(if (poi) R.string.sessions_kind_poi else R.string.sessions_kind_sweep),
+                bg = Color(0xF2FFFFFF), fg = Palette.Ink, size = 12.sp, bold = true)
+            Box(Modifier.weight(1f))
+            when {
+                recording -> Pill(stringResource(R.string.sessions_badge_recording), dot = Palette.Red, bg = Color(0xF2FFFFFF), fg = Palette.Blue, size = 12.sp, bold = true)
+                empty -> Pill(stringResource(R.string.sessions_badge_empty), bg = Color(0xF2FFFFFF), fg = Palette.Muted, size = 12.sp, bold = true)
+                r.s.exportedAt != null -> Pill("✓ " + stringResource(R.string.sessions_badge_sent), bg = Palette.GreenLight, fg = Palette.Green, size = 12.sp, bold = true)
+                else -> Pill(stringResource(R.string.sessions_badge_not_sent), dot = Color(0xFFF79009), bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp, bold = true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Tile(sessionId: String, p: Preview, modifier: Modifier, label: Boolean, more: Int) {
+    val img = rememberThumb(sessionId, p.itemId)
+    Box(modifier.background(Color(0xFFD5DBD8))) {
+        androidx.compose.animation.Crossfade(img, label = "thumb") { b ->
+            if (b != null) Image(b, p.label, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+        if (label) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xC0000000))))
+            .padding(start = 8.dp, end = 8.dp, top = 22.dp, bottom = 7.dp)) {
+            Text(p.label ?: stringResource(R.string.sessionmap_place_no_name), color = Color.White.copy(alpha = if (p.label == null) 0.7f else 1f),
+                fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (more > 0) Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
+            Text("+$more", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** A photo to show on a session card, and the place's name for Place capture. */
+private data class Preview(val itemId: String, val label: String? = null)
+
+/**
+ * Place capture: each place's first photo with its name (typed, or read from the sign). Street sweep: four sharp photos
+ * spread over the ride, leaving out the first and last tenth (often taken while mounting the phone).
+ */
+private fun previews(kind: SessionKind, items: List<JSONObject>, pois: List<JSONObject>): List<Preview> {
+    val photos = items.filter { it.optString("kind") == "photo" && it.optString("id").isNotBlank() }
+    if (kind == SessionKind.POI) {
+        val byPoi = photos.groupBy { it.optString("poiId") }
+        return pois.mapNotNull { p ->
+            val first = byPoi[p.optString("id")]?.firstOrNull() ?: return@mapNotNull null
+            val name = p.optJSONObject("fields")?.optString("name")?.takeIf { it.isNotBlank() }
+                ?: p.optJSONObject("read")?.optString("name")?.takeIf { it.isNotBlank() && it != "null" }
+            Preview(first.getString("id"), name)
+        }
+    }
+    val sharp = photos.filter { it.optJSONObject("blur")?.let { b -> b.optBoolean("blurry") || b.optBoolean("unusable") } != true }
+        .ifEmpty { photos }
+    val n = 4
+    if (sharp.size <= n) return sharp.map { Preview(it.getString("id")) }
+    val lo = sharp.size / 10
+    val hi = sharp.size - 1 - sharp.size / 10
+    return (0 until n).map { k -> Preview(sharp[lo + (hi - lo) * k / (n - 1)].getString("id")) }
+}
 
 private fun mb(b: Long) = if (b >= 1L shl 30) String.format(Locale.ROOT, "%.1f GB", b / 1073741824.0)
     else String.format(Locale.ROOT, "%.0f MB", b / 1048576.0)

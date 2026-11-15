@@ -35,10 +35,27 @@ photos and contributes them to the target map through that map's contribution to
 - **Hardware keys**: the volume keys or a Bluetooth remote on the handlebar shoot (Place capture, manual sweep);
   nothing changes in the format.
 
+### App 0.15: hand-held sweeps, contributor ID
+- **`session.holding`** (street sweeps): `"mount"` (phone fixed on the bike; also every session before 0.15) or
+  `"hand"` (a passenger holds it and aims). Hand-held photos each carry their own direction:
+  `cameraBearingSource = "gyroCompass"`: the gyroscope's direction (game rotation vector, no magnetometer) plus the
+  median of (compass − gyro) over the last 2 minutes, which cancels the compass's ±20–40° disturbances on a motorbike
+  while following the gyro's drift; expect about 5–10°. `"compass"` on the first photos, before that median exists
+  (one raw compass reading: weak). Per photo, `cameraYawToTravelDeg` and `sideOfTravel` follow from it, and the
+  passenger may film **both sides**: `sideOfTravel` can change from photo to photo, and is `"front"` / `"back"`
+  within 20° of straight ahead / behind (no side; still usable for triangulation). No mount estimate is made
+  (`session.mount` stays null) and no `_patch` rewrites these items. `motion` has `gyroAzimuthDeg` (gyro frame, only
+  differences between photos mean something), `fusedAzimuthDeg`, `fusedOffsetSpreadDeg`, `fusedSamples` and
+  `cameraElevationDeg`; `imu.csv` has `q` rows (game rotation vector x, y, z, w) to redo the fusion offline.
+- Auto photos wait while the camera points at the road (below −45° mounted, −35° by hand) or, by hand, while the
+  phone turns faster than 1.2 rad/s; the slide keeps counting, so the photo comes as soon as the aim is back.
+- **`session.contributor`** is now the contributor ID the team gave (optional: `""` when none was typed), and
+  `session.email` is always `""`: the app asks for no email or name any more. Group and credit by `contributor`.
+
 ### App 0.8 (renamed POI Capture)
 - The schema id is `poi-capture/3` (same format as `road-capture/3`; accept both). Zips are named
   `poi-capture_<road or "place">_….zip` (earlier: `road-capture_…`, `…_dia-diem_…`).
-- `session.email`: the contributor's email, typed once at onboarding and **not verified**. Use it to group a person's
+- `session.email` (0.8–0.14; `""` from 0.15): the contributor's email, typed once at onboarding and **not verified**. Use it to group a person's
   sessions and to credit them, never as proof of identity. `""` in older sessions. `session.contributor` is the display
   name (the part before `@` when none was given).
 
@@ -76,7 +93,9 @@ photos and contributes them to the target map through that map's contribution to
   up to 30/s): `elapsedNanos` (same clock as photos and imu.csv), `portrait`, `shift` (slide since the previous frame,
   fraction of the frame width; empty = not matched), `textured` / `votes` / `agreeing` (bands with texture / that
   matched / that agreed), `bestCorrelation`, `sharpness`, `brightness`, `speedMps`, `used` (`frame` = the slide came
-  from the image, `gps` / `gps-late` = from the GPS speed, `wait` = stopped), `slide` (since the last photo), `steady`.
+  from the image, `gps` / `gps-late` = from the GPS speed, `wait` = stopped), `slide` (since the last photo), `steady`,
+  `bufferW` / `bufferH` (the camera analysis buffer, from v0.15). Up to v0.14 frames were downscaled by picking pixels
+  (aliasing): `sharpness` there is not comparable with later versions, and most frames fell back to `gps`.
   A diagnostic for the photo timing; nothing else depends on it.
 - **Photo size** (from v0.14): at least 2560 px on the long side; a camera without that exact size gives the next
   size up (OPPO Reno6 Z: 3264×1840). v0.13 photos on such phones are 1920×1088.
@@ -193,7 +212,7 @@ videos/<id>.mp4      video segments (H.264, ≈1080p, no audio, landscape)
   "kind": "sweep" | "poi",
   "exportedAt": "2026-11-08T10:18:00Z",
   "session": {
-    "id": "s_…", "schema": "poi-capture/3", "kind": "sweep" | "poi", "contributor": "…", "email": "…", "note": "…",
+    "id": "s_…", "schema": "poi-capture/3", "kind": "sweep" | "poi", "contributor": "…", "email": "", "note": "…", "holding": "mount" | "hand",
     "vehicle": "unspecified" | "motorbike" | "car",
     "mode": "photo-auto" | "photo-manual" | "video",
     "createdAt": "ISO", "startedAt": "ISO", "endedAt": "ISO" | null,   // null = cut off (crash, dead battery)
@@ -228,7 +247,7 @@ videos/<id>.mp4      video segments (H.264, ≈1080p, no audio, landscape)
       "travelBearing": 90.0,             // direction of travel, ° from north
       "cameraBearing": 180.0,            // travel bearing + cameraYawToTravelDeg
       "cameraYawToTravelDeg": 90.0,
-      "cameraBearingSource": "measured" | "assumed" | "compass",
+      "cameraBearingSource": "measured" | "compassMount" | "assumed" | "compass" | "gyroCompass",
       "facadeLat": 21.02845, "facadeLon": 105.80512, "facadeDistanceM": 6, "facadeSource": "roadType", "facadeRoadType": "residential",
       "wayId": 123456, "roadName": "Phố Tràng Tiền", "distanceToRoadM": 3.2, "segmentBearing": 90,   // null without road data
       "travel": "forward", "sideOfTravel": "right", "sideOfWay": "right",   // per item: a U-turn flips the side

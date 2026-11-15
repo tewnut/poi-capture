@@ -1,6 +1,11 @@
 package io.github.tewnut.poicapture.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -44,18 +49,18 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 
-/** Settings (first filled in by the onboarding): who records, language, facade distance, road data, advanced options. */
+/**
+ * Settings (first filled in by the onboarding): the contributor ID, language, offline road data, and folded away the
+ * advanced options (mount angle, photo kinds). Every change is saved as it is made.
+ */
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
     val ctx = LocalContext.current
-    var name by remember { mutableStateOf(Prefs.contributor(ctx)) }
-    var email by remember { mutableStateOf(Prefs.email(ctx)) }
+    var id by remember { mutableStateOf(Prefs.contributorId(ctx)) }
     var settings by remember { mutableStateOf(Prefs.settings(ctx)) }
-    val emailOk = Onboarding.isEmail(email)
 
     fun save() {
-        Prefs.saveContributor(ctx, name.trim())
-        if (emailOk) Prefs.saveEmail(ctx, email.trim())
+        Prefs.saveContributorId(ctx, id)
         Prefs.saveSettings(ctx, settings)
     }
 
@@ -63,32 +68,23 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
     fun leave() { save(); onBack() }
     androidx.activity.compose.BackHandler { leave() }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding()) {
+    Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
     ScreenHeader(stringResource(R.string.settings_title), onBack = ::leave)
-    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
-        SettingsCard(stringResource(R.string.settings_contributor)) {
-            OutlinedTextField(email, { email = it.trim(); save() }, label = { Text(stringResource(R.string.settings_email)) }, singleLine = true,
-                isError = !emailOk,
-                supportingText = { Text(stringResource(if (emailOk) R.string.settings_email_ok else R.string.settings_email_bad)) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-                modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(name, { name = it; save() }, label = { Text(stringResource(R.string.settings_display_name)) }, singleLine = true,
-                placeholder = { Text(email.substringBefore('@')) },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), modifier = Modifier.fillMaxWidth())
+        SettingsCard("🪪", stringResource(R.string.settings_contributor), stringResource(R.string.settings_email_ok)) {
+            ContributorIdField(id, { id = it; save() })
         }
 
-        SettingsCard(stringResource(R.string.language_title)) { LanguageRow() }
+        SettingsCard("🌐", stringResource(R.string.language_title)) { LanguageList() }
 
-        SettingsCard(stringResource(R.string.settings_road_data)) { RoadPacksCard() }
+        SettingsCard("🗺️", stringResource(R.string.settings_road_data)) { RoadPacksCard() }
 
         var advanced by remember { mutableStateOf(false) }
-        androidx.compose.material3.TextButton(onClick = { advanced = !advanced }) {
-            Text(stringResource(if (advanced) R.string.settings_advanced_hide else R.string.settings_advanced_show))
-        }
-        if (advanced) SettingsCard(stringResource(R.string.settings_mount_title)) {
-            Hint(stringResource(R.string.settings_mount_hint))
+        SettingsRow("⚙️", stringResource(R.string.settings_advanced), stringResource(R.string.settings_advanced_sub),
+            trailing = if (advanced) "▴" else "▾") { advanced = !advanced }
+        if (advanced) SettingsCard("🛵", stringResource(R.string.settings_mount_title), stringResource(R.string.settings_mount_hint)) {
             val deg = settings.mountOffsetDeg.toInt()
             Stepper(if (deg == 0) "0°" else "${kotlin.math.abs(deg)}°",
                 onMinus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg - 5).coerceAtLeast(-45.0)); save() },
@@ -98,19 +94,21 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
                 minus = "−5°", plus = "+5°")
         }
 
-        if (advanced) SettingsCard(stringResource(R.string.settings_roles_title)) {
+        if (advanced) SettingsCard("🏷️", stringResource(R.string.settings_roles_title), stringResource(R.string.settings_roles_hint)) {
             var ask by remember { mutableStateOf(Prefs.askPhotoRole(ctx)) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.settings_roles_ask), modifier = Modifier.weight(1f), color = Palette.Ink)
                 androidx.compose.material3.Switch(ask, { ask = it; Prefs.setAskPhotoRole(ctx, it) })
             }
-            Hint(stringResource(R.string.settings_roles_hint))
             if (ask) PhotoRolesCard()
         }
 
-        androidx.compose.material3.TextButton(onClick = onReplayOnboarding, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-            Text(stringResource(R.string.settings_replay_onboarding))
-        }
+        SettingsRow("📖", stringResource(R.string.settings_replay_onboarding), stringResource(R.string.settings_replay_sub),
+            trailing = "›", onClick = onReplayOnboarding)
+
+        val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
+        if (version != null) Hint(stringResource(R.string.app_name) + " " + version,
+            Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp))
     }
     }
 }
@@ -144,12 +142,39 @@ internal fun Context.findActivity(): Activity? {
     return null
 }
 
+/** A settings section: an icon in a green circle, the title (and a line under it), then its controls. */
 @Composable
-private fun SettingsCard(title: String, content: @Composable () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(1.dp)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, fontWeight = FontWeight.Bold, color = Palette.Ink)
+private fun SettingsCard(icon: String, title: String, sub: String? = null, content: @Composable () -> Unit) {
+    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Palette.Line), elevation = CardDefaults.cardElevation(0.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SectionHead(icon, title, sub)
             content()
+        }
+    }
+}
+
+/** A tappable settings line (opens or folds something): icon, title, one line under it, a mark on the right. */
+@Composable
+private fun SettingsRow(icon: String, title: String, sub: String, trailing: String, onClick: () -> Unit) {
+    Card(onClick = onClick, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White),
+        border = BorderStroke(1.dp, Palette.Line), elevation = CardDefaults.cardElevation(0.dp)) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.weight(1f)) { SectionHead(icon, title, sub) }
+            Text(trailing, fontSize = 22.sp, color = Palette.Muted, modifier = Modifier.padding(start = 8.dp))
+        }
+    }
+}
+
+@Composable
+private fun SectionHead(icon: String, title: String, sub: String?) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.size(40.dp).background(Palette.GreenLight, CircleShape), contentAlignment = Alignment.Center) {
+            Text(icon, fontSize = 18.sp)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
+            if (sub != null) Hint(sub)
         }
     }
 }

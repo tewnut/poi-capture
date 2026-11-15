@@ -76,7 +76,7 @@
     <string name="onboarding_welcome_button">Bắt đầu thiết lập</string>
     <string name="onboarding_welcome_time">Thiết lập một lần, khoảng 1 phút.</string>
     <string name="onboarding_sweep_title">Quét đường</string>
-    <string name="onboarding_sweep_text">Gắn điện thoại lên xe, chạy dọc phố: app tự chụp dãy nhà bên phải, bạn không phải chạm máy.</string>
+    <string name="onboarding_sweep_text">Chạy xe dọc phố với điện thoại gắn trên xe, hoặc người ngồi sau cầm: app tự chụp dãy cửa hàng.</string>
     <string name="onboarding_place_title">Chụp địa điểm</string>
     <string name="onboarding_place_text">Dừng ở từng cửa hàng: chụp mặt tiền, biển hiệu, bên trong, rồi ghim lên đúng tòa nhà.</string>
     <string name="onboarding_position_title">Vị trí đặt vào tòa nhà</string>
@@ -84,10 +84,10 @@
     <string name="onboarding_offline_title">Không cần mạng khi ghi</string>
     <string name="onboarding_offline_text">Ảnh lưu trên máy cho đến khi bạn gửi file (Zalo, Drive, email…) hoặc lưu lại.</string>
 
-    <string name="onboarding_email_title">Email của bạn</string>
-    <string name="onboarding_email_lead">Đi kèm mỗi phiên bạn gửi, để ghi công và gộp các phiên của bạn. Không cần xác minh, app không gửi thư.</string>
-    <string name="onboarding_email_label">Email</string>
-    <string name="onboarding_email_placeholder">ten@gmail.com</string>
+    <string name="onboarding_email_title">Mã cộng tác viên</string>
+    <string name="onboarding_email_lead">Nếu nhóm đã cấp cho bạn mã cộng tác viên, hãy nhập ở đây. Mã đi kèm mỗi phiên bạn gửi để ghi công cho bạn.</string>
+    <string name="onboarding_email_label">Mã cộng tác viên (không bắt buộc)</string>
+    <string name="onboarding_email_placeholder">VD: HCM-024</string>
     <string name="onboarding_email_invalid">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
     <string name="onboarding_name_label">Tên hiển thị (không bắt buộc)</string>
     <string name="onboarding_name_placeholder">Nguyễn Văn A</string>
@@ -127,9 +127,9 @@
 
     <string name="onboarding_ready_title">Sẵn sàng!</string>
     <string name="onboarding_ready_button">Bắt đầu ghi</string>
-    <string name="onboarding_mount_title">Gắn máy</string>
-    <string name="onboarding_mount_text">• Điện thoại kẹp chắc trên giá xe, tốt nhất nằm ngang (thấy rộng hơn).\n• Camera sau nhìn sang dãy nhà bên phải.\n• Vài lần tăng tốc / phanh đầu tiên, app tự đo hướng camera.</string>
-    <string name="onboarding_summary_name">Người ghi: %1$s</string>
+    <string name="onboarding_mount_title">Hai cách quét đường</string>
+    <string name="onboarding_mount_text">Kẹp chắc điện thoại, tốt nhất nằm ngang, camera sau nhìn sang dãy nhà. App tự đo hướng camera trong vài lần tăng tốc / phanh đầu tiên.</string>
+    <string name="onboarding_summary_name">Mã cộng tác viên: %1$s</string>
     <string name="onboarding_summary_perms_ok">Đã cấp quyền camera và vị trí</string>
     <string name="onboarding_summary_perms_missing">Còn thiếu quyền %1$s</string>
     <string name="onboarding_summary_perms_fix">Bật ở Cài đặt trước khi ghi.</string>
@@ -167,7 +167,7 @@
     <string name="setup_mode_manual">Bấm tay</string>
     <string name="setup_mode_auto_hint">Chụp mỗi khi cảnh phố trôi ~⅓ khung hình (cách nhau ≤ %1$s m, mỗi biển hiệu có trong ≥ 2 ảnh) · chạy tối đa %2$d km/h</string>
     <string name="setup_mode_manual_hint">Chụp bằng nút âm lượng hoặc nút bấm Bluetooth trên tay lái, không cần chạm màn hình · chạy tối đa %1$d km/h</string>
-    <string name="setup_mount_hint">Gắn máy chắc (nằm ngang thấy rộng hơn), camera nhìn sang dãy nhà cần ghi. App tự nhận bên (phải/trái) khi bạn chạy. Bấm ★ Đánh dấu khi đi qua cửa hàng đáng chú ý.</string>
+    <string name="setup_mount_hint">Gắn máy chắc (nằm ngang thấy rộng hơn), camera nhìn sang dãy nhà cần ghi. App tự đo hướng camera và nhận bên (phải/trái) khi bạn chạy. Bấm ★ Đánh dấu khi đi qua cửa hàng đáng chú ý.</string>
     <string name="setup_enter_email">Nhập email</string>
     <string name="setup_session_running">Đang có một phiên ghi chưa kết thúc.</string>
     <string name="setup_start">Bắt đầu</string>
@@ -385,16 +385,16 @@
 
     <!-- Settings -->
     <string name="settings_title">Cài đặt</string>
-    <string name="settings_contributor">Người ghi</string>
+    <string name="settings_contributor">Mã cộng tác viên</string>
     <string name="settings_email">Email</string>
-    <string name="settings_email_ok">Không cần xác minh. Dùng để ghi công và gộp các phiên ghi của bạn.</string>
+    <string name="settings_email_ok">Không bắt buộc. Mã do nhóm cấp, đi kèm mỗi phiên bạn gửi.</string>
     <string name="settings_email_bad">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
     <string name="settings_display_name">Tên hiển thị (không bắt buộc)</string>
     <string name="settings_road_data">Dữ liệu đường offline</string>
     <string name="settings_advanced_hide">▾ Ẩn cài đặt nâng cao</string>
     <string name="settings_advanced_show">▸ Cài đặt nâng cao (góc giá đỡ, loại ảnh)</string>
     <string name="settings_mount_title">Góc chếch giá đỡ (chỉnh tay)</string>
-    <string name="settings_mount_hint">App tự đo hướng camera khi bạn tăng tốc / phanh vài lần. Chỉ chỉnh ở đây nếu app báo chưa đo được: camera hơi chếch về phía trước hay phía sau bao nhiêu độ.</string>
+    <string name="settings_mount_hint">Chỉ dùng khi gắn máy trên xe. App tự đo hướng camera khi bạn tăng tốc / phanh vài lần; chỉ chỉnh ở đây nếu app báo chưa đo được: camera chếch về phía trước hay phía sau bao nhiêu độ.</string>
     <string name="settings_mount_forward">chếch về phía trước</string>
     <string name="settings_mount_backward">chếch về phía sau</string>
     <string name="settings_mount_square">vuông góc với đường</string>
@@ -449,6 +449,15 @@
     <string name="setup_sweep_sub">Chạy xe · tự chụp</string>
     <string name="setup_place_sub">Dừng ở từng cửa hàng</string>
     <string name="setup_mode_short">Cách ghi</string>
+    <string name="setup_holding_title">Điện thoại</string>
+    <string name="setup_holding_mount">Gắn trên xe</string>
+    <string name="setup_holding_mount_sub">Kẹp cố định trên xe</string>
+    <string name="setup_holding_hand">Cầm tay</string>
+    <string name="setup_holding_hand_sub">Người ngồi sau cầm</string>
+    <string name="setup_holding_hand_hint">Cầm ngang điện thoại, hướng vào dãy cửa hàng, bên nào cũng được. Mỗi ảnh có hướng riêng nên xoay máy không sao; ảnh sẽ chờ khi bạn lia máy nhanh.</string>
+    <string name="capture_hand_hint">Cầm tay: cầm ngang, hướng vào cửa hàng</string>
+    <string name="capture_hand_swinging">Giữ yên máy một chút…</string>
+    <string name="capture_aim_low">Camera đang chĩa xuống đường: nâng lên phía cửa hàng</string>
     <string name="setup_plan_auto_short">≤ %1$s m/ảnh · ≤ %2$d km/h</string>
     <string name="setup_plan_short">≤ %1$d km/h</string>
     <string name="setup_need_gps">Đang chờ GPS…</string>
@@ -486,4 +495,16 @@
     <string name="sessionmap_place_no_name">Chưa có tên</string>
     <string name="sessionmap_edit_texts">Sửa tên và chữ</string>
     <string name="sessionmap_save">Lưu</string>
+    <string name="onboarding_id_help">Không bắt buộc. Có thể thêm hoặc đổi sau trong Cài đặt.</string>
+    <string name="onboarding_id_card_title">Không cần email hay tên</string>
+    <string name="onboarding_id_card_text">Chỉ mã này được gửi kèm các phiên. Chưa có mã? Để trống.</string>
+    <string name="onboarding_id_skip">Bỏ qua</string>
+    <string name="onboarding_summary_no_id">Chưa có mã cộng tác viên</string>
+    <string name="onboarding_summary_no_id_sub">Không bắt buộc: thêm trong Cài đặt khi nhóm cấp mã.</string>
+    <string name="onboarding_hand_text">Người ngồi sau cầm ngang điện thoại, hướng vào dãy cửa hàng, bên nào cũng được. Mỗi ảnh có hướng riêng; ảnh sẽ chờ khi máy đang lia hoặc chĩa xuống đường.</string>
+    <string name="setup_hand_info">Người ngồi sau cầm ngang điện thoại, hướng vào dãy cửa hàng, bên nào của phố cũng được. Mỗi ảnh có hướng riêng từ con quay và la bàn nên xoay máy không sao; ảnh tự động sẽ chờ khi máy lia nhanh hoặc chĩa xuống đường.</string>
+    <string name="setup_info_both">Chung</string>
+    <string name="settings_advanced">Nâng cao</string>
+    <string name="settings_advanced_sub">Góc giá đỡ, loại ảnh</string>
+    <string name="settings_replay_sub">Ngôn ngữ, quyền, dữ liệu đường và hai cách quét đường</string>
 </resources>

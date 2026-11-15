@@ -509,19 +509,13 @@ private fun PhotoViewer(sessionId: String, pins: List<PhotoPin>, start: Int, onC
     }
 }
 
-/** A photo from the session, decoded off the main thread ([sample] = 1 full size, 2 half, …). */
+/**
+ * A photo from the session, decoded off the main thread and turned upright ([sample] = 1 full size, 2 half, …; about
+ * 4000 / [sample] px on the long side). Before, portrait shots showed on their side: CameraX keeps the sensor's
+ * landscape pixels and only tags the rotation.
+ */
 @Composable
-private fun rememberPhoto(sessionId: String, id: String, sample: Int): ImageBitmap? {
-    val ctx = LocalContext.current
-    var b by remember(id, sample) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(id, sample) {
-        b = withContext(Dispatchers.IO) {
-            val f = CaptureService.store(ctx).photoFile(sessionId, id)
-            runCatching { BitmapFactory.decodeFile(f.path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap() }.getOrNull()
-        }
-    }
-    return b
-}
+private fun rememberPhoto(sessionId: String, id: String, sample: Int): ImageBitmap? = rememberThumb(sessionId, id, maxPx = 4096 / sample)
 
 private fun time(ms: Long) = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(ms))
 

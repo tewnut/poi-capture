@@ -27,7 +27,9 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
     /** [shift]: fraction of the frame width, null when the frames could not tell (dark, blank, blurred, first frame). */
     data class Frame(val tNs: Long, val shift: Double?, val sharpness: Double, val brightness: Double,
                      /** how the frame matched its reference (for frames.csv); null = it became the first reference */
-                     val match: io.github.tewnut.poicapture.core.FrameShift.Match? = null, val portrait: Boolean = false)
+                     val match: io.github.tewnut.poicapture.core.FrameShift.Match? = null, val portrait: Boolean = false,
+                     /** the camera buffer the frame was read from (for frames.csv) */
+                     val bufferW: Int = 0, val bufferH: Int = 0)
 
     private val thread = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
@@ -37,6 +39,8 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
     private val tracker = SlideTracker()
     private var prevPortrait = false
     private var gray = IntArray(0)
+    private var row = ByteArray(0)
+    private var acc = IntArray(0)
 
     fun analysis(): ImageAnalysis = ImageAnalysis.Builder()
         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -58,18 +62,30 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
         val step = if (up) maxOf(1, img.height / 360) else maxOf(1, img.width / 320)
         val gw = img.width / step; val gh = img.height / step
         if (gray.size != gw * gh) gray = IntArray(gw * gh)
-        // grayscale at ~320 px, turned so that the photo's horizontal runs along x (sensor buffers are landscape)
+        // grayscale at ~320 px, turned so that the photo's horizontal runs along x (sensor buffers are landscape).
+        // Each pixel is the mean of its step x step block, not one pixel picked out of it: picking aliases, so fine
+        // texture (tiles, grilles, lettering) flickered from frame to frame as the scene slid by a fraction of a
+        // block, and two frames 33 ms apart matched in only 15-28 % of cases (15 Nov rides, frames.csv).
         val w = if (up) gh else gw
         val h = if (up) gw else gh
+        if (row.size < img.width) row = ByteArray(img.width)
+        if (acc.size != gw) acc = IntArray(gw)
+        val area = step * step
         var sum = 0L; var n = 0
         for (r in 0 until gh) {
-            val row = r * step * stride
+            java.util.Arrays.fill(acc, 0)
+            for (k in 0 until step) {
+                buf.position((r * step + k) * stride)
+                buf.get(row, 0, minOf(img.width, buf.remaining()))
+                for (c in 0 until gw) { var s = 0; val x0 = c * step; for (j in 0 until step) s += row[x0 + j].toInt() and 0xFF; acc[c] += s }
+            }
             for (c in 0 until gw) {
-                val v = buf.get(row + c * step).toInt() and 0xFF
+                val v = acc[c] / area
                 if (up) gray[c * w + r] = v else gray[r * w + c] = v
                 if (r in gh / 4 until gh * 3 / 4 && c in gw / 4 until gw * 3 / 4) { sum += v; n++ }
             }
         }
+        buf.rewind()
         val brightness = if (n > 0) sum.toDouble() / n else 0.0
         val profiles = FrameShift.profiles(gray, w, h)
         if (prevPortrait != up) tracker.reset()
@@ -77,6 +93,6 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
         val shift = tracker.next(profiles)
         val match = tracker.last
         val sharp = BlurCheck.sharpness(gray, w, h)
-        main.post { onBrightness(brightness); onFrame(Frame(t, shift, sharp, brightness, match, up)) }
+        main.post { onBrightness(brightness); onFrame(Frame(t, shift, sharp, brightness, match, up, img.width, img.height)) }
     }
 }

@@ -104,4 +104,63 @@ class PlanFacadeTest {
         repeat(40) { bad.add(rnd.nextDouble() * 360, 63.0, 3.3) }
         assertNull(bad.estimate())
     }
+
+    @Test fun diagonalMountIsStillApplied() {
+        // Nguyen Co Thach, 15 Nov: travel ~150 deg, camera ~188 deg: 38 deg right of travel, classed "front"
+        val c = CompassYaw()
+        repeat(20) { c.add(188.0 + (it % 5 - 2) * 3, 150.0, 2.4) }
+        val e = c.estimate()!!
+        assertEquals(CameraSide.FRONT, e.side)
+        assertEquals(CameraSide.RIGHT, e.viewSide)
+        val item = JSONObject().put("cameraBearingSource", "assumed").put("travelBearing", 150.0).put("lat", 10.772).put("lon", 106.7237)
+        val p = Remeasure.patch(item, e, 14.0)!!
+        assertEquals(188.0, p.getDouble("cameraBearing"), 2.0)
+        assertEquals("right", p.getString("sideOfTravel"))
+        // straight ahead: not a side camera
+        assertNull(MountEstimate(5.0, CameraSide.FRONT, 0.9, 20).viewSide)
+    }
+
+    @Test fun handHeadingFollowsTheGyroAndTakesNorthFromTheCompass() {
+        // a passenger swings the phone between 40° and 140° from travel; the gyro frame is 73° off north and drifts
+        // 3°/min; the compass is off by up to ±35° at random (motorbike)
+        val rnd = java.util.Random(7)
+        val h = HeadingFusion()
+        var worst = 0.0
+        for (k in 0 until 4 * 180) {                                   // 3 minutes, 4 pairs a second
+            val t = k * 250_000_000L
+            val trueAz = (120.0 + 50 * kotlin.math.sin(k / 15.0) + 360) % 360
+            val drift = 3.0 * t / 60e9
+            val gyroAz = (trueAz - 73 + drift + 360) % 360
+            val compassAz = trueAz + (rnd.nextDouble() * 70 - 35)
+            h.add(t, compassAz, gyroAz)
+            if (k > 40) {
+                val est = h.bearing(gyroAz)!!
+                worst = maxOf(worst, kotlin.math.abs(((est - trueAz + 540) % 360) - 180))
+            }
+        }
+        assertTrue("worst error $worst", worst < 10)
+        // a compass that says nothing useful: no offset rather than a wrong one
+        val bad = HeadingFusion()
+        repeat(40) { bad.add(it * 250_000_000L, rnd.nextDouble() * 360, 10.0) }
+        assertNull(bad.offset())
+    }
+
+    @Test fun handBearingGivesEachPhotoItsOwnSide() {
+        fun item() = JSONObject().put("lat", 10.78).put("lon", 106.74).put("travelBearing", 0.0).put("travel", "forward")
+            .put("cameraBearing", 90.0).put("sideOfTravel", "right").put("cameraBearingSource", "assumed")
+        val right = HandBearing.apply(item(), 70.0, "gyroCompass", 10.0)
+        assertEquals("right", right.getString("sideOfTravel"))
+        assertEquals(70.0, right.getDouble("cameraBearing"), 0.01)
+        assertEquals("gyroCompass", right.getString("cameraBearingSource"))
+        assertTrue(right.getDouble("facadeLon") > 106.74)            // the shop is east of the camera
+        val left = HandBearing.apply(item(), 260.0, "gyroCompass", 10.0)
+        assertEquals("left", left.getString("sideOfTravel"))
+        assertEquals(-100.0, left.getDouble("cameraYawToTravelDeg"), 0.01)
+        assertEquals("front", HandBearing.apply(item(), 10.0, "compass", 10.0).getString("sideOfTravel"))
+        // no direction at all: the item is left as it was
+        assertEquals("assumed", HandBearing.apply(item(), null, "compass", 10.0).getString("cameraBearingSource"))
+        // a mount estimate never overwrites a hand-held photo
+        val est = MountEstimate(50.0, CameraSide.RIGHT, 0.9, 30, "compassMount")
+        assertNull(Remeasure.patch(right, est, 10.0))
+    }
 }

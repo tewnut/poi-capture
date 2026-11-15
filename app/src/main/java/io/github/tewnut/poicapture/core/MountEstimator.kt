@@ -27,6 +27,18 @@ data class MountEstimate(val yawDeg: Double, val side: CameraSide, val consisten
                          /** "measured" (acceleration, [MountEstimator]) or "compassMount" ([CompassYaw]) */
                          val source: String = "measured") {
     /** Same convention as Settings.mountOffsetDeg: degrees the camera is turned toward the front. */
+    /**
+     * The side of the road whose shop fronts the camera sees, also when it is turned diagonally (20-45 deg off the
+     * travel direction, [side] = FRONT): 15 Nov, Nguyen Co Thach, the phone looked 38 deg right of travel and the
+     * estimate was dropped as "front", so every photo kept the assumed 90 deg. Null only for a camera looking
+     * (nearly) straight ahead or back.
+     */
+    val viewSide: CameraSide? get() = when {
+        yawDeg in 20.0..160.0 -> CameraSide.RIGHT
+        yawDeg in -160.0..-20.0 -> CameraSide.LEFT
+        else -> null
+    }
+
     val offsetTowardFrontDeg: Double get() = when (side) {
         CameraSide.RIGHT -> 90 - yawDeg
         CameraSide.LEFT -> yawDeg + 90
@@ -37,6 +49,44 @@ data class MountEstimate(val yawDeg: Double, val side: CameraSide, val consisten
         .put("yawToTravelDeg", (yawDeg * 10).let { Math.round(it) / 10.0 })
         .put("side", side.json).put("consistency", (consistency * 100).let { Math.round(it) / 100.0 })
         .put("events", events).put("source", source)
+}
+
+/**
+ * The camera's direction photo by photo when the phone is held by hand (a passenger aiming at the shops). The compass
+ * alone is off by 20–40° on a motorbike (engine, steel, passing trucks); the gyroscope follows every turn of the hand
+ * to a degree or two but has no north and drifts a few degrees a minute. Together: the gyro direction ("game rotation
+ * vector", gyroscope + gravity only) plus the median of (compass − gyro) over the last [windowNs]. The difference is the
+ * same whichever way the phone points, so its median cancels the compass's disturbances while the window follows the
+ * gyro's drift.
+ */
+class HeadingFusion(private val windowNs: Long = 120_000_000_000L, private val minSamples: Int = 8,
+                    private val maxSpreadDeg: Double = 40.0) {
+    private val samples = ArrayDeque<Pair<Long, Double>>()
+
+    /** One pair of camera azimuths (degrees) at [tNs]: from the compass-based and the gyro-only rotation. */
+    @Synchronized fun add(tNs: Long, compassDeg: Double, gyroDeg: Double) {
+        samples.addLast(tNs to ((compassDeg - gyroDeg + 540) % 360) - 180)
+        while (samples.isNotEmpty() && tNs - samples.first().first > windowNs) samples.removeFirst()
+        while (samples.size > 2000) samples.removeFirst()
+    }
+
+    /** Median (compass − gyro) and the spread of its middle half, or null with too few or too scattered readings. */
+    @Synchronized fun offset(): Offset? {
+        if (samples.size < minSamples) return null
+        val v = samples.map { it.second }
+        val sx = v.sumOf { kotlin.math.sin(Math.toRadians(it)) }
+        val cx = v.sumOf { kotlin.math.cos(Math.toRadians(it)) }
+        val mean = Math.toDegrees(atan2(sx, cx))
+        val rel = v.map { ((it - mean + 540) % 360) - 180 }.sorted()
+        val spread = rel[rel.size * 3 / 4] - rel[rel.size / 4]
+        if (spread > maxSpreadDeg) return null
+        return Offset(((mean + rel[rel.size / 2] + 540) % 360) - 180, spread, rel.size)
+    }
+
+    /** True camera azimuth for a gyro azimuth, or null while the offset is not known. */
+    fun bearing(gyroDeg: Double): Double? = offset()?.let { (gyroDeg + it.deg + 720) % 360 }
+
+    data class Offset(val deg: Double, val spreadDeg: Double, val samples: Int)
 }
 
 /**

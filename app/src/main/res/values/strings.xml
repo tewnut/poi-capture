@@ -80,7 +80,7 @@
     <string name="onboarding_welcome_button">Set up</string>
     <string name="onboarding_welcome_time">One-time setup, about a minute.</string>
     <string name="onboarding_sweep_title">Street sweep</string>
-    <string name="onboarding_sweep_text">Mount the phone on your bike and ride along the street: the app photographs the buildings on your right, no tapping needed.</string>
+    <string name="onboarding_sweep_text">Ride along the street with the phone on a mount, or let a passenger hold it: the app photographs the shopfronts by itself.</string>
     <string name="onboarding_place_title">Place capture</string>
     <string name="onboarding_place_text">Stop at each shop: photograph the front, the sign, the inside, then pin it on the right building.</string>
     <string name="onboarding_position_title">Pinned to the building</string>
@@ -88,10 +88,10 @@
     <string name="onboarding_offline_title">No network needed while recording</string>
     <string name="onboarding_offline_text">Photos stay on the phone until you send the file (Zalo, Drive, email…) or save it.</string>
 
-    <string name="onboarding_email_title">Your email</string>
-    <string name="onboarding_email_lead">Goes with each session you send, to credit you and group your sessions. No verification, the app sends no mail.</string>
-    <string name="onboarding_email_label">Email</string>
-    <string name="onboarding_email_placeholder">name@gmail.com</string>
+    <string name="onboarding_email_title">Contributor ID</string>
+    <string name="onboarding_email_lead">If your team gave you a contributor ID, enter it here. It goes with each session you send, so your work is credited to you.</string>
+    <string name="onboarding_email_label">Contributor ID (optional)</string>
+    <string name="onboarding_email_placeholder">e.g. HCM-024</string>
     <string name="onboarding_email_invalid">That doesn\'t look like an email, e.g. name@gmail.com</string>
     <string name="onboarding_name_label">Display name (optional)</string>
     <string name="onboarding_name_placeholder">Jane Doe</string>
@@ -132,9 +132,9 @@
 
     <string name="onboarding_ready_title">Ready</string>
     <string name="onboarding_ready_button">Start recording</string>
-    <string name="onboarding_mount_title">Mounting the phone</string>
-    <string name="onboarding_mount_text">• Phone clamped firmly to the holder, best in landscape (it sees more of the street).\n• Back camera facing the buildings on your right.\n• During the first few accelerations / brakes, the app measures the camera direction.</string>
-    <string name="onboarding_summary_name">Recorded by: %1$s</string>
+    <string name="onboarding_mount_title">Two ways to sweep a street</string>
+    <string name="onboarding_mount_text">Clamp the phone firmly, best in landscape, back camera facing the buildings. The app measures the camera direction during the first few accelerations and brakes.</string>
+    <string name="onboarding_summary_name">Contributor ID: %1$s</string>
     <string name="onboarding_summary_perms_ok">Camera and location allowed</string>
     <string name="onboarding_summary_perms_missing">Missing permission: %1$s</string>
     <string name="onboarding_summary_perms_fix">Turn it on in Settings before recording.</string>
@@ -172,7 +172,7 @@
     <string name="setup_mode_manual">Manual</string>
     <string name="setup_mode_auto_hint">A photo each time the street slides ~⅓ of the frame (≤ %1$s m apart, each sign on ≥ 2 photos) · max %2$d km/h</string>
     <string name="setup_mode_manual_hint">Shoot with the volume keys or a Bluetooth button on the handlebar, no need to touch the screen · max %1$d km/h</string>
-    <string name="setup_mount_hint">Mount the phone firmly (landscape sees more), camera facing the buildings to record. The app detects the side (right/left) as you ride. Tap ★ Mark when you pass a shop worth noting.</string>
+    <string name="setup_mount_hint">Clamp the phone firmly (landscape sees more), camera facing the buildings to record. The app measures the camera direction and the side (right/left) as you ride. Tap ★ Mark when you pass a shop worth noting.</string>
     <string name="setup_enter_email">Enter email</string>
     <string name="setup_session_running">A session is still recording.</string>
     <string name="setup_start">Start</string>
@@ -400,16 +400,16 @@
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
-    <string name="settings_contributor">You</string>
+    <string name="settings_contributor">Contributor ID</string>
     <string name="settings_email">Email</string>
-    <string name="settings_email_ok">No verification needed. Used to credit you and group your sessions.</string>
+    <string name="settings_email_ok">Optional. The ID your team gave you; it goes with each session you send.</string>
     <string name="settings_email_bad">That doesn\'t look like an email, e.g. name@gmail.com</string>
     <string name="settings_display_name">Display name (optional)</string>
     <string name="settings_road_data">Offline road data</string>
     <string name="settings_advanced_hide">▾ Hide advanced settings</string>
     <string name="settings_advanced_show">▸ Advanced settings (mount angle, photo kinds)</string>
     <string name="settings_mount_title">Mount angle (manual)</string>
-    <string name="settings_mount_hint">The app measures where the camera points by itself when you speed up or brake a few times. Only set it here if the app says it couldn\'t measure it: how many degrees the camera is turned toward the front or the back.</string>
+    <string name="settings_mount_hint">For a phone on a mount only. The app measures where the camera points by itself when you speed up or brake a few times; set it here only if the app says it couldn\'t: how many degrees the camera is turned toward the front or the back.</string>
     <string name="settings_mount_forward">turned toward the front</string>
     <string name="settings_mount_backward">turned toward the back</string>
     <string name="settings_mount_square">square to the road</string>
@@ -465,6 +465,15 @@
     <string name="setup_sweep_sub">Ride · auto photos</string>
     <string name="setup_place_sub">Stop at each shop</string>
     <string name="setup_mode_short">Record</string>
+    <string name="setup_holding_title">The phone is</string>
+    <string name="setup_holding_mount">On a mount</string>
+    <string name="setup_holding_mount_sub">Fixed on the bike</string>
+    <string name="setup_holding_hand">In hand</string>
+    <string name="setup_holding_hand_sub">A passenger holds it</string>
+    <string name="setup_holding_hand_hint">Hold the phone sideways and aim at the shopfronts, either side. Each photo gets its own direction, so turning is fine; photos wait while you swing it fast.</string>
+    <string name="capture_hand_hint">In hand: hold sideways, aim at the shopfronts</string>
+    <string name="capture_hand_swinging">Hold still a moment…</string>
+    <string name="capture_aim_low">Camera points at the road: raise it to the shops</string>
     <string name="setup_plan_auto_short">≤ %1$s m apart · ≤ %2$d km/h</string>
     <string name="setup_plan_short">≤ %1$d km/h</string>
     <string name="setup_need_gps">Waiting for GPS…</string>
@@ -503,4 +512,16 @@
     <string name="sessionmap_place_no_name">No name yet</string>
     <string name="sessionmap_edit_texts">Edit name and texts</string>
     <string name="sessionmap_save">Save</string>
+    <string name="onboarding_id_help">Optional. You can add or change it later in Settings.</string>
+    <string name="onboarding_id_card_title">No email or name needed</string>
+    <string name="onboarding_id_card_text">Only the ID is sent with your sessions. No ID? Leave it empty.</string>
+    <string name="onboarding_id_skip">Skip for now</string>
+    <string name="onboarding_summary_no_id">No contributor ID</string>
+    <string name="onboarding_summary_no_id_sub">Optional: add it in Settings if your team gives you one.</string>
+    <string name="onboarding_hand_text">A passenger holds the phone sideways and aims at the shopfronts, on either side. Each photo gets its own direction; photos wait while the phone swings or points at the road.</string>
+    <string name="setup_hand_info">A passenger holds the phone sideways and aims at the shopfronts, on either side of the street. Each photo gets its own direction from the gyroscope and compass, so turning is fine; auto photos wait while the phone swings fast or points at the road.</string>
+    <string name="setup_info_both">Both</string>
+    <string name="settings_advanced">Advanced</string>
+    <string name="settings_advanced_sub">Mount angle, photo kinds</string>
+    <string name="settings_replay_sub">Language, permissions, road data and the two ways to sweep</string>
 </resources>

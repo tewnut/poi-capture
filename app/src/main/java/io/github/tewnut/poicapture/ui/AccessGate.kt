@@ -99,7 +99,7 @@ fun AccessGate(access: RequiredAccess) {
         else -> stringResource(R.string.common_turn_on_location) to { locationSettings() }
     }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding().padding(top = 24.dp)) {
+    Box(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding().padding(top = 24.dp)) {
         StepFrame(stringResource(R.string.gate_title), stringResource(R.string.gate_lead), button, onNext = action) {
             WhiteCard {
                 Row("📍", R.string.onboarding_perm_location, R.string.gate_precise_why, access.preciseLocation)
@@ -123,7 +123,7 @@ private fun Row(icon: String, title: Int, why: Int, ok: Boolean) =
 fun UnsupportedDevice(missing: List<io.github.tewnut.poicapture.capture.DeviceCheck.Need>) {
     val activity = LocalContext.current as? android.app.Activity
     fun finish() { activity?.finish() }
-    Box(Modifier.fillMaxSize().background(Color(0xFFF9FAFB)).safeDrawingPadding().padding(top = 24.dp)) {
+    Box(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding().padding(top = 24.dp)) {
         StepFrame(stringResource(R.string.device_title), stringResource(R.string.device_lead),
             stringResource(R.string.device_close), onNext = { finish() }) {
             WhiteCard {
