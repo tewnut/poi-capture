@@ -19,19 +19,28 @@ button:disabled { cursor: default; opacity: .5; }
 .ghost.on { color: var(--accent); font-weight: 600; }
 select, input { font: inherit; }
 
-.app { display: grid; grid-template-columns: 340px 1fr auto; grid-template-rows: 54px 1fr; height: 100vh; }
-.top { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px;
-  background: var(--card); border-bottom: 1px solid var(--line); }
-.brand { font-weight: 800; font-size: 17px; letter-spacing: -.3px; }
+.app { display: grid; grid-template-columns: 352px 1fr auto; height: 100vh; }
+.brand { font-weight: 800; font-size: 16px; letter-spacing: -.3px; }
 .logo { color: var(--accent); }
-.actions { display: flex; gap: 8px; align-items: center; }
-.who { border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; width: 180px; }
+button.small { padding: 4px 10px; font-size: 13px; }
 
 .side { background: var(--card); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
-.tabs { display: flex; border-bottom: 1px solid var(--line); }
-.tabs button { flex: 1; background: none; border: 0; padding: 10px 4px; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 600; }
-.tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
-.tabs .n { font-size: 11px; background: var(--canvas); border-radius: 8px; padding: 0 6px; margin-left: 2px; }
+.sidehead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 12px 6px; }
+.who { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px; font-size: 12px; border-bottom: 1px solid var(--line); }
+.who input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 13px; }
+.seg { display: flex; gap: 4px; margin: 10px 12px 0; padding: 3px; background: var(--canvas); border-radius: 10px; }
+.seg button { flex: 1; border: 0; background: none; padding: 6px 4px; border-radius: 8px; color: var(--muted); font-weight: 600; }
+.seg button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+.seg .n { font-size: 11px; background: rgba(0,0,0,.06); border-radius: 8px; padding: 0 6px; margin-left: 2px; }
+.sesshead { padding: 8px 12px 0; display: flex; flex-direction: column; gap: 4px; }
+.sesshead h1 { font-size: 17px; margin: 0; letter-spacing: -.2px; }
+.back { padding-left: 0; color: var(--accent); font-weight: 600; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.group { display: flex; flex-direction: column; gap: 6px; }
+.group + .group { margin-top: 8px; }
+.ghead { display: flex; justify-content: space-between; align-items: baseline; background: none; border: 0; border-bottom: 1px solid var(--line);
+  padding: 4px 0; text-align: left; }
+.ghead:hover b { color: var(--accent); }
 .pane { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .banner { margin: 8px 12px 0; padding: 7px 10px; background: #eef6ff; border-radius: 8px; font-size: 13px; }
 .banner.err { background: #fdecea; color: #8a1c1c; display: flex; justify-content: space-between; }
@@ -51,6 +60,8 @@ select, input { font: inherit; }
 .mapnote b { font-size: 15px; }
 
 .ses { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.ses:hover { border-color: #b9c6bf; }
+.ses .stats { margin-bottom: 6px; }
 .ses.open { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 .ses input { margin-top: 4px; }
 .ses .body { flex: 1; cursor: pointer; min-width: 0; }
@@ -88,10 +99,8 @@ select, input { font: inherit; }
 .pubs { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
 
 @media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; grid-template-rows: auto 45vh auto auto; height: auto; }
-  .top { flex-wrap: wrap; padding: 8px 12px; }
-  .actions { flex-wrap: wrap; }
-  .mapwrap { grid-row: 2; height: 45vh; }
-  .side { grid-row: 3; border-right: 0; }
-  .detail { grid-row: 4; width: auto; border-left: 0; border-top: 1px solid var(--line); }
+  .app { grid-template-columns: 1fr; grid-template-rows: 45vh auto auto; height: auto; }
+  .mapwrap { grid-row: 1; height: 45vh; }
+  .side { grid-row: 2; border-right: 0; }
+  .detail { grid-row: 3; width: auto; border-left: 0; border-top: 1px solid var(--line); }
 }

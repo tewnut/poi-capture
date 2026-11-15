@@ -138,7 +138,18 @@ watch(() => [state.task, state.open], () => {
   const t = openTask.value
   if (t) map.setView([t.lat, t.lon], Math.max(map.getZoom(), 19))
 })
-watch(() => state.open, (v) => { if (v && !state.place) fitOpen() })
+watch(() => state.open, (v) => { if (v && !state.place) fitOpen(); else if (!v) fitAll() })
+
+/** Back on the session list: all the sessions shown. */
+function fitAll() {
+  const pts: L.LatLngExpression[] = []
+  for (const d of state.datasets) {
+    if (!state.shown.has(d.id)) continue
+    pts.push(...d.track)
+    for (const p of d.places) { const at = pinOf(p, reviewOf(d.id, p)); pts.push([at.lat, at.lon]) }
+  }
+  if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] })
+}
 defineExpose({ fitOpen })
 </script>
 

@@ -105,6 +105,22 @@ export function counts(d: Dataset) {
   return c
 }
 
+export type Stage = 'captured' | 'processed' | 'reviewed'
+export const STAGES: { key: Stage; label: string }[] = [
+  { key: 'captured', label: 'Captured' }, { key: 'processed', label: 'Agent processed' }, { key: 'reviewed', label: 'Human reviewed' },
+]
+
+/** Where a session is in the pipeline: captured (raw phone export), agent processed (result bundle), human
+ *  reviewed (every place decided, and every removal task too). done / total counts those decisions. */
+export function stageOf(d: Dataset): { stage: Stage; done: number; total: number } {
+  if (d.source === 'raw') return { stage: 'captured', done: 0, total: d.places.length }
+  const removals = d.tasks.map((t, i) => ({ t, i })).filter(({ t }) => t.type !== 'visit')
+  const total = d.places.length + removals.length
+  const done = d.places.filter((p) => reviewOf(d.id, p).decision !== 'todo').length +
+    removals.filter(({ i }) => (state.removals[`${d.id}|${i}`]?.decision || 'todo') !== 'todo').length
+  return { stage: done >= total ? 'reviewed' : 'processed', done, total }
+}
+
 /** Google status of a place, from the agent's lookup. */
 export function gstat(p: Place): 'found' | 'new' | 'todo' {
   const g = p.google
