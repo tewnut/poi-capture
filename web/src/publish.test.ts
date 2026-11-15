@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { csv, geojson, osm, osmHours, record } from './publish'
+import { cell, csv, geojson, osm, osmHours, record } from './publish'
 import { _test } from './importer'
 import type { Dataset, Place, Review } from './types'
 
@@ -71,6 +71,16 @@ describe('publish', () => {
     expect(c).toContain('"A, ""B"""')
     expect(c).toContain('remove,Old shop')
     expect(c.charCodeAt(0)).toBe(0xfeff)
+  })
+})
+
+describe('csv cells', () => {
+  it('defuses formulas but keeps numbers', () => {
+    expect(cell('=HYPERLINK("http://x")')).toBe(`"'=HYPERLINK(""http://x"")"`)
+    expect(cell('+84 886')).toBe("'+84 886")
+    expect(cell('@x')).toBe("'@x")
+    expect(cell(-10.5)).toBe('-10.5')
+    expect(cell('Bún bò')).toBe('Bún bò')
   })
 })
 

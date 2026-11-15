@@ -367,6 +367,11 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
     write_indexes(out, session)
 
 
+def csv_cell(v):
+    """Text starting with = + - @ (or a tab / return) gets a leading ' so a spreadsheet does not run it as a formula."""
+    return "'" + v if isinstance(v, str) and v[:1] in ('=', '+', '-', '@', '\t', '\r') else v
+
+
 def write_indexes(out, session=None):
     rows = []
     for d in sorted(os.listdir(out)):
@@ -384,9 +389,9 @@ def write_indexes(out, session=None):
                     'google distance m', 'folder'])
         for d, m in rows:
             p = m['place']; pos = p['position']
-            w.writerow([d[:2], p['name'], p['category'], p['confidence'], len(m['photos']), pos['lat'], pos['lon'],
+            w.writerow([csv_cell(x) for x in [d[:2], p['name'], p['category'], p['confidence'], len(m['photos']), pos['lat'], pos['lon'],
                         pos['method'], pos['googleMaps'], g(m, 'name'), g(m, 'address'), g(m, 'phone'),
-                        ' | '.join(g(m, 'openingHours') or []), g(m, 'website'), g(m, 'url'), g(m, 'distanceM'), d])
+                        ' | '.join(g(m, 'openingHours') or []), g(m, 'website'), g(m, 'url'), g(m, 'distanceM'), d]])
     feats = [{'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [m['place']['position']['lon'], m['place']['position']['lat']]},
               'properties': {'folder': d, 'name': m['place']['name'], 'category': m['place']['category'],
                              'confidence': m['place']['confidence'], 'googleName': g(m, 'name')}} for d, m in rows]

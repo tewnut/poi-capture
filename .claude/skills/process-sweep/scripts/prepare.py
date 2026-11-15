@@ -10,20 +10,22 @@ Writes into <workdir>:
 import json, os, sys, zipfile
 
 sys.stdout.reconfigure(encoding='utf-8')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from safety import inside, safe_id, extract  # noqa: E402  (untrusted export: paths and ids are checked)
 
 
 def load(src, work):
     """(session, items, photo_dir) from a zip, an unzipped export (manifest.json) or a raw session dir."""
     if zipfile.is_zipfile(src):
         raw = os.path.join(work, 'raw')
-        with zipfile.ZipFile(src) as z:
-            z.extractall(raw)
+        extract(src, raw)
         src = raw
     if os.path.exists(os.path.join(src, 'manifest.json')):
         m = json.load(open(os.path.join(src, 'manifest.json'), encoding='utf-8'))
         items = [i for i in m['items'] if i.get('kind') == 'photo']
         for i in items:
-            i['_path'] = os.path.abspath(os.path.join(src, i.get('file') or f"photos/{i['id']}.jpg"))
+            i['_path'] = inside(src, i.get('file') or f"photos/{safe_id(i['id'])}.jpg")
+            safe_id(i['id'])
         return m['session'], items
     # raw session dir (pulled from the phone): items.jsonl, later lines {"_patch": id, ...} update an item
     session = json.load(open(os.path.join(src, 'session.json'), encoding='utf-8'))
@@ -41,7 +43,7 @@ def load(src, work):
         order.append(o['id'])
     items = [by_id[i] for i in order if by_id[i].get('kind') == 'photo']
     for i in items:
-        i['_path'] = os.path.abspath(os.path.join(src, 'photos', i['id'] + '.jpg'))
+        i['_path'] = inside(src, os.path.join('photos', safe_id(i['id']) + '.jpg'))
     return session, items
 
 

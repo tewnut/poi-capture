@@ -14,11 +14,14 @@ in capture order (print them with --list):
 
 Places are not matched with sweeps (separate tasks); Google Maps is looked up afterwards with enrich_browser.py.
 """
-import json, os, shutil, sys, tempfile, zipfile
+import json, os, re, shutil, sys, tempfile, zipfile
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build  # noqa: E402
+
+
+from safety import inside, safe_id, extract  # noqa: E402  (untrusted export: paths and ids are checked)
 
 
 def load_session(src):
@@ -26,16 +29,15 @@ def load_session(src):
     tmp = None
     if src.lower().endswith('.zip'):
         tmp = tempfile.mkdtemp(prefix='place_')
-        with zipfile.ZipFile(src) as z:
-            z.extractall(tmp)
+        extract(src, tmp)
         src = tmp
     if os.path.isfile(os.path.join(src, 'manifest.json')):          # export zip
         m = json.load(open(os.path.join(src, 'manifest.json'), encoding='utf-8'))
-        items = {i['id']: dict(i, path=os.path.join(src, i['file'])) for i in m['items'] if i.get('kind') == 'photo'}
+        items = {safe_id(i['id']): dict(i, path=inside(src, i['file'])) for i in m['items'] if i.get('kind') == 'photo'}
         places = [{'id': p['id'], 'position': p['position'], 'fields': p.get('fields') or {},
                    'photos': [items[i] for i in p.get('photos') or [] if i in items]} for p in m.get('pois') or []]
         track = []
-        tf = os.path.join(src, m.get('trackFile') or 'track.geojson')
+        tf = inside(src, m.get('trackFile') or 'track.geojson')
         if os.path.isfile(tf):
             g = json.load(open(tf, encoding='utf-8'))
             for f in g.get('features') or [g]:
@@ -58,7 +60,7 @@ def load_session(src):
             if o['_patch'] in items:
                 items[o['_patch']].update({k: v for k, v in o.items() if k != '_patch'})
         elif o.get('kind') == 'photo':
-            items[o['id']] = dict(o, path=os.path.join(src, 'photos', o['id'] + '.jpg'))
+            items[o['id']] = dict(o, path=inside(src, os.path.join('photos', safe_id(o['id']) + '.jpg')))
     places = []
     for pid in order:
         ph = sorted((i for i in items.values() if i.get('poiId') == pid), key=lambda i: i.get('tMs') or 0)
