@@ -25,10 +25,10 @@ enum class PoiStatus(val json: String) {
 
 object Pois {
     /** A new place, at the contributor's current position (refined later by a pin on the building). */
-    fun new(id: String, nowMs: Long, at: Fix?): JSONObject = JSONObject()
+    fun new(id: String, nowMs: Long, at: Fix?, source: String = "gps"): JSONObject = JSONObject()
         .put("id", id).put("createdAt", iso(nowMs)).put("tMs", nowMs)
         .put("position", if (at == null) JSONObject.NULL else JSONObject()
-            .put("lat", at.lat).put("lon", at.lon).put("accuracyM", at.accuracyM).put("source", "gps"))
+            .put("lat", at.lat).put("lon", at.lon).put("accuracyM", at.accuracyM).put("source", source))
         .put("fields", JSONObject())
         .put("status", PoiStatus.NEW.json)
 

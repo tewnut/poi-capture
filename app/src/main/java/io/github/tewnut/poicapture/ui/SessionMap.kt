@@ -91,8 +91,8 @@ import java.time.format.DateTimeFormatter
  * openstreetmap.org outright (an office Wi-Fi in Ho Chi Minh City: the name does not resolve, the map stays an empty
  * grid), so when the configured server's host can't be looked up the tiles come from [FALLBACK] (same OSM data).
  */
-internal class TemplateTileSource(private val template: String) :
-    OnlineTileSourceBase("tiles-${template.hashCode()}", 0, 19, 256, "", arrayOf(template), "© OpenStreetMap contributors") {
+internal class TemplateTileSource(private val template: String, copyright: String = "© OpenStreetMap contributors") :
+    OnlineTileSourceBase("tiles-${template.hashCode()}", 0, 19, 256, "", arrayOf(template), copyright) {
     // (called on osmdroid's download threads, so the name lookup never blocks the screen)
     override fun getTileURLString(index: Long): String = (if (reachable(template)) template else FALLBACK)
         .replace("{z}", MapTileIndex.getZoom(index).toString())
@@ -100,8 +100,15 @@ internal class TemplateTileSource(private val template: String) :
         .replace("{y}", MapTileIndex.getY(index).toString())
 
     companion object {
-        /** CARTO's OSM basemap, served from a CDN that resolves where openstreetmap.org does not. */
-        const val FALLBACK = "https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png"
+        /** Esri's street map, where openstreetmap.org does not resolve (CARTO's basemaps now answer "API KEY REQUIRED"). */
+        const val FALLBACK = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+        /** Esri World Imagery: satellite view, to put a pin on the right building (shown only, nothing derived). */
+        const val SATELLITE = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+
+        /** The map's tiles: the configured street map, or satellite imagery. */
+        fun of(ctx: android.content.Context, satellite: Boolean) =
+            if (satellite) TemplateTileSource(SATELLITE, "Imagery © Esri, Maxar, Earthstar Geographics")
+            else TemplateTileSource(io.github.tewnut.poicapture.Prefs.settings(ctx).tileUrl)
         private val checked = java.util.concurrent.ConcurrentHashMap<String, Pair<Boolean, Long>>()
 
         /** Whether the template's host resolves; remembered for a minute (a failed lookup is retried after that). */
@@ -246,6 +253,7 @@ fun SessionMap(sessionId: String, refresh: Any?, live: Boolean, modifier: Modifi
             onSelect = { id -> shown.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { scope.launch { pager.animateScrollToPage(it) } } },
             onMap = { mapView = it }, onCentre = { centre = it },
             modifier = Modifier.fillMaxSize().clipToBounds())
+        MapStyleButton(mapView, Modifier.align(Alignment.TopEnd).padding(10.dp))
 
         if (relocating && sel != null) {
             // warnings only (the contributor decides): too far, on the road, across the street
@@ -557,7 +565,7 @@ private fun PinsMap(pins: List<PhotoPin>, track: List<LatLon>, selected: String?
     val shopPin = remember { androidx.core.content.ContextCompat.getDrawable(ctx, R.drawable.ic_shop_pin) }
     val map = remember {
         MapView(ctx).apply {
-            setTileSource(TemplateTileSource(tileUrl))
+            setTileSource(TemplateTileSource.of(ctx, Prefs.satellite(ctx)))
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             // OSM tiles stop at 19; deeper zoom stretches them (blurry) but lets a dot go on the right doorway
@@ -741,4 +749,19 @@ private fun shiftLat(lat: Double, zoom: Double, px: Int): Double =
 private fun pinPoint(m: MapView, insetPx: Int): LatLon {
     val c = m.mapCenter
     return LatLon(c.latitude + shiftLat(c.latitude, m.zoomLevelDouble, insetPx / 2), c.longitude)
+}
+
+/** Street map / satellite switch over a map (remembered for every map in the app). */
+@Composable
+internal fun MapStyleButton(map: MapView?, modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    var sat by remember { mutableStateOf(Prefs.satellite(ctx)) }
+    androidx.compose.material3.Surface(onClick = {
+        sat = !sat
+        Prefs.saveSatellite(ctx, sat)
+        map?.setTileSource(TemplateTileSource.of(ctx, sat))
+    }, modifier = modifier, shape = RoundedCornerShape(10.dp), color = Color.White, shadowElevation = 4.dp) {
+        Text(stringResource(if (sat) R.string.map_street else R.string.map_satellite), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            color = Palette.Ink, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+    }
 }

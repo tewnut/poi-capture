@@ -437,12 +437,12 @@
     <string name="onboarding_language_phone">Phone\'s language</string>
     <string name="onboarding_language_phone_text">Follow the phone: now %1$s</string>
     <!-- capture: GPS lost -->
-    <string name="capture_gps_lost_title">GPS lost: recording on hold</string>
-    <string name="capture_gps_lost_text">Every photo needs a GPS position from the last 5 seconds. Nothing is recorded until the GPS is back.</string>
+    <string name="capture_gps_lost_title">Waiting for GPS</string>
+    <string name="capture_gps_lost_text">The session starts once the phone has a satellite fix. After that, losing GPS (inside a building, under an arcade) only shows an alert: photos keep the last position.</string>
     <string name="capture_gps_lost_sky">Move to open sky, away from tall buildings, trees and roofs.</string>
     <string name="capture_gps_lost_location">Keep the phone\'s Location on, with precise location for this app.</string>
     <string name="capture_gps_lost_settings">Location settings</string>
-    <string name="capture_gps_lost_resume">Recording carries on by itself as soon as the GPS is back.</string>
+    <string name="capture_gps_lost_resume">The session starts by itself as soon as the GPS is found.</string>
     <!-- navigation: home = sessions -->
     <string name="nav_back">Back</string>
     <string name="sessions_empty_text">Ride along a street or stop at a few shops. Your recordings show up here, ready to send.</string>
@@ -480,7 +480,7 @@
     <string name="setup_need_email">Add your email to start</string>
     <string name="setup_info_title">How it works</string>
     <string name="setup_info_gps_title">GPS</string>
-    <string name="setup_info_gps">Start unlocks once the phone has a satellite fix from the last 5 seconds. Outdoors under open sky it takes seconds; indoors or between tall buildings it can take minutes. Wi-Fi positions are never used for photos.</string>
+    <string name="setup_info_gps">Start unlocks once the phone has a satellite fix from the last 5 seconds: start outdoors, under open sky. After that the session carries on if the GPS drops (indoors, under an arcade): photos keep the last position and are marked for the processing step. Wi-Fi positions are never used for photos.</string>
     <string name="sessionmap_warn_far">More than %1$d m from where it was taken</string>
     <string name="sessionmap_warn_road">On the road, not on a building</string>
     <string name="sessionmap_warn_across">Across the street from where the camera looked</string>
@@ -524,4 +524,22 @@
     <string name="settings_advanced">Advanced</string>
     <string name="settings_advanced_sub">Mount angle, photo kinds</string>
     <string name="settings_replay_sub">Language, permissions, road data and the two ways to sweep</string>
+    <string name="capture_gps_lost_banner">GPS lost: photos keep the last position. Step outside to refresh it.</string>
+    <string name="capture_gps_wait_title">Waiting for GPS</string>
+    <string name="guide_intro">Photograph more than the front: the agent reads every photo and fills in the place from it.</string>
+    <string name="guide_next">Next: %1$s</string>
+    <string name="guide_done">Enough for this place. More angles are welcome, or tap Next place.</string>
+    <string name="guide_front_title">Front</string>
+    <string name="guide_front_text">The whole shop, straight on, with its sign</string>
+    <string name="guide_sign_title">Sign</string>
+    <string name="guide_sign_text">Close up: name and phone number readable</string>
+    <string name="guide_info_title">Hours and menu</string>
+    <string name="guide_info_text">Opening hours, menu, prices, phone on the door</string>
+    <string name="guide_plate_title">Business plate</string>
+    <string name="guide_plate_text">Company name, address and tax code (MST)</string>
+    <string name="map_satellite">Satellite</string>
+    <string name="map_street">Map</string>
+    <string name="poi_unsure">The GPS was not sure here: photos of this place were far apart. Check the pin and drag it to the door (Satellite helps).</string>
+    <string name="poi_unsure_indoor">Taken mostly without good GPS (inside or under a roof): the pin is carried from the last good fix by your steps. Check it and drag it to the door.</string>
+    <string name="settings_installed">Installed %1$s</string>
 </resources>

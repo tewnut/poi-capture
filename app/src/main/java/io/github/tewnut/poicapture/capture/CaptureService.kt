@@ -82,6 +82,8 @@ import io.github.tewnut.poicapture.core.SignReading
 import io.github.tewnut.poicapture.core.SignText
 import io.github.tewnut.poicapture.core.PoiStatus
 import io.github.tewnut.poicapture.core.Pois
+import io.github.tewnut.poicapture.core.FootTracker
+import io.github.tewnut.poicapture.core.PlacePosition
 import io.github.tewnut.poicapture.core.SessionKind
 import io.github.tewnut.poicapture.core.Remeasure
 import io.github.tewnut.poicapture.core.CompassYaw
@@ -126,7 +128,7 @@ const val HAND_SWING_RADS = 1.2
 data class CaptureUi(
     val camera: String = "off",          // off | on | lost (interrupted, CameraX retries) | error (could not open)
     val gps: String = "waiting",         // waiting | good | weak | error
-    val gpsFresh: Boolean = false,       // a GPS fix from the last GPS_MAX_AGE_MS: without one nothing is captured
+    val gpsFresh: Boolean = false,       // a GPS fix from the last GPS_MAX_AGE_MS: needed to start; later only an alert
     val exposureReady: Boolean = false,  // street sweep: the camera's light level is known (dark or not)
     val tooDark: Boolean = false,        // street sweep: even the highest ISO cannot give a 1/500 s shutter
     val manualShutter: Boolean = false,  // street sweep: shutter held at 1/500 s, ISO raised instead
@@ -158,6 +160,8 @@ data class CaptureUi(
     val poiId: String? = null,           // place being photographed, null = next shot starts a new one
     val poiNumber: Int = 0,              // places started in this session
     val poiRoles: Map<String, Int> = emptyMap(),   // photos of the current place per role
+    val poiUnsure: Boolean = false,      // the current place's position is doubtful: ask the contributor to check the pin
+    val poiIndoor: Boolean = false,      // most of its photos were taken without good GPS (inside, under an arcade)
     val poiRead: SignReading? = null,  // what the phone read on its photos (hint)
     val reading: Int = 0,                // photos waiting for / in on-device text reading
     val readNote: UiText? = null,        // e.g. a sign photo with no readable text: shoot closer
@@ -219,6 +223,9 @@ class CaptureService : LifecycleService() {
         java.util.concurrent.LinkedBlockingQueue(), java.util.concurrent.ThreadPoolExecutor.DiscardPolicy())
     private val ocr = Executors.newSingleThreadExecutor()   // on-device text reading of POI photos (~1 s each)
     private val poiReadings = HashMap<String, MutableList<SignReading>>()
+    private var foot: FootTracker? = null
+    /** Place capture: the position estimate of each photo of the current place, and whether its GPS was stale */
+    private val placeEstimates = mutableListOf<Pair<FootTracker.Estimate, Boolean>>()
 
     private var lm: LocationManager? = null
     private var gnss: GnssRecorder? = null
@@ -459,8 +466,11 @@ class CaptureService : LifecycleService() {
             gnss = GnssRecorder(lm, store.gnssFile(session.id)).also { it.start(io) }
             watchGps()
         }
+        // on foot (Place capture): steps and direction carry the position when the GPS cannot be trusted
+        val ft = if (session.kind == SessionKind.POI) FootTracker().also { foot = it } else null
         imu = ImuRecorder(getSystemService(SENSOR_SERVICE) as SensorManager, store.imuFile(session.id),
-            if (hand) null else mountEstimator).also { it.start() }
+            if (hand) null else mountEstimator,
+            onStep = ft?.let { t -> { ns: Long -> t.onHeading(imu?.walkHeadingDeg()); t.onStep(ns) } }).also { it.start() }
         if (session.mode == Mode.PHOTO_AUTO && framesLog == null) framesLog = runCatching {
             val f = store.framesFile(session.id)
             val fresh = !f.exists() || f.length() == 0L
@@ -490,6 +500,7 @@ class CaptureService : LifecycleService() {
                 if (d != facadeNow) { facadeNow = d; fp.facadeDistanceM = d; applyPlan(currentPlan()) }
             }
         }
+        foot?.onFix(f)
         if (fp.onFix(f)) {
             session.travel = fp.travel
             session.sideOfWay = fp.travel?.let { sideOfWay(session.sideOfTravel, it) }
@@ -817,8 +828,13 @@ class CaptureService : LifecycleService() {
     fun takePhoto(trigger: String, role: String? = null) {
         val ic = imageCapture ?: return
         if (_state.value.camera != "on") return
-        // no GPS fix from the last 5 s: no photo (the screen is asking the contributor to fix the GPS)
-        if (freshFix() == null) { _state.update { it.copy(gpsFresh = false) }; return }
+        // a GPS fix is needed to start; once started, GPS lost (inside a building, under an arcade) only raises an
+        // alert: the photo keeps the last fix and says how old it is (gpsStale, gpsAgeS) for the processing step
+        val fresh = freshFix()
+        if (fresh == null) {
+            _state.update { it.copy(gpsFresh = false) }
+            if (fp.fix == null || session.startedAt == null) return
+        }
         val poiMode = session.kind == SessionKind.POI
         val poiId = if (poiMode) (_state.value.poiId ?: newPoi()) else null
         if (shooting) { if (trigger == "auto") { lastMissedShotMs = System.currentTimeMillis(); return } }
@@ -827,6 +843,8 @@ class CaptureService : LifecycleService() {
         val en = SystemClock.elapsedRealtimeNanos()
         val id = uid("p_", now)
         val meta = orientationMeta(fp.itemMeta(id, "photo", now, session.sideOfTravel, en).put("trigger", trigger))
+        if (fresh == null) meta.put("gpsStale", true)
+            .put("gpsAgeS", fp.fix?.elapsedNanos?.let { Math.round((en - it) / 1e8) / 10.0 } ?: JSONObject.NULL)
         val motion = imu?.snapshot(en)
         motion?.let { meta.put("motion", it) }
         if (poiId == null && hand) {
@@ -841,6 +859,19 @@ class CaptureService : LifecycleService() {
         }
         if (poiId != null) {
             meta.put("poiId", poiId)
+            // on foot: the GPS is used only when it agrees with the steps; otherwise the position bridged from the
+            // last trusted fix (the raw GPS stays in gpsLat / gpsLon / gpsAccuracyM)
+            foot?.estimate(en)?.let { est ->
+                meta.put("positionSource", est.source.json).put("positionUncertaintyM", Math.round(est.uncertaintyM * 10) / 10.0)
+                    .put("bridgedM", Math.round(est.bridgedM * 10) / 10.0)
+                if (est.source == FootTracker.Source.BRIDGE && est.ll != null) {
+                    meta.put("gpsLat", meta.opt("lat")).put("gpsLon", meta.opt("lon")).put("gpsAccuracyM", meta.opt("accuracyM"))
+                        .put("lat", est.ll.lat).put("lon", est.ll.lon).put("accuracyM", Math.round(est.uncertaintyM * 10) / 10.0)
+                }
+                placeEstimates += est to (fresh == null)
+                val c = PlacePosition.check(placeEstimates.map { it.first }, placeEstimates.map { it.second })
+                _state.update { it.copy(poiUnsure = c.unsure, poiIndoor = c.indoor) }
+            }
             // the kind of photo only when the contributor is asked for it; otherwise the agent tells it from the image
             session.photoRoles?.let { pr -> meta.put("role", role ?: pr.cover.id) }
             // on foot the travel direction means nothing: the camera direction comes from the orientation sensor
@@ -934,13 +965,23 @@ class CaptureService : LifecycleService() {
     fun newPoi(): String {
         val now = System.currentTimeMillis()
         val id = uid("poi_", now)
-        store.appendPoi(session.id, Pois.new(id, now, fp.fix))
-        _state.update { it.copy(poiId = id, poiNumber = it.poiNumber + 1, poiRoles = emptyMap(), poiRead = null, readNote = null) }
+        // the start position: the GPS when it agrees with the steps, else the position bridged from the last trusted fix
+        val est = foot?.estimate(SystemClock.elapsedRealtimeNanos())
+        val bridged = est?.source == FootTracker.Source.BRIDGE && est.ll != null
+        val at = if (bridged) fp.fix?.copy(lat = est!!.ll!!.lat, lon = est.ll.lon, accuracyM = est.uncertaintyM) else fp.fix
+        store.appendPoi(session.id, Pois.new(id, now, at, if (bridged) "bridge" else "gps"))
+        placeEstimates.clear()
+        _state.update { it.copy(poiId = id, poiNumber = it.poiNumber + 1, poiRoles = emptyMap(), poiRead = null, readNote = null,
+            poiUnsure = false, poiIndoor = false) }
         return id
     }
 
-    /** Where the current place was started (the default pin), or the current position. */
+    /**
+     * The default pin of the current place: the photo position closest to all the others (a contributor often takes
+     * the first photo from afar, at an entrance, then walks to the shop), else where the place was started.
+     */
     fun poiStartPosition(): LatLon? {
+        PlacePosition.medoid(placeEstimates.mapNotNull { it.first.ll })?.let { return it }
         val id = _state.value.poiId
         val p = id?.let { pid -> store.pois(session.id).firstOrNull { it.optString("id") == pid } }?.optJSONObject("position")
         return p?.let { LatLon(it.getDouble("lat"), it.getDouble("lon")) } ?: fp.fix?.ll
@@ -949,15 +990,23 @@ class CaptureService : LifecycleService() {
     /** The contributor finished a place: pin, optional fields, status. The next shot starts a new place. */
     fun finishPoi(pin: LatLon?, pinMoved: Boolean, fields: Map<String, String>, status: PoiStatus) {
         val id = _state.value.poiId ?: return
-        store.patchPoi(session.id, id, Pois.review(pin, !pinMoved, fields, status, System.currentTimeMillis()))
-        _state.update { it.copy(poiId = null, poiRoles = emptyMap(), poiRead = null, readNote = null) }
+        // not reviewed on the map: the photos' medoid, not the first photo, is the place's position
+        val medoid = if (pin == null && !pinMoved) PlacePosition.medoid(placeEstimates.mapNotNull { it.first.ll }) else null
+        store.patchPoi(session.id, id, Pois.review(pin ?: medoid, !pinMoved, fields, status, System.currentTimeMillis()))
+        if (placeEstimates.isNotEmpty()) {
+            val c = PlacePosition.check(placeEstimates.map { it.first }, placeEstimates.map { it.second })
+            store.patchPoi(session.id, id, org.json.JSONObject().put("indoor", c.indoor)
+                .put("positionUnsure", c.unsure && !pinMoved).put("photoSpreadM", Math.round(c.spreadM)))
+        }
+        placeEstimates.clear()
+        _state.update { it.copy(poiId = null, poiRoles = emptyMap(), poiRead = null, readNote = null, poiUnsure = false, poiIndoor = false) }
     }
 
     // ---------- session control ----------
 
     fun start() {
         if (_state.value.running) return
-        if (freshFix() == null) return   // the Start button waits for GPS
+        if (session.startedAt == null && freshFix() == null) return   // the first start waits for GPS; resuming does not
         if (session.startedAt == null) session.startedAt = iso(System.currentTimeMillis())
         store.save(session)
         _state.update { it.copy(running = true) }

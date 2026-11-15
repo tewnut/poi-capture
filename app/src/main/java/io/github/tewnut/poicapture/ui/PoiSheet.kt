@@ -24,6 +24,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -84,7 +85,8 @@ class PoiDraft {
 @Composable
 fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: PhotoRoles, d: PoiDraft,
              read: io.github.tewnut.poicapture.core.SignReading?, reading: Boolean,
-             onMore: () -> Unit, onSave: (pin: LatLon?, moved: Boolean, fields: Map<String, String>, status: PoiStatus) -> Unit) {
+             onMore: () -> Unit, unsure: Boolean = false, indoor: Boolean = false,
+             onSave: (pin: LatLon?, moved: Boolean, fields: Map<String, String>, status: PoiStatus) -> Unit) {
     val ctx = LocalContext.current
     if (d.pin == null && !d.moved) d.pin = start
     // no GPS fix for this place yet: open the map where the phone was last seen, not at 0,0
@@ -95,7 +97,9 @@ fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: P
     val tall = androidx.compose.ui.platform.LocalConfiguration.current.let { it.screenHeightDp > it.screenWidthDp }
     val mapPart: @Composable (Modifier) -> Unit = { m ->
         Box(m) {
-            PinMap(d.pin, centre, onPin = { d.pin = it; d.moved = true }, modifier = Modifier.fillMaxSize().clipToBounds())
+            var mapRef by remember { mutableStateOf<MapView?>(null) }
+            PinMap(d.pin, centre, onPin = { d.pin = it; d.moved = true }, onMap = { mapRef = it }, modifier = Modifier.fillMaxSize().clipToBounds())
+            MapStyleButton(mapRef, Modifier.align(Alignment.BottomEnd).padding(10.dp))
             Pill(stringResource(when {
                     d.moved -> R.string.poi_pin_set
                     d.pin == null -> R.string.poi_pin_no_gps
@@ -110,6 +114,10 @@ fun PoiSheet(number: Int, start: LatLon?, roles: Map<String, Int>, photoRoles: P
         Column(m.padding(horizontal = 16.dp, vertical = 8.dp)) {
           Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(stringResource(R.string.poi_title, number), fontWeight = FontWeight.Bold, fontSize = 22.sp, color = Palette.Ink)
+            // the GPS was doubtful here: the pin needs the contributor's eye (the satellite view helps)
+            if (unsure && !d.moved) Text(stringResource(if (indoor) R.string.poi_unsure_indoor else R.string.poi_unsure),
+                color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth().background(Palette.Amber, androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(10.dp))
             val tagged = roles.keys.any { it.isNotEmpty() }
             val noPhotos = stringResource(R.string.poi_no_photos)
             if (!tagged) Hint(roles.values.sum().let { if (it == 0) noPhotos else pluralStringResource(R.plurals.poi_photos, it, it) })
@@ -177,7 +185,7 @@ private fun lastKnown(ctx: android.content.Context): LatLon? = runCatching {
 
 /** Map with one draggable pin; tapping the map moves the pin there. */
 @Composable
-private fun PinMap(pin: LatLon?, centre: LatLon?, onPin: (LatLon) -> Unit, modifier: Modifier) {
+private fun PinMap(pin: LatLon?, centre: LatLon?, onPin: (LatLon) -> Unit, onMap: (MapView) -> Unit, modifier: Modifier) {
     val ctx = LocalContext.current
     val setPin by rememberUpdatedState(onPin)
     val density = ctx.resources.displayMetrics.density
@@ -191,7 +199,7 @@ private fun PinMap(pin: LatLon?, centre: LatLon?, onPin: (LatLon) -> Unit, modif
     }
     val map = remember {
         MapView(ctx).apply {
-            setTileSource(TemplateTileSource(Prefs.settings(ctx).tileUrl))
+            setTileSource(TemplateTileSource.of(ctx, Prefs.satellite(ctx)))
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             maxZoomLevel = 19.0
@@ -199,6 +207,7 @@ private fun PinMap(pin: LatLon?, centre: LatLon?, onPin: (LatLon) -> Unit, modif
             (pin ?: centre)?.let { controller.setCenter(GeoPoint(it.lat, it.lon)) }
         }
     }
+    LaunchedEffect(map) { onMap(map) }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
         val obs = LifecycleEventObserver { _, e ->

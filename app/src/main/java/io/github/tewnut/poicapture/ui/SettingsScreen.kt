@@ -106,9 +106,16 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
         SettingsRow("📖", stringResource(R.string.settings_replay_onboarding), stringResource(R.string.settings_replay_sub),
             trailing = "›", onClick = onReplayOnboarding)
 
-        val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
-        if (version != null) Hint(stringResource(R.string.app_name) + " " + version,
-            Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp))
+        // the version, and when this copy was installed or last updated (which build is on the phone)
+        val info = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0) }.getOrNull() }
+        if (info != null) {
+            val installed = remember(info) {
+                java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
+                    .format(java.util.Date(info.lastUpdateTime))
+            }
+            Hint(stringResource(R.string.app_name) + " " + info.versionName + "\n" + stringResource(R.string.settings_installed, installed),
+                Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp))
+        }
     }
     }
 }

@@ -435,6 +435,8 @@ private fun SetupInfo(photoEveryM: Double, maxSpeedKmh: Int, onClose: () -> Unit
             Item("📏", stringResource(R.string.setup_facade_title), stringResource(R.string.setup_facade_hint))
             Section(stringResource(R.string.setup_place_title))
             Item("🏪", stringResource(R.string.setup_place_title), stringResource(R.string.setup_poi_hint))
+            Text(stringResource(R.string.guide_intro), color = Palette.Muted, fontSize = 14.sp, lineHeight = 20.sp)
+            PlaceGuideList()
             Section(stringResource(R.string.setup_info_both))
             Item("🛣️", stringResource(R.string.setup_you_are_on), stringResource(R.string.setup_road_auto_hint))
             Item("🛰️", stringResource(R.string.setup_info_gps_title), stringResource(R.string.setup_info_gps))

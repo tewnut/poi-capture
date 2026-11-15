@@ -421,12 +421,12 @@
     <string name="onboarding_language_phone">Theo điện thoại</string>
     <string name="onboarding_language_phone_text">Ngôn ngữ của điện thoại: hiện là %1$s</string>
     <!-- capture: GPS lost -->
-    <string name="capture_gps_lost_title">Mất GPS: tạm dừng ghi</string>
-    <string name="capture_gps_lost_text">Mỗi ảnh cần vị trí GPS trong 5 giây gần nhất. Chưa ghi gì cho đến khi có lại GPS.</string>
+    <string name="capture_gps_lost_title">Đang chờ GPS</string>
+    <string name="capture_gps_lost_text">Phiên bắt đầu khi máy bắt được vệ tinh. Sau đó, nếu mất GPS (trong nhà, dưới mái hiên) chỉ hiện cảnh báo: ảnh dùng vị trí cuối cùng.</string>
     <string name="capture_gps_lost_sky">Ra chỗ thoáng, xa nhà cao tầng, cây và mái che.</string>
     <string name="capture_gps_lost_location">Giữ Vị trí của điện thoại bật, với vị trí chính xác cho app này.</string>
     <string name="capture_gps_lost_settings">Cài đặt vị trí</string>
-    <string name="capture_gps_lost_resume">App tự ghi tiếp ngay khi có lại GPS.</string>
+    <string name="capture_gps_lost_resume">Phiên tự bắt đầu ngay khi bắt được GPS.</string>
     <!-- navigation: home = sessions -->
     <string name="nav_back">Quay lại</string>
     <string name="sessions_empty_text">Chạy dọc một con phố hoặc dừng ở vài cửa hàng. Các phiên ghi sẽ hiện ở đây, sẵn sàng để gửi.</string>
@@ -464,7 +464,7 @@
     <string name="setup_need_email">Nhập email để bắt đầu</string>
     <string name="setup_info_title">Cách dùng</string>
     <string name="setup_info_gps_title">GPS</string>
-    <string name="setup_info_gps">Nút Bắt đầu mở khi máy bắt được vệ tinh trong 5 giây gần nhất. Ngoài trời thoáng chỉ vài giây; trong nhà hay giữa nhà cao tầng có thể mất vài phút. Vị trí từ Wi-Fi không bao giờ dùng cho ảnh.</string>
+    <string name="setup_info_gps">Nút Bắt đầu mở khi máy bắt được vệ tinh trong 5 giây gần nhất: hãy bắt đầu ngoài trời thoáng. Sau đó phiên vẫn tiếp tục nếu mất GPS (trong nhà, dưới mái hiên): ảnh dùng vị trí cuối cùng và được đánh dấu cho bước xử lý. Vị trí từ Wi-Fi không bao giờ dùng cho ảnh.</string>
     <string name="sessionmap_warn_far">Xa hơn %1$d m so với chỗ chụp</string>
     <string name="sessionmap_warn_road">Đang nằm trên đường, không phải trên nhà</string>
     <string name="sessionmap_warn_across">Ở bên kia đường so với hướng camera</string>
@@ -507,4 +507,22 @@
     <string name="settings_advanced">Nâng cao</string>
     <string name="settings_advanced_sub">Góc giá đỡ, loại ảnh</string>
     <string name="settings_replay_sub">Ngôn ngữ, quyền, dữ liệu đường và hai cách quét đường</string>
+    <string name="capture_gps_lost_banner">Mất GPS: ảnh dùng vị trí cuối cùng. Ra chỗ thoáng để cập nhật lại.</string>
+    <string name="capture_gps_wait_title">Đang chờ GPS</string>
+    <string name="guide_intro">Hãy chụp nhiều hơn mặt tiền: agent đọc từng ảnh và điền thông tin địa điểm từ đó.</string>
+    <string name="guide_next">Tiếp theo: %1$s</string>
+    <string name="guide_done">Đã đủ cho địa điểm này. Chụp thêm góc khác cũng tốt, hoặc bấm Địa điểm tiếp.</string>
+    <string name="guide_front_title">Mặt tiền</string>
+    <string name="guide_front_text">Toàn bộ cửa hàng, chụp thẳng, thấy biển hiệu</string>
+    <string name="guide_sign_title">Biển hiệu</string>
+    <string name="guide_sign_text">Chụp gần: đọc rõ tên và số điện thoại</string>
+    <string name="guide_info_title">Giờ mở cửa, thực đơn</string>
+    <string name="guide_info_text">Giờ mở cửa, thực đơn, giá, số điện thoại trên cửa</string>
+    <string name="guide_plate_title">Biển đăng ký kinh doanh</string>
+    <string name="guide_plate_text">Tên công ty, địa chỉ và mã số thuế (MST)</string>
+    <string name="map_satellite">Vệ tinh</string>
+    <string name="map_street">Bản đồ</string>
+    <string name="poi_unsure">GPS không chắc ở đây: các ảnh của địa điểm này cách xa nhau. Hãy kiểm tra ghim và kéo về đúng cửa (xem Vệ tinh sẽ dễ hơn).</string>
+    <string name="poi_unsure_indoor">Phần lớn ảnh chụp khi GPS yếu (trong nhà hoặc dưới mái che): ghim được suy ra từ vị trí tốt cuối cùng theo bước chân của bạn. Hãy kiểm tra và kéo về đúng cửa.</string>
+    <string name="settings_installed">Cài đặt lúc %1$s</string>
 </resources>

@@ -123,7 +123,10 @@ class GnssRecorder(private val lm: LocationManager, file: File) {
  * Gyroscope, accelerometer and rotation vector at ~50 Hz → imu.csv (timestamps = elapsedRealtimeNanos, the same
  * base as location fixes, GNSS and photos). Keeps the last second in memory to describe the shake at each photo.
  */
-class ImuRecorder(private val sm: SensorManager, file: File, private val mount: MountEstimator? = null) : SensorEventListener {
+class ImuRecorder(private val sm: SensorManager, file: File, private val mount: MountEstimator? = null,
+                  /** Place capture: called (on the sensor thread) at each step detected, for the position bridge */
+                  private val onStep: ((Long) -> Unit)? = null) : SensorEventListener {
+    private val steps = io.github.tewnut.poicapture.core.StepDetector()
     // camera-direction estimator feed: virtual gravity / linear acceleration sensors when the phone has them, else a
     // ~1 s low-pass of the accelerometer as gravity and accelerometer − gravity as linear acceleration
     private val hasGravity = sm.getDefaultSensor(Sensor.TYPE_GRAVITY) != null
@@ -191,7 +194,11 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
                     }
                     lastGyroNs = e.timestamp
                 }
-                "a" -> push(acc, e.timestamp, sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
+                "a" -> {
+                    val m = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+                    push(acc, e.timestamp, m)
+                    if (onStep != null) steps.add(e.timestamp, m.toDouble())?.let { onStep.invoke(it) }
+                }
                 "r" -> { for (i in 0 until minOf(5, v.size)) rot[i] = v[i]; hasRot = true; if (!hasGame) setUp(rot) }
                 "q" -> { for (i in 0 until minOf(5, v.size)) game[i] = v[i]; hasGame = true; setUp(game) }
             }
@@ -229,6 +236,11 @@ class ImuRecorder(private val sm: SensorManager, file: File, private val mount: 
         q.addLast(t to x)
         while (q.isNotEmpty() && t - q.first().first > 1_000_000_000L) q.removeFirst()
     }
+
+    /** The walking direction now: the camera's, from the gyro set to north by the compass, else the compass alone. */
+    @Synchronized
+    fun walkHeadingDeg(): Double? =
+        (if (hasYaw) heading.bearing(gyroYaw) else null) ?: (if (hasRot) cameraAzimuth(rot) else null)
 
     /** Fastest turn rate (rad/s) over the 100 ms before `nowNanos`: shake right now; null without a gyroscope. */
     @Synchronized

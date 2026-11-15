@@ -35,6 +35,21 @@ photos and contributes them to the target map through that map's contribution to
 - **Hardware keys**: the volume keys or a Bluetooth remote on the handlebar shoot (Place capture, manual sweep);
   nothing changes in the format.
 
+### App 0.16: GPS on foot, indoor places, photo guide
+- **GPS is needed to start a session, not to continue it.** Once started, GPS lost (inside a building, under an
+  arcade) only raises an alert; photos keep the last fix and carry `gpsStale: true` and `gpsAgeS` (age of that fix).
+- **Place capture, on foot**: a fix is trusted only when it agrees with the steps walked since the last trusted one
+  (under an arcade the GPS claimed 3–8 m while landing 30–66 m off). Otherwise the position is bridged from the last
+  trusted fix by steps (accelerometer) and direction (gyro set to north by the compass). Each photo has
+  `positionSource` (`gps` | `bridge` | `none`), `positionUncertaintyM`, `bridgedM` (metres walked on steps since the
+  last trusted fix); when bridged, `lat` / `lon` / `accuracyM` are the bridged estimate and the raw GPS is in
+  `gpsLat` / `gpsLon` / `gpsAccuracyM`. A place's start `position.source` can be `bridge`.
+- **Each place** gets `indoor` (most photos without good GPS), `positionUnsure` (photos more than 15 m apart, bridged
+  too long, or indoor, and the pin was not set by hand) and `photoSpreadM`. When unsure, the app opens the pin check
+  before the next place; a pin set there has `position.source = "pin"`.
+- The capture screen suggests what to photograph next at a place (front, sign, hours / menu, business plate) with an
+  example of each; the agent reads every photo.
+
 ### App 0.15: hand-held sweeps, contributor ID
 - **`session.holding`** (street sweeps): `"mount"` (phone fixed on the bike; also every session before 0.15) or
   `"hand"` (a passenger holds it and aims). Hand-held photos each carry their own direction:

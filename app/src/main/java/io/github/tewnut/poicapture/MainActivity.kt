@@ -133,6 +133,9 @@ object Prefs {
     fun holding(ctx: Context): io.github.tewnut.poicapture.core.Holding =
         io.github.tewnut.poicapture.core.Holding.of(sp(ctx).getString("holding", null))
     fun saveHolding(ctx: Context, h: io.github.tewnut.poicapture.core.Holding) = sp(ctx).edit().putString("holding", h.json).apply()
+    /** Maps: satellite imagery instead of the street map (remembered). */
+    fun satellite(ctx: Context): Boolean = sp(ctx).getBoolean("satellite", false)
+    fun saveSatellite(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("satellite", v).apply()
     fun askPhotoRole(ctx: Context): Boolean = sp(ctx).getBoolean("askPhotoRole", false)
     fun setAskPhotoRole(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("askPhotoRole", v).apply()
     fun savePhotoRoles(ctx: Context, r: PhotoRoles?) = sp(ctx).edit().apply {

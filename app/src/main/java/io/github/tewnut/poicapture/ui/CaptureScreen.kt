@@ -88,6 +88,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     val activity = ctx as Activity
     var service by remember { mutableStateOf<CaptureService?>(null) }
     var confirmEnd by remember { mutableStateOf(false) }
+    var endAfterCheck by remember { mutableStateOf(false) }   // End was pressed on an unsure place: check its pin first
     val previewView = remember { PreviewView(ctx) }
 
     // portrait or landscape, as the phone is held or mounted (the rest of the app is portrait); screen kept on,
@@ -157,6 +158,10 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
 
     fun end(discardIfEmpty: Boolean) {
         val s = svc ?: run { onDone(); return }
+        // the last place's position is doubtful and its pin was not checked: the pin check comes first, then the end
+        if (poiMode && ui.poiId != null && ui.poiUnsure && !draft.moved && !discardIfEmpty) {
+            endAfterCheck = true; reviewing = true; return
+        }
         val id = runCatching { s.session.id }.getOrNull()
         if (poiMode && ui.poiId != null) s.finishPoi(draft.pin, draft.moved, draft.fields(), draft.status)   // keep it with what was typed
         s.finishSession()
@@ -171,8 +176,10 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     if (reviewing && session != null) {
         val start = remember(ui.poiId) { svc?.poiStartPosition() }
         PoiSheet(ui.poiNumber, start, ui.poiRoles, photoRoles, draft, ui.poiRead, ui.reading > 0, onMore = { reviewing = false },
+            unsure = ui.poiUnsure, indoor = ui.poiIndoor,
             onSave = { pin, moved, fields, status ->
                 svc?.finishPoi(pin, moved, fields, status)
+                if (endAfterCheck) { endAfterCheck = false; reviewing = false; end(discardIfEmpty = false); return@PoiSheet }
                 reviewing = false
                 saved = ctx.getString(R.string.capture_place_saved, ui.poiNumber)
                 draft = PoiDraft()
@@ -219,6 +226,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 val alert = when {
                     ui.camera == "lost" -> stringResource(R.string.capture_camera_busy)
                     ui.error != null -> ui.error.text()
+                    !ui.gpsFresh && !notStarted -> stringResource(R.string.capture_gps_lost_banner)
                     else -> ui.warnings.firstOrNull()?.text()
                 }
                 if (alert != null) {
@@ -233,7 +241,9 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
 
         // ---------- the main actions, under the thumb: right rail in landscape, bottom bar in portrait ----------
         val upright = ui.portrait
-        val nextPlace = {
+        val nextPlace = nextPlace@{
+            // GPS doubtful for this place (photos far apart, taken inside, or carried by steps for long): check the pin
+            if (ui.poiUnsure && !draft.moved) { reviewing = true; return@nextPlace }
             svc?.finishPoi(draft.pin, draft.moved, draft.fields(), draft.status)
             saved = ctx.getString(R.string.capture_place_saved, ui.poiNumber)
             draft = PoiDraft()
@@ -309,6 +319,8 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                         modifier = Modifier.background(Palette.Green, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
                 }
                 if (saved == null) ReadLine(ui)
+                // what to photograph next, with an example (the agent reads every one of them)
+                if (!askRole && saved == null) PlaceGuideCard(if (ui.poiId != null) ui.poiRoles.values.sum() else 0)
                 if (askRole && current != null) Text(roleLabel(photoRoles, current) +
                     roleHint(photoRoles, current).let { h -> if (h.isNotBlank()) ": $h" else "" },
                     color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -332,9 +344,9 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                     .background(Color(0xCC0B6B4C), RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp))
         }
 
-        // ---------- GPS lost: nothing is captured until it is back ----------
-        if (session != null && !ui.gpsFresh && (ui.camera == "on" || !notStarted)) GpsLostCard(ui, Modifier.align(Alignment.Center),
-            onEnd = { if (captured == 0) end(discardIfEmpty = true) else confirmEnd = true })
+        // ---------- no GPS yet: the session cannot start (once started, GPS lost is only an alert at the top) ----------
+        if (session != null && !ui.gpsFresh && notStarted && ui.camera == "on") GpsLostCard(ui, Modifier.align(Alignment.Center),
+            onEnd = { end(discardIfEmpty = true) })
 
         // ---------- street sweep in the dark: not started, say why and what to do ----------
         if (notStarted && session != null && !poiMode && ui.camera == "on" && ui.tooDark) TooDarkCard(Modifier.align(Alignment.Center),
@@ -419,8 +431,8 @@ private fun Speed(ui: CaptureUi) {
 }
 
 /**
- * In front of the controls while the GPS is stale (no fix for 5 s): photos, marks and video are on hold, so the
- * contributor fixes the GPS first. Goes away by itself when a fix comes back.
+ * Before the start, while there is no GPS fix: the session cannot start without one. Goes away by itself (and the
+ * session starts) when a fix comes in. Once started, GPS lost is only an alert line: photos keep the last fix.
  */
 @Composable
 private fun GpsLostCard(ui: CaptureUi, modifier: Modifier, onEnd: () -> Unit) {
