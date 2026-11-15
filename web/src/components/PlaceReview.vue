@@ -2,11 +2,10 @@
 // One place: photos, what was read (each field with the photo it came from), the three pins, the decision.
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Photo from './Photo.vue'
-import CopyLink from './CopyLink.vue'
-import { to, shareUrl } from '../router'
 import { reviewOf, putReview, gstat, photoUrl } from '../store'
+import { t } from '../i18n'
 import type { Dataset, Place, Review, FieldKey, PinSource } from '../types'
-import { FIELD_KEYS, FIELD_LABEL } from '../types'
+import { FIELD_KEYS } from '../types'
 
 const props = defineProps<{ ds: Dataset; place: Place }>()
 const emit = defineEmits<{ close: []; next: [] }>()
@@ -31,10 +30,10 @@ const view = ref<View>(pinSource.value)
 watch(() => props.place.id, () => (view.value = pinSource.value))
 const chips = computed(() => {
   const c: { key: View; label: string; color: string; can: boolean }[] = []
-  if (first.value) c.push({ key: firstLabel.value, label: firstLabel.value === 'algorithm' ? 'Algo' : 'Contributor', color: 'green', can: true })
-  if (props.place.pins.agent) c.push({ key: 'agent', label: 'Agent', color: 'purple', can: true })
-  c.push({ key: 'manual', label: 'Pin', color: 'orange', can: false })
-  if (props.place.pins.google || google.value) c.push({ key: 'google', label: 'Google', color: 'blue', can: false })
+  if (first.value) c.push({ key: firstLabel.value, label: t(firstLabel.value === 'algorithm' ? 'chipAlgo' : 'chipContributor'), color: 'green', can: true })
+  if (props.place.pins.agent) c.push({ key: 'agent', label: t('chipAgent'), color: 'purple', can: true })
+  c.push({ key: 'manual', label: t('chipPin'), color: 'orange', can: false })
+  if (props.place.pins.google || google.value) c.push({ key: 'google', label: t('chipGoogle'), color: 'blue', can: false })
   return c
 })
 function pick(k: View) {
@@ -42,6 +41,7 @@ function pick(k: View) {
   if (k === 'agent' || k === 'algorithm' || k === 'contributor') usePin(k)
 }
 const finalPin = computed(() => r.value.pin || (pinSource.value === 'agent' ? props.place.pins.agent : first.value))
+const firstName = computed(() => t(firstLabel.value))
 
 // photos: full screen viewer and open in a new tab
 const full = ref(false)
@@ -95,8 +95,7 @@ async function decide(d: Review['decision']) {
   if (d !== 'todo') emit('next')
 }
 defineExpose({ setPin: async (lat: number, lon: number) => { r.value.pin = { lat, lon, source: 'manual' }; await save() } })
-
-const STATUS_LABEL: Record<string, string> = { open: 'open', closed: 'closed', for_rent: 'for rent', under_construction: 'under construction', gone: 'gone', unknown: 'unknown' }
+const G_LABEL = { found: 'gFound', new: 'gNew', todo: 'gTodo' } as const
 </script>
 
 <template>
@@ -105,22 +104,22 @@ const STATUS_LABEL: Record<string, string> = { open: 'open', closed: 'closed', f
       <div>
         <h2>{{ place.name }}</h2>
         <div class="muted">
-          <input class="cat" :value="r.category ?? place.category ?? ''" placeholder="category" @change="r.category = ($event.target as HTMLInputElement).value; save()" />
-          · <span :class="['chip', place.status !== 'open' ? 'bad' : '']">{{ STATUS_LABEL[place.status] }}</span>
-          <span v-if="place.confidence === 'low'" class="chip warn">name partly read</span>
-          <span :class="['chip', 'g-' + gstat(place)]">{{ { found: 'on Google Maps', new: 'not on Google nearby', todo: 'Google not checked' }[gstat(place)] }}</span>
+          <input class="cat" :value="r.category ?? place.category ?? ''" :placeholder="t('category')" @change="r.category = ($event.target as HTMLInputElement).value; save()" />
+          · <span :class="['chip', place.status !== 'open' ? 'bad' : '']">{{ t('status_' + place.status) }}</span>
+          <span v-if="place.confidence === 'low'" class="chip warn">{{ t('namePartly') }}</span>
+          <span :class="['chip', 'g-' + gstat(place)]">{{ t(G_LABEL[gstat(place)]) }}</span>
         </div>
       </div>
-      <div class="hd"><CopyLink :url="shareUrl(to.place(ds.id, place.id))" /><button class="ghost" title="Close" @click="emit('close')">✕</button></div>
+      <button class="ghost" :title="t('close')" @click="emit('close')">✕</button>
     </header>
 
-    <div v-if="!photos.length" class="nophotos muted">No photo was kept for this place.</div>
+    <div v-if="!photos.length" class="nophotos muted">{{ t('noPhotoKept') }}</div>
     <div v-else class="photos">
       <div class="frame">
         <Photo class="big" :ds="ds.id" :path="photos[big]?.file" :alt="place.name" @click="full = true" />
         <div class="tools">
-          <button title="Full screen" @click="full = true">⤢</button>
-          <button title="Open the photo in a new tab" @click="newTab">↗</button>
+          <button :title="t('fullScreen')" @click="full = true">⤢</button>
+          <button :title="t('newTab')" @click="newTab">↗</button>
         </div>
       </div>
       <div v-if="photos[big]?.why" class="why muted">#{{ photos[big]?.index }} · {{ photos[big]?.why }}</div>
@@ -130,75 +129,75 @@ const STATUS_LABEL: Record<string, string> = { open: 'open', closed: 'closed', f
     </div>
     <p v-if="place.note" class="note">{{ place.note }}</p>
 
-    <h3>What the photos say</h3>
+    <h3>{{ t('whatPhotosSay') }}</h3>
     <table class="fields">
       <tr v-for="k in FIELD_KEYS.filter((k) => place.fields[k] || r.fields[k] || ['phone', 'houseNumber', 'openingHours'].includes(k))" :key="k" :class="fieldState(k)">
-        <th>{{ FIELD_LABEL[k] }}<div v-if="place.fields[k]" class="src">photo #{{ place.fields[k]?.photo ?? '?' }}<span v-if="place.fields[k]?.sure && place.fields[k]?.sure !== 'high'"> · {{ place.fields[k]?.sure }}</span></div></th>
-        <td><input :value="shown(k)" :placeholder="place.fields[k] ? '' : 'not on the photos'" @change="edit(k, $event)" /></td>
+        <th>{{ t('field.' + k) }}<div v-if="place.fields[k]" class="src">{{ t('photoN', { n: place.fields[k]?.photo ?? '?' }) }}<span v-if="place.fields[k]?.sure && place.fields[k]?.sure !== 'high'"> · {{ t('sure_' + place.fields[k]?.sure) }}</span></div></th>
+        <td><input :value="shown(k)" :placeholder="place.fields[k] ? '' : t('notOnPhotos')" @change="edit(k, $event)" /></td>
         <td class="acts">
-          <button :class="['ok', { on: fieldState(k) === 'ok' || fieldState(k) === 'edited' }]" title="Correct" :disabled="!shown(k)" @click="setField(k, 'ok')">✓</button>
-          <button :class="['no', { on: fieldState(k) === 'rejected' }]" title="Wrong: leave out" :disabled="!shown(k)" @click="setField(k, 'rejected')">✕</button>
+          <button :class="['ok', { on: fieldState(k) === 'ok' || fieldState(k) === 'edited' }]" :title="t('correct')" :disabled="!shown(k)" @click="setField(k, 'ok')">✓</button>
+          <button :class="['no', { on: fieldState(k) === 'rejected' }]" :title="t('wrongLeaveOut')" :disabled="!shown(k)" @click="setField(k, 'rejected')">✕</button>
         </td>
       </tr>
     </table>
 
-    <h3>Position</h3>
+    <h3>{{ t('position') }}</h3>
     <div class="chips">
       <button v-for="c in chips" :key="c.key" :class="['pchip', c.color, { view: view === c.key, final: pinSource === c.key }]"
-        :title="c.can ? 'Show, and use as the final pin' : c.key === 'google' ? 'Show (for checking only)' : 'Show'" @click="pick(c.key)">
+        :title="c.can ? t('chipUse') : c.key === 'google' ? t('chipShowGoogle') : t('chipShow')" @click="pick(c.key)">
         <i class="dot"></i>{{ c.label }}<span v-if="pinSource === c.key" class="tick">✓</span>
       </button>
     </div>
     <div class="pinfo">
       <template v-if="view === 'algorithm' || view === 'contributor'">
-        <b>{{ view === 'algorithm' ? 'Algorithm' : 'Contributor' }}</b><span v-if="pinSource === view" class="fin"> · final pin</span><br />
+        <b>{{ t(view === 'algorithm' ? 'algorithmT' : 'contributorT') }}</b><span v-if="pinSource === view" class="fin"> · {{ t('finalPin') }}</span><br />
         {{ first?.method }}<template v-if="first?.uncertaintyM">, ±{{ first.uncertaintyM }} m</template>.
-        <template v-if="first?.sightings?.length"> Green lines on the map: the photos it was located from.</template>
+        <template v-if="first?.sightings?.length"> {{ t('greenLines') }}</template>
       </template>
       <template v-else-if="view === 'agent' && place.pins.agent">
-        <b>Agent</b><span v-if="pinSource === 'agent'" class="fin"> · final pin</span><br />
-        {{ place.pins.agent.why }}<template v-if="first">, {{ distM(first, place.pins.agent) }} m from the {{ firstLabel }} pin</template>.
+        <b>{{ t('chipAgent') }}</b><span v-if="pinSource === 'agent'" class="fin"> · {{ t('finalPin') }}</span><br />
+        {{ place.pins.agent.why }}<template v-if="first">, {{ t('fromPin', { m: distM(first, place.pins.agent), pin: firstName }) }}</template>.
       </template>
       <template v-else-if="view === 'manual'">
-        <b>Your pin</b><span v-if="pinSource === 'manual'" class="fin"> · final pin</span><br />
-        Drag the orange pin on the map to the doorway; it becomes the final pin.
-        <template v-if="finalPin"><br /><span class="muted">Now at {{ finalPin.lat.toFixed(6) }}, {{ finalPin.lon.toFixed(6) }}</span></template>
+        <b>{{ t('yourPin') }}</b><span v-if="pinSource === 'manual'" class="fin"> · {{ t('finalPin') }}</span><br />
+        {{ t('dragPin') }}
+        <template v-if="finalPin"><br /><span class="muted">{{ t('nowAt') }} {{ finalPin.lat.toFixed(6) }}, {{ finalPin.lon.toFixed(6) }}</span></template>
       </template>
       <template v-else-if="view === 'google'">
-        <b>Google Maps</b> <span class="muted">· for checking only, never published</span><br />
+        <b>{{ t('googleMaps') }}</b> <span class="muted">· {{ t('checkingOnly') }}</span><br />
         <template v-if="google && google.name">
-          {{ google.name }}<template v-if="place.pins.google && first">, {{ distM(first, place.pins.google) }} m from the {{ firstLabel }} pin</template><br />
+          {{ google.name }}<template v-if="place.pins.google && first">, {{ t('fromPin', { m: distM(first, place.pins.google), pin: firstName }) }}</template><br />
           <span v-if="google.address">{{ google.address }}<br /></span>
           <span v-if="google.phone">{{ google.phone }}<br /></span>
           <span v-if="google.website">{{ google.website }}<br /></span>
           <span v-if="google.openingHours" class="muted">{{ google.openingHours.join(' · ') }}<br /></span>
           <span v-if="google.businessStatus && google.businessStatus !== 'OPERATIONAL'" class="warn">Google: {{ google.businessStatus.toLowerCase().replace('_', ' ') }}<br /></span>
-          <a v-if="googleUrl" :href="googleUrl" target="_blank" rel="noopener noreferrer">open on Google Maps</a>
+          <a v-if="googleUrl" :href="googleUrl" target="_blank" rel="noopener noreferrer">{{ t('openGoogle') }}</a>
         </template>
-        <template v-else>Not found nearby: probably a place Google does not have.</template>
+        <template v-else>{{ t('googleNotFound') }}</template>
       </template>
     </div>
 
-    <textarea :value="r.comment || ''" placeholder="Comment (optional)" @change="r.comment = ($event.target as HTMLTextAreaElement).value; save()"></textarea>
+    <textarea :value="r.comment || ''" :placeholder="t('comment')" @change="r.comment = ($event.target as HTMLTextAreaElement).value; save()"></textarea>
 
     <div v-if="full" class="viewer" @click.self="full = false">
       <Photo class="vimg" :ds="ds.id" :path="photos[big]?.file" :alt="place.name" />
       <div class="vbar">
-        <span>{{ big + 1 }} / {{ photos.length }}<template v-if="photos[big]?.index != null"> · photo #{{ photos[big]?.index }}</template><template v-if="photos[big]?.why"> · {{ photos[big]?.why }}</template></span>
+        <span>{{ big + 1 }} / {{ photos.length }}<template v-if="photos[big]?.index != null"> · {{ t('photoN', { n: photos[big]?.index }) }}</template><template v-if="photos[big]?.why"> · {{ photos[big]?.why }}</template></span>
         <span>
-          <button v-if="photos.length > 1" title="Previous (←)" @click="step(-1)">‹</button>
-          <button v-if="photos.length > 1" title="Next (→)" @click="step(1)">›</button>
-          <button title="Open in a new tab" @click="newTab">↗</button>
-          <button title="Close (Esc)" @click="full = false">✕</button>
+          <button v-if="photos.length > 1" :title="t('prev')" @click="step(-1)">‹</button>
+          <button v-if="photos.length > 1" :title="t('next')" @click="step(1)">›</button>
+          <button :title="t('newTab')" @click="newTab">↗</button>
+          <button :title="t('closeEsc')" @click="full = false">✕</button>
         </span>
       </div>
     </div>
 
     <footer>
-      <button class="primary" @click="decide('confirmed')">{{ r.decision === 'confirmed' ? '✓ Confirmed' : 'Confirm' }}</button>
-      <button class="secondary" @click="decide('visit')">{{ r.decision === 'visit' ? 'Visit queued' : 'Needs a visit' }}</button>
-      <button class="danger" @click="decide('rejected')">{{ r.decision === 'rejected' ? 'Rejected' : 'Reject' }}</button>
-      <button v-if="r.decision !== 'todo'" class="ghost" @click="decide('todo')">Undo</button>
+      <button class="primary" @click="decide('confirmed')">{{ r.decision === 'confirmed' ? t('confirmedBtn') : t('confirm') }}</button>
+      <button class="secondary" @click="decide('visit')">{{ r.decision === 'visit' ? t('visitQueued') : t('needsVisit') }}</button>
+      <button class="danger" @click="decide('rejected')">{{ r.decision === 'rejected' ? t('rejectedF') : t('reject') }}</button>
+      <button v-if="r.decision !== 'todo'" class="ghost" @click="decide('todo')">{{ t('undo') }}</button>
     </footer>
   </div>
 </template>
@@ -208,7 +207,6 @@ const STATUS_LABEL: Record<string, string> = { open: 'open', closed: 'closed', f
 header { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
 h2 { margin: 0; font-size: 19px; letter-spacing: -0.2px; }
 h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
-.hd { display: flex; align-items: flex-start; gap: 2px; }
 .cat { border: 0; border-bottom: 1px dashed var(--line); font: inherit; color: var(--muted); width: 140px; background: transparent; }
 .photos .big { width: 100%; max-height: 300px; object-fit: contain; background: #111; border-radius: 10px; display: block; }
 .nophotos { background: var(--canvas); border-radius: 10px; padding: 18px; text-align: center; font-size: 13px; }

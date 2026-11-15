@@ -5,6 +5,7 @@ import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { state, reviewOf, gstat, openPlace, openDataset, openTask } from '../store'
+import { t, lang } from '../i18n'
 import type { Dataset, Place, Review } from '../types'
 
 const emit = defineEmits<{ select: [ds: string, place: string]; movePin: [lat: number, lon: number] }>()
@@ -49,7 +50,7 @@ function drawDataset(d: Dataset, bounds: L.LatLngExpression[]) {
   if (d.track.length > 1) L.polyline(d.track, { color: '#7d8c84', weight: 4, opacity: dim ? 0.25 : 0.55 }).addTo(base)
   if (state.open === d.id)
     for (const s of d.shots) L.circleMarker([s[1], s[2]], { radius: 2.2, color: '#4b5a52', weight: 1, fillOpacity: 0.8 })
-      .bindTooltip(`photo #${s[0]}`).addTo(base)
+      .bindTooltip(t('photoN', { n: s[0] })).addTo(base)
   d.places.forEach((p, k) => {
     const r = reviewOf(d.id, p)
     const at = pinOf(p, r)
@@ -58,18 +59,18 @@ function drawDataset(d: Dataset, bounds: L.LatLngExpression[]) {
       .bindTooltip(esc(p.name)).addTo(base)
     m.on('click', () => emit('select', d.id, p.id))
   })
-  for (const t of d.tasks.filter((t) => t.type !== 'visit')) {
-    L.marker([t.lat, t.lon], { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="rm">✕</div>' }) })
-      .bindTooltip(`${t.type === 'removal' ? 'Removal' : 'Verify removal'}: ${esc(t.name)}`).addTo(base)
+  for (const tk of d.tasks.filter((x) => x.type !== 'visit')) {
+    L.marker([tk.lat, tk.lon], { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="rm">✕</div>' }) })
+      .bindTooltip(t(tk.type === 'removal' ? 'removalTip' : 'verifyTip', { name: esc(tk.name) })).addTo(base)
   }
 }
 
 function drawSelected() {
   sel.clearLayers()
-  const t = openTask.value
-  if (t) {
-    L.circle([t.lat, t.lon], { radius: 12, color: t.type === 'visit' ? '#b7791f' : '#d6336c', weight: 3, fillOpacity: 0.15 })
-      .bindTooltip(esc(t.name)).addTo(sel)
+  const tk = openTask.value
+  if (tk) {
+    L.circle([tk.lat, tk.lon], { radius: 12, color: tk.type === 'visit' ? '#b7791f' : '#d6336c', weight: 3, fillOpacity: 0.15 })
+      .bindTooltip(esc(tk.name)).addTo(sel)
   }
   const d = openDataset.value, p = openPlace.value
   if (!d || !p) return
@@ -78,23 +79,23 @@ function drawSelected() {
   if (first) {
     for (const s of first.sightings || []) {
       L.polyline([[s.lat, s.lon], [first.lat, first.lon]], { color: '#1f7a52', weight: 2 }).addTo(sel)
-      L.circleMarker([s.lat, s.lon], { radius: 4, color: '#1f7a52', fillColor: '#fff', fillOpacity: 1, weight: 2 }).bindTooltip(`photo #${s.i}`).addTo(sel)
+      L.circleMarker([s.lat, s.lon], { radius: 4, color: '#1f7a52', fillColor: '#fff', fillOpacity: 1, weight: 2 }).bindTooltip(t('photoN', { n: s.i })).addTo(sel)
     }
     if (first.uncertaintyM) L.circle([first.lat, first.lon], { radius: first.uncertaintyM, color: '#1f7a52', weight: 1, fillOpacity: 0.05 }).addTo(sel)
     L.circleMarker([first.lat, first.lon], { radius: 7, color: '#1f7a52', weight: 3, fillColor: '#fff', fillOpacity: 1 })
-      .bindTooltip(p.pins.algorithm ? 'algorithm' : 'contributor').addTo(sel)
+      .bindTooltip(t(p.pins.algorithm ? 'algorithm' : 'contributor')).addTo(sel)
   }
   const g = p.pins.google
   if (g) {
-    L.circleMarker([g.lat, g.lon], { radius: 7, color: '#1659c7', weight: 2, dashArray: '3 3', fillOpacity: 0.1 }).bindTooltip(`Google: ${esc(g.name)} (review only)`).addTo(sel)
+    L.circleMarker([g.lat, g.lon], { radius: 7, color: '#1659c7', weight: 2, dashArray: '3 3', fillOpacity: 0.1 }).bindTooltip(t('googleTip', { name: esc(g.name) })).addTo(sel)
   }
   const a = p.pins.agent
-  if (a) L.circleMarker([a.lat, a.lon], { radius: 7, color: '#7c3aed', weight: 3, fillColor: '#fff', fillOpacity: 1 }).bindTooltip(`agent: ${esc(a.why)}`).addTo(sel)
+  if (a) L.circleMarker([a.lat, a.lon], { radius: 7, color: '#7c3aed', weight: 3, fillColor: '#fff', fillOpacity: 1 }).bindTooltip(t('agentTip', { why: esc(a.why) })).addTo(sel)
   const fin = pinOf(p, r)
   const drag = L.marker([fin.lat, fin.lon], {
     draggable: true, zIndexOffset: 1000,
     icon: L.divIcon({ className: '', iconSize: [30, 40], iconAnchor: [15, 38], html: '<div class="final-pin"></div>' }),
-  }).bindTooltip('final pin: drag to the doorway').addTo(sel)
+  }).bindTooltip(t('finalPinTip')).addTo(sel)
   drag.on('dragend', () => { const ll = drag.getLatLng(); emit('movePin', ll.lat, ll.lng) })
 }
 
@@ -123,7 +124,7 @@ onMounted(() => {
   const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
     maxNativeZoom: 19, maxZoom: 21, attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics',
   })
-  L.control.layers({ OpenStreetMap: osm, 'Satellite (Esri)': sat }, undefined, { position: 'topright' }).addTo(map)
+  L.control.layers({ [t('osmLayer')]: osm, [t('satLayer')]: sat }, undefined, { position: 'topright' }).addTo(map)
   map.setView([10.776, 106.757], 15)
   base = L.layerGroup().addTo(map)
   sel = L.layerGroup().addTo(map)
@@ -131,12 +132,12 @@ onMounted(() => {
 })
 onBeforeUnmount(() => map?.remove())
 
-watch(() => [state.datasets.length, state.shown.size, state.open, state.reviews], drawAll, { deep: true })
+watch(() => [state.datasets.length, state.shown.size, state.open, state.reviews, lang.value], drawAll, { deep: true })
 watch(() => state.place, () => { drawAll(); focusPlace() })
 watch(() => [state.task, state.open], () => {
   drawAll()
-  const t = openTask.value
-  if (t) map.setView([t.lat, t.lon], Math.max(map.getZoom(), 19))
+  const tk = openTask.value
+  if (tk) map.setView([tk.lat, tk.lon], Math.max(map.getZoom(), 19))
 })
 watch(() => state.open, (v) => { if (v && !state.place) fitOpen(); else if (!v) fitAll() })
 

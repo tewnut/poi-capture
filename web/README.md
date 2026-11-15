@@ -2,8 +2,8 @@
 
 Stage 3 of the pipeline (docs/pipeline.md): confirm what the agentic processing found, then publish.
 
-- **Sessions** (left panel): every imported session with its stage, **Captured → Agent processed → Human
-  reviewed**, and review progress; filter by stage, kind, mounted / in hand. Import a processed session folder
+- **Sessions** (left panel): every imported session with its stage as three dots, Captured → Agent processed → Human
+  reviewed (the name on hover), and review progress; filter by stage, kind, mounted / in hand. Import a processed session folder
   (with `result.json`, from the `process-sweep` skill), a zip of it, or a zip exported from the phone, with the
   buttons under the list or by dropping it on the page. Everything stays in this browser (IndexedDB); nothing is
   uploaded, and there is no sign-in.
@@ -12,7 +12,8 @@ Stage 3 of the pipeline (docs/pipeline.md): confirm what the agentic processing 
   Pin, Google for checking only), then Confirm, Needs a visit or Reject.
 - **All tasks**: visits for Place capture and removals across the sessions shown, grouped by session, to plan
   field visits; export as GeoJSON.
-- **Publish** (top of the panel): confirmed places and removals as GeoJSON and CSV, new places as an
+- **Settings** (⚙ at the top): your reviewer name and the language (English / Tiếng Việt).
+- **Publish** (in a session): that session's confirmed places and removals as GeoJSON and CSV, new places as an
   OpenStreetMap `.osm` file for JOSM. Google's details and pins are never written.
 - **Links**: `#/` sessions, `#/tasks` all tasks, `#/s/<session>` its places, `#/s/<session>/tasks`,
   `#/s/<session>/p/<place>`, `#/s/<session>/t/<task>`. A link opens only where that session was imported (there

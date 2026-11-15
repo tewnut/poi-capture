@@ -25,8 +25,3 @@ export const to = {
   place: (ds: string, place: string) => ({ name: 'place', params: { ds, place } }),
   task: (ds: string, task: number) => ({ name: 'task', params: { ds, task: String(task) } }),
 }
-
-/** The full address of a route, to copy and share. */
-export function shareUrl(r: ReturnType<(typeof to)[keyof typeof to]>) {
-  return new URL(router.resolve(r as any).href, location.href).href
-}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watchEffect } from 'vue'
 import { photoUrl } from '../store'
+import { t } from '../i18n'
 
 const props = defineProps<{ ds: string; path?: string | null; alt?: string }>()
 const url = ref<string | null>(null)
@@ -9,7 +10,7 @@ watchEffect(async () => { url.value = await photoUrl(props.ds, props.path) })
 
 <template>
   <img v-if="url" :src="url" :alt="alt || ''" loading="lazy" />
-  <div v-else class="nophoto">no photo</div>
+  <div v-else class="nophoto">{{ t('noPhoto') }}</div>
 </template>
 
 <style scoped>

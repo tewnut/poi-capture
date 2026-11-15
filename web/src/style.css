@@ -26,8 +26,12 @@ button.small { padding: 4px 10px; font-size: 13px; }
 
 .side { background: var(--card); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .sidehead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 12px 6px; }
-.who { display: flex; align-items: center; gap: 8px; padding: 0 12px 10px; font-size: 12px; border-bottom: 1px solid var(--line); }
-.who input { flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; font-size: 13px; }
+.sidehead { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.gear { font-size: 18px; line-height: 1; padding: 4px 8px; }
+.settings { display: grid; gap: 8px; padding: 10px 12px; background: var(--canvas); border-bottom: 1px solid var(--line); }
+.settings label { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; font-size: 13px; }
+.settings input, .settings select { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 13px; background: #fff; }
+.settings p { margin: 0; }
 .seg { display: flex; gap: 4px; margin: 10px 12px 0; padding: 3px; background: var(--canvas); border-radius: 10px; }
 .seg button { flex: 1; border: 0; background: none; padding: 6px 4px; border-radius: 8px; color: var(--muted); font-weight: 600; }
 .seg button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
