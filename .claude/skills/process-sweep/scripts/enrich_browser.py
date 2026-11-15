@@ -83,6 +83,7 @@ def ev(js):
 
 MAX_M = 300           # a match farther than this from the estimate is another branch
 MIN_MATCH = 0.5       # share of the sign's words found in Google's name
+NEAR_M, NEAR_MATCH = 30, 0.3   # right next to the estimate, a weaker name match is enough ("ANH HAI BẮP", 4 m)
 
 
 def name_match(sign, google):
@@ -92,7 +93,10 @@ def name_match(sign, google):
     a, b = set(fold_words(sign)), set(fold_words(google))
     if not a or not b:
         return 0.0
-    return round(max(len(a & b) / len(a), similarity(sign, google)), 2)
+    # written together or apart ("Namphong" / "Nam Phong", "Bitis" / "Biti's"): words found in Google's name squashed
+    squashed = ''.join(fold_words(google)).replace(' ', '')
+    glued = sum(1 for w in a if len(w) >= 3 and w in squashed) / len(a)
+    return round(max(len(a & b) / len(a), similarity(sign, google), glued), 2)
 
 
 def fold_words(s):
@@ -127,7 +131,8 @@ def lookup(name, lat, lon):
         s = name_match(name, c['name'])
         cands.append({'name': c['name'], 'distanceM': round(d), 'nameMatch': s, 'summary': c['text'], '_score': s - d / 500})
     cands.sort(key=lambda c: -c['_score'])
-    pick = next((c for c in cands if c['nameMatch'] >= MIN_MATCH and c['distanceM'] <= MAX_M), None)
+    pick = next((c for c in cands if (c['nameMatch'] >= MIN_MATCH and c['distanceM'] <= MAX_M)
+                 or (c['nameMatch'] >= NEAR_MATCH and c['distanceM'] <= NEAR_M)), None)
     if not found:
         # one obvious match: Google shows that place straight away, without a list
         h1 = place_h1()
@@ -137,7 +142,8 @@ def lookup(name, lat, lon):
         d = dist_m(lat, lon, float(m.group(1)), float(m.group(2)))
         only = {'name': h1, 'distanceM': round(d), 'nameMatch': name_match(name, h1), 'summary': 'the only result'}
         cands = [only]
-        if only['nameMatch'] < MIN_MATCH or only['distanceM'] > MAX_M:
+        if not ((only['nameMatch'] >= MIN_MATCH and only['distanceM'] <= MAX_M)
+                or (only['nameMatch'] >= NEAR_MATCH and only['distanceM'] <= NEAR_M)):
             return None, cands
         pick = dict(only)
     elif pick is None:

@@ -28,14 +28,14 @@ describe('publish', () => {
     phone: { state: 'ok', value: '0886673868' }, houseNumber: { state: 'rejected', value: '106' },
     openingHours: { state: 'ok', value: '07:00–22:00' } }, reviewer: 'A', at: '2026-11-15T10:00:00Z' }
 
-  it('uses the confirmed fields and the agent pin, never Google', () => {
+  it('uses the confirmed fields and the agent pin, never the Google pin', () => {
     const r = record({ dataset, place, review })
     expect(r.phone).toBe('0886673868')
     expect(r.houseNumber).toBeNull()              // rejected by the reviewer
     expect(r.lat).toBeCloseTo(10.77695)           // agent pin, not Google's
     expect(r.pinSource).toBe('agent')
     const all = geojson([{ dataset, place, review }], []) + csv([{ dataset, place, review }], []) + osm([{ dataset, place, review }])
-    expect(all).not.toContain('Google')
+    expect(all).not.toContain('Google address')
     expect(all).not.toContain('10.7771')
   })
 
@@ -71,6 +71,36 @@ describe('publish', () => {
     expect(c).toContain('"A, ""B"""')
     expect(c).toContain('remove,Old shop')
     expect(c.charCodeAt(0)).toBe(0xfeff)
+  })
+})
+
+describe('Google-filled fields', () => {
+  const p2: Place = { ...place, fields: { ...place.fields, website: { value: 'shop.vn', source: 'google', sure: 'medium' } } }
+  const rv: Review = { decision: 'confirmed', fields: { website: { state: 'ok', value: 'shop.vn' } } }
+  it('are marked in CSV / GeoJSON and left out of the .osm file', () => {
+    expect(record({ dataset, place: p2, review: rv }).fromGoogle).toBe('website')
+    expect(csv([{ dataset, place: p2, review: rv }], [])).toContain('shop.vn')
+    expect(osm([{ dataset, place: p2, review: rv }])).not.toContain('shop.vn')
+  })
+  it('edited by the reviewer, they are the reviewer\'s', () => {
+    const ed: Review = { decision: 'confirmed', fields: { website: { state: 'edited', value: 'shop2.vn' } } }
+    expect(record({ dataset, place: p2, review: ed }).fromGoogle).toBe('')
+    expect(osm([{ dataset, place: p2, review: ed }])).toContain('shop2.vn')
+  })
+})
+
+describe('comparison labels stay metadata', () => {
+  const p3: Place = { ...place, fields: {
+    phone: { value: '0886673868', photo: 37, google: 'differs', googleValue: '02811112222' },
+    houseNumber: { value: '106', photo: 37, google: 'match' },
+    website: { value: 'shop.vn', source: 'google', sure: 'medium', note: 'Google lists only one day' } } }
+  const rv: Review = { decision: 'confirmed', fields: { phone: { state: 'ok', value: '0886673868' },
+    houseNumber: { state: 'ok', value: '106' }, website: { state: 'ok', value: 'shop.vn' } } }
+  it('never appear in GeoJSON, CSV or OSM', () => {
+    const out = geojson([{ dataset, place: p3, review: rv }], []) + csv([{ dataset, place: p3, review: rv }], []) + osm([{ dataset, place: p3, review: rv }])
+    for (const s of ['match', 'differs', 'googleValue', '02811112222', 'only one day', 'khớp', 'khác Google'])
+      expect(out).not.toContain(s)
+    expect(out).toContain('0886673868')
   })
 })
 

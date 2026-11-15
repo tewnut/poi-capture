@@ -13,6 +13,10 @@ Stage 3 of the pipeline (docs/pipeline.md): confirm what the agentic processing 
 - **All tasks**: visits for Place capture and removals across the sessions shown, grouped by session, to plan
   field visits; export as GeoJSON.
 - **Settings** (⚙ at the top): your reviewer name and the language (English / Tiếng Việt).
+- **Google** (decided 2026-11-15, docs/pipeline.md): fields the photos lack are filled from Google and marked; a field
+  that matches or differs from Google is labelled on the review screen only. Labels never reach the published data;
+  Google-filled fields are listed in `fromGoogle` (GeoJSON / CSV) and left out of the `.osm` file.
+- **Clear all data** (⚙): removes every session, photo and review from this browser, to import fresh sessions.
 - **Publish** (in a session): that session's confirmed places and removals as GeoJSON and CSV, new places as an
   OpenStreetMap `.osm` file for JOSM. Google's details and pins are never written.
 - **Links**: `#/` sessions, `#/tasks` all tasks, `#/s/<session>` its places, `#/s/<session>/tasks`,

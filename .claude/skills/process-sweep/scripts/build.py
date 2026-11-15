@@ -268,6 +268,13 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
     photos = json.load(open(os.path.join(work, 'photos.json'), encoding='utf-8'))
     session = json.load(open(os.path.join(work, 'session.json'), encoding='utf-8'))
     spec = json.load(open(os.path.join(work, 'places.json'), encoding='utf-8'))
+    # stopped (no travel direction yet): a photo without a camera direction borrows its nearest neighbour's
+    known = [i for i, p in enumerate(photos) if p.get('cameraBearing') is not None]
+    for i, p in enumerate(photos):
+        if p.get('cameraBearing') is None and known:
+            j = min(known, key=lambda k: abs(k - i))
+            p['cameraBearing'] = photos[j]['cameraBearing']
+            p['cameraBearingSource'] = (photos[j].get('cameraBearingSource') or 'assumed') + '+neighbour'
     default_d = float(spec.get('defaultFacadeDistanceM') or 30)
     best_n = int(spec.get('bestPhotos') or best_n)
     global BEARING_OFFSET

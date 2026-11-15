@@ -9,7 +9,7 @@ import TaskDetail from './components/TaskDetail.vue'
 import TaskRow from './components/TaskRow.vue'
 import StageBar from './components/StageBar.vue'
 import Photo from './components/Photo.vue'
-import { state, load, add, remove, reviewOf, gstat, openDataset, openPlace, openTask, setReviewer, stageOf, STAGES } from './store'
+import { state, load, add, remove, clearAll, reviewOf, gstat, openDataset, openPlace, openTask, setReviewer, stageOf, STAGES } from './store'
 import { to } from './router'
 import { t, lang, setLang, LANGS, type Lang } from './i18n'
 import { importFiles } from './importer'
@@ -115,6 +115,13 @@ function kindLabel(d: Dataset) {
 }
 const STAGE_NAME = { captured: 'stageCaptured', processed: 'stageProcessed', reviewed: 'stageReviewed' } as const
 function toggleShown(id: string) { state.shown.has(id) ? state.shown.delete(id) : state.shown.add(id) }
+async function wipe() {
+  if (!state.datasets.length) return
+  if (!window.confirm(t('clearAllConfirm', { n: state.datasets.length }))) return
+  await clearAll()
+  settingsOpen.value = false
+  router.push(to.sessions())
+}
 async function del(d: Dataset) {
   if (!window.confirm(t('removeConfirm', { name: d.session.name || d.id }))) return
   await remove(d.id)
@@ -189,6 +196,10 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
             <option v-for="l in LANGS" :key="l.key" :value="l.key">{{ l.label }}</option>
           </select></label>
         <p class="muted small">{{ t('reviewerHint') }}</p>
+        <div class="wipe">
+          <button class="danger small" :disabled="!state.datasets.length" @click="wipe">{{ t('clearAll') }}</button>
+          <span class="muted small">{{ t('clearAllHint') }}</span>
+        </div>
       </div>
       <input ref="dirInput" type="file" webkitdirectory multiple hidden @change="onPick" />
       <input ref="fileInput" type="file" accept=".zip" multiple hidden @change="onPick" />

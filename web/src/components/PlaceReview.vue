@@ -96,6 +96,22 @@ async function decide(d: Review['decision']) {
 }
 defineExpose({ setPin: async (lat: number, lon: number) => { r.value.pin = { lat, lon, source: 'manual' }; await save() } })
 const G_LABEL = { found: 'gFound', new: 'gNew', todo: 'gTodo' } as const
+
+/** Where a field's value came from and how it compares, as small dots (the words on hover). */
+function marks(k: FieldKey) {
+  const f = props.place.fields[k]
+  if (!f) return []
+  const out: { cls: string; tip: string }[] = []
+  const src = f.source === 'google' ? 'Google' : f.source === 'website' ? 'website' : null
+  if (src && f.clarified) out.push({ cls: f.source === 'google' ? 'g' : 'w', tip: t('clarifiedBy', { src, v: f.photoValue || '' }) })
+  else if (f.source === 'google') out.push({ cls: 'g', tip: t('fromGoogle') + (f.note ? ` · ${t('googleOneDay')}` : '') })
+  else if (f.source === 'website') out.push({ cls: 'w', tip: t('fromWebsite') })
+  if (f.google === 'match') out.push({ cls: 'ok', tip: t('matchesGoogle') })
+  if (f.google === 'differs') out.push({ cls: 'warn', tip: `Google: ${f.googleValue || ''}` })
+  if (f.website === 'match') out.push({ cls: 'ok', tip: t('matchesWebsite') })
+  if (f.website === 'differs') out.push({ cls: 'warn', tip: `Website: ${f.websiteValue || ''}` })
+  return out
+}
 </script>
 
 <template>
@@ -132,7 +148,10 @@ const G_LABEL = { found: 'gFound', new: 'gNew', todo: 'gTodo' } as const
     <h3>{{ t('whatPhotosSay') }}</h3>
     <table class="fields">
       <tr v-for="k in FIELD_KEYS.filter((k) => place.fields[k] || r.fields[k] || ['phone', 'houseNumber', 'openingHours'].includes(k))" :key="k" :class="fieldState(k)">
-        <th>{{ t('field.' + k) }}<div v-if="place.fields[k]" class="src">{{ t('photoN', { n: place.fields[k]?.photo ?? '?' }) }}<span v-if="place.fields[k]?.sure && place.fields[k]?.sure !== 'high'"> · {{ t('sure_' + place.fields[k]?.sure) }}</span></div></th>
+        <th>{{ t('field.' + k) }}
+          <span v-for="m in marks(k)" :key="m.cls" :class="['mark', m.cls]" :title="m.tip"></span>
+          <div v-if="place.fields[k] && !place.fields[k]?.source" class="src">{{ t('photoN', { n: place.fields[k]?.photo ?? '?' }) }}<span v-if="place.fields[k]?.sure && place.fields[k]?.sure !== 'high'"> · {{ t('sure_' + place.fields[k]?.sure) }}</span></div>
+        </th>
         <td><input :value="shown(k)" :placeholder="place.fields[k] ? '' : t('notOnPhotos')" @change="edit(k, $event)" /></td>
         <td class="acts">
           <button :class="['ok', { on: fieldState(k) === 'ok' || fieldState(k) === 'edited' }]" :title="t('correct')" :disabled="!shown(k)" @click="setField(k, 'ok')">✓</button>
@@ -219,6 +238,9 @@ h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing
 .fields { width: 100%; border-collapse: collapse; }
 .fields th { text-align: left; font-weight: 600; font-size: 13px; width: 112px; vertical-align: top; padding: 6px 6px 6px 0; }
 .fields .src { font-weight: 400; font-size: 11px; color: var(--muted); }
+.mark { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 4px; vertical-align: 1px; cursor: help; }
+.mark.g { background: #1659c7; } .mark.w { background: #7c3aed; } .mark.ok { background: var(--accent); }
+.mark.warn { background: #f59f00; }
 .fields td { padding: 4px 0; vertical-align: top; }
 .fields input { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: #fff; }
 .fields tr.edited input { border-color: #b7791f; }

@@ -32,6 +32,7 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .settings label { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; font-size: 13px; }
 .settings input, .settings select { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 13px; background: #fff; }
 .settings p { margin: 0; }
+.settings .wipe { display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--line); padding-top: 8px; }
 .seg { display: flex; gap: 4px; margin: 10px 12px 0; padding: 3px; background: var(--canvas); border-radius: 10px; }
 .seg button { flex: 1; border: 0; background: none; padding: 6px 4px; border-radius: 8px; color: var(--muted); font-weight: 600; }
 .seg button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }

@@ -25,6 +25,8 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 const en: Record<string, Msg> = {
   appName: 'POI Capture Reviewer',
+  clearAll: 'Clear all data', clearAllHint: 'Sessions, photos and reviews in this browser, to import fresh ones',
+  clearAllConfirm: (p) => `Remove all ${p.n} sessions, their photos and every review from this browser? This cannot be undone.`,
   settings: 'Settings', reviewer: 'Reviewer', reviewerHint: 'Your name, saved with each decision',
   yourName: 'your name', language: 'Language', close: 'Close',
   sessions: 'Sessions', allTasks: 'All tasks', places: 'Places', tasks: 'Tasks', back: 'Sessions',
@@ -99,8 +101,11 @@ const en: Record<string, Msg> = {
   publishCount: (p) => `${plural(p.places, 'confirmed place', 'confirmed places')} and ${plural(p.removals, 'confirmed removal', 'confirmed removals')} in this session.`,
   nothingToPublish: 'Nothing to publish yet',
   nothingToPublishText: 'Confirm places in the review panel (open a place, check its fields and pin, then Confirm), or confirm removals in Tasks.',
-  publishRule: "Only what the photos showed and you confirmed is written, with the pin you chose. Google's details and pins are never included.",
-  osmNote: 'The .osm file holds new nodes for JOSM: check them against what is already mapped and follow the OSM import guidelines before uploading. Removals are only in the GeoJSON and CSV.',
+  publishRule: "What you confirmed is written, with the pin you chose. Fields filled from Google are marked (fromGoogle) in the GeoJSON and CSV, and left out of the .osm file.",
+  fromGoogle: 'from Google', matchesGoogle: 'matches Google', googleOneDay: 'one day only',
+  fromWebsite: 'from the website', matchesWebsite: 'matches the website',
+  clarifiedBy: (p) => `Clarified with ${p.src}: the photo read "${p.v}"`,
+  osmNote: 'The .osm file holds new nodes for JOSM, without the fields filled from Google (OpenStreetMap does not accept them): check them against what is already mapped and follow the OSM import guidelines before uploading. Removals are only in the GeoJSON and CSV.',
   nothingConfirmed: 'Nothing confirmed yet',
   // place review
   category: 'category', status_open: 'open', status_closed: 'closed', status_for_rent: 'for rent',
@@ -126,6 +131,8 @@ const en: Record<string, Msg> = {
 
 const vi: Record<string, Msg> = {
   appName: 'POI Capture Reviewer',
+  clearAll: 'Xóa toàn bộ dữ liệu', clearAllHint: 'Các phiên, ảnh và kết quả duyệt trong trình duyệt này, để nạp phiên mới',
+  clearAllConfirm: (p) => `Xóa cả ${p.n} phiên, ảnh và mọi kết quả duyệt khỏi trình duyệt này? Không thể hoàn tác.`,
   settings: 'Cài đặt', reviewer: 'Người duyệt', reviewerHint: 'Tên của bạn, lưu cùng mỗi quyết định',
   yourName: 'tên của bạn', language: 'Ngôn ngữ', close: 'Đóng',
   sessions: 'Phiên', allTasks: 'Tất cả việc', places: 'Địa điểm', tasks: 'Việc cần làm', back: 'Các phiên',
@@ -195,8 +202,11 @@ const vi: Record<string, Msg> = {
   publishCount: (p) => `${p.places} địa điểm và ${p.removals} gỡ bỏ đã xác nhận trong phiên này.`,
   nothingToPublish: 'Chưa có gì để xuất bản',
   nothingToPublishText: 'Hãy xác nhận địa điểm ở khung duyệt (mở địa điểm, kiểm tra thông tin và ghim, rồi Xác nhận), hoặc xác nhận gỡ bỏ ở mục Việc cần làm.',
-  publishRule: 'Chỉ ghi những gì ảnh cho thấy và bạn đã xác nhận, với ghim bạn chọn. Không bao giờ ghi thông tin hay ghim của Google.',
-  osmNote: 'File .osm chứa các điểm mới cho JOSM: đối chiếu với dữ liệu đã có và làm theo hướng dẫn nhập dữ liệu của OSM trước khi tải lên. Gỡ bỏ chỉ có trong GeoJSON và CSV.',
+  publishRule: 'Ghi những gì bạn đã xác nhận, với ghim bạn chọn. Các trường lấy từ Google được đánh dấu (fromGoogle) trong GeoJSON và CSV, và không đưa vào file .osm.',
+  fromGoogle: 'từ Google', matchesGoogle: 'khớp Google', googleOneDay: 'chỉ một ngày',
+  fromWebsite: 'từ website', matchesWebsite: 'khớp website',
+  clarifiedBy: (p) => `Làm rõ bằng ${p.src}: ảnh đọc được "${p.v}"`,
+  osmNote: 'File .osm chứa các điểm mới cho JOSM, không gồm các trường lấy từ Google (OpenStreetMap không chấp nhận): đối chiếu với dữ liệu đã có và làm theo hướng dẫn nhập dữ liệu của OSM trước khi tải lên. Gỡ bỏ chỉ có trong GeoJSON và CSV.',
   nothingConfirmed: 'Chưa xác nhận gì',
   category: 'loại', status_open: 'đang mở', status_closed: 'đã đóng cửa', status_for_rent: 'cho thuê',
   status_under_construction: 'đang xây dựng', status_gone: 'không còn', status_unknown: 'không rõ',

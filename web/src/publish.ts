@@ -24,6 +24,8 @@ export function record(x: Published) {
   const pin = review.pin || (place.pins.agent || place.pins.algorithm || place.pins.contributor)!
   const v: Record<string, string | null> = {}
   for (const k of FIELD_KEYS) v[k] = value(place, review, k)
+  // fields whose value is still Google's (filled from Google and not edited by the reviewer)
+  const fromGoogle = FIELD_KEYS.filter((k) => v[k] && place.fields[k]?.source === 'google' && review.fields[k]?.state !== 'edited')
   return {
     id: place.id,
     name: v.name || place.name,
@@ -34,6 +36,7 @@ export function record(x: Published) {
     pinSource: review.pin?.source || (place.pins.agent ? 'agent' : place.pins.algorithm ? 'algorithm' : 'contributor'),
     session: dataset.session.id, sessionName: dataset.session.name || '', captured: dataset.session.startedAt || '',
     reviewer: review.reviewer || '', reviewedAt: review.at || '', comment: review.comment || '',
+    fromGoogle: fromGoogle.join(' '),
   }
 }
 
@@ -56,7 +59,7 @@ export function geojson(places: Published[], removed: Removed[]) {
 }
 
 const CSV_COLS = ['id', 'change', 'name', 'category', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
-  'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment'] as const
+  'fromGoogle', 'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment'] as const
 
 /** A CSV cell. Text starting with = + - @ (or a tab / return) is prefixed with ' so spreadsheets do not run it
  *  as a formula (names and fields come from photos and imports). Numbers are left as numbers. */
@@ -113,9 +116,11 @@ export function osm(places: Published[]) {
     '  <!-- New places confirmed in POI Capture Reviewer. Check against existing OSM data in JOSM before uploading;',
     '       follow the OSM import / organised editing guidelines. Removals are in the GeoJSON / CSV export. -->']
   places.forEach((x, i) => {
-    const r = record(x)
+    const r: Record<string, any> = { ...record(x) }
+    // OpenStreetMap does not accept data copied from Google: those fields stay out of the .osm file
+    for (const k of (r.fromGoogle as string).split(' ').filter(Boolean)) r[k] = null
     const tags: Record<string, string> = { name: r.name, ...(OSM_TAGS[r.category || ''] || {}) }
-    if (r.phone) tags.phone = r.phone.split(/[,;]\s*/).map((p) => p.replace(/^0/, '+84 ').replace(/\s+/g, ' ')).join(';')
+    if (r.phone) tags.phone = r.phone.split(/[,;]\s*/).map((p: string) => p.replace(/^0/, '+84 ').replace(/\s+/g, ' ')).join(';')
     if (r.houseNumber) tags['addr:housenumber'] = r.houseNumber
     if (r.street) tags['addr:street'] = r.street.split(',')[0].trim()
     const oh = osmHours(r.openingHours)

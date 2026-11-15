@@ -102,7 +102,15 @@ def main():
             print(f'P{k}: no reading, skipped')
             continue
         n += 1
-        pos = p['position']
+        pos = dict(p['position'])
+        # not pinned by hand: the photos' medoid (the photo position closest to the others) rather than the first
+        # photo, often taken from afar (an entrance, across the street) before walking to the shop
+        pts = [(it['lat'], it['lon']) for it in p['photos'] if it.get('lat') is not None]
+        if pos.get('source') != 'pin' and len(pts) >= 2:
+            def dm(a, b): return build.math.hypot(*build.to_xy(a[0], a[1], b[0], b[1]))
+            med = min(pts, key=lambda q: sum(dm(q, r) for r in pts))
+            if dm(med, (pos['lat'], pos['lon'])) > 1:
+                pos.update({'lat': med[0], 'lon': med[1], 'source': (pos.get('source') or 'gps') + '+medoid'})
         d = os.path.join(out, f"{n:02d}_{build.safe(rd['name'])}")
         os.makedirs(d)
         best = [(b['photo'], b.get('why')) if isinstance(b, dict) else (b, None) for b in rd.get('best') or []] \

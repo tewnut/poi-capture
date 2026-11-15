@@ -37,7 +37,7 @@ traffic signs, building names alone, banners, parking signs) note:
 - `fields`: **everything readable** about it, each `{"value", "photo", "sure": high|medium|low}`: `phone`,
   `houseNumber`, `street`, `openingHours`, `website`, `signText`, `other` (services, prices, slogans). Crop the
   full-size photo (`file` in `<work>/photos.json`) for small print: addresses and phones are rarely readable on the
-  sheets. Only what is written; never fill from Google.
+  sheets. Only what is written: the reading never fills from Google (result.py merges Google afterwards, marked).
 - `best`: **1 to N** photos to keep, each `{"photo", "why"}`; the cover first: the sign whole, sharp, frontal, not cut
   by the frame edge or hidden by a tree, pole, umbrella, vehicle or person. Add a photo only if it adds something (the
   entrance, the other end of a long frontage, a second sign with hours or phone); one is fine when the rest repeat
@@ -145,11 +145,27 @@ Open the folder (`explorer.exe <out>` on Windows) and tell the user: number of p
 why (umbrellas, trees, distance), how many were found on Google Maps and how many not (likely new places, the most
 valuable), positions triangulated vs single-photo, and the link to `index.html`.
 
-## Terms: keep Google's data for review only
+## Google data: merged, marked, kept out of OpenStreetMap
 
-What comes from Google Maps stays in the separate `googleMaps` block, with its source and date, for a person to check
-the place against. Google's terms of service do not allow automated reading of Google Maps pages (the browser route:
-keep it to reviewing a few sweeps by hand, at a human pace, not bulk collection), and the Maps Platform terms do not allow using Google content to build or enrich another map or
-place database, and limit storing it (place IDs may be kept; other content only briefly). Do not copy it into the
-place's own fields (`address`, `phone`, `openingHours`, …) or into anything contributed to a map or sold. Those fields
-are for what the photos show or a contributor confirms on site. Say this to the user when they ask to merge it in.
+The project decided (2026-11-15) to use Google Maps data in its place records, knowing Google's terms do not allow
+it. `result.py` merges a matched Google place (name match >= 0.5, within 100 m) into each place's fields:
+
+- the photos show the same value: kept, `"google": "match"`;
+- the photos show a different value: the photo value is kept (newer), `"google": "differs"`, `"googleValue"`;
+- the photos lack it: Google's value, `"source": "google"` (opening hours from one day only: `"sure": "low"`);
+- the photos show it but unclearly (`"sure": "low"`, or "…" / "?" in it) and Google agrees with what was read (a
+  phone sharing a run of 3+ digits, a name or street mostly the same): Google's value clarifies it, `"source":
+  "google"`, `"clarified": true`, the reading kept in `"photoValue"` (e.g. "0901 457 …" read, Google "0981 457 801").
+
+**The place's own website comes first.** `python <skill>/scripts/enrich_web.py <out>` opens each place's website
+(from the photos or Google; robots.txt honoured; social and link-in-bio pages skipped) and reads its schema.org data
+(phone, address, opening hours), title, description, `tel:` links and up to 3 images (`WEB_1.jpg` …, shown with the
+place's photos). Its fields are merged like Google's (`"source": "website"`), before Google's, but only when the
+website's address is this place's street or house number: a chain's site gives its head office, not this branch.
+Run it after the Google lookup (it needs Google's website when the photos show none).
+
+Google-sourced values are marked in the published GeoJSON / CSV (`fromGoogle`) and never written to the `.osm`
+file: OpenStreetMap does not accept data copied from Google (edits get reverted, accounts blocked). Pins never come
+from Google.
+
+The comparison marks (`google`: `match` / `differs`, `googleValue`, `source`, `note`) are metadata for the review screen only: they are never written into a field's value or into the published data (tested in web/src/publish.test.ts).

@@ -90,10 +90,13 @@ first.
 
 ## Google
 
-Google Maps results are for the reviewer to check against: kept in their own block with source and date, never
-copied into a place's fields or pin, and not published. Google's terms do not allow using its content to build
-another map database. The agent may say "Google's pin is 25 m east" to point the reviewer at a problem; the
-final pin comes from the photos, OSM, the contributor or the reviewer.
+Project decision (2026-11-15): Google Maps data is used in place records, against Google's terms, as a choice the
+project owns. Matched fields are compared (`match` / `differs`, the photo wins when they differ, as it is newer);
+fields the photos lack are filled from Google with `source: "google"`; a photo reading the agent was unsure of is
+clarified by Google when Google agrees with what was read (`clarified: true`, `photoValue` kept). The place's own
+website (enrich_web.py) is read first and merged the same way (`source: "website"`), when its address is this place's. These are marked in the GeoJSON / CSV export
+(`fromGoogle`) and left out of the OpenStreetMap file, which must not contain Google data. Pins are never Google's.
+The comparison marks (`google`: `match` / `differs`, `googleValue`, `source`, `note`) are metadata for the review screen only: they are never written into a field's value or into the published data (tested in web/src/publish.test.ts).
 
 ## Measured so far (2026-11-15, Thủ Đức, small samples)
 

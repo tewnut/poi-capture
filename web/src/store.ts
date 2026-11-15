@@ -1,7 +1,7 @@
 // App state. Datasets, photos and reviews are kept in this browser (IndexedDB): nothing is uploaded, and each
 // reviewer's browser has its own copy (no sign-in yet; docs/pipeline.md). Export / publish writes files.
 import { reactive, computed } from 'vue'
-import { createStore, get, set, del, keys, getMany } from 'idb-keyval'
+import { createStore, get, set, del, keys, getMany, clear } from 'idb-keyval'
 import type { Dataset, Review, RemovalReview, Place, Decision } from './types'
 import type { Imported } from './importer'
 
@@ -48,6 +48,19 @@ export async function add(items: Imported[]) {
     else state.datasets.unshift(dataset)
     state.shown.add(dataset.id)
   }
+}
+
+/** Remove every session, photo and review from this browser, to start again with fresh imports. */
+export async function clearAll() {
+  await clear(blobs)
+  await clear(meta)
+  for (const p of urls.values()) p.then((u) => u && URL.revokeObjectURL(u))
+  urls.clear()
+  state.datasets = []
+  state.shown = new Set()
+  state.reviews = {}
+  state.removals = {}
+  state.open = null; state.place = null; state.task = null; state.missing = ''
 }
 
 export async function remove(id: string) {

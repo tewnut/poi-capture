@@ -3,7 +3,15 @@
 
 export type LatLon = { lat: number; lon: number }
 
-export type Field = { value: string; photo?: number | string | null; sure?: 'high' | 'medium' | 'low' }
+/** A value read on the photos, or filled from Google when the photos lack it (source "google"); compared with a
+ *  matched Google place: google = "match" | "differs" (then googleValue is Google's). */
+export type Field = {
+  value: string; photo?: number | string | null; sure?: 'high' | 'medium' | 'low'
+  source?: 'photo' | 'google' | 'website'; google?: 'match' | 'differs'; googleValue?: string; note?: string | null
+  website?: 'match' | 'differs'; websiteValue?: string
+  /** an unclear photo reading made clear by the source; photoValue = what the photo showed */
+  clarified?: boolean; photoValue?: string
+}
 
 export const FIELD_KEYS = ['name', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'signText', 'other'] as const
 export type FieldKey = (typeof FIELD_KEYS)[number]
@@ -28,7 +36,7 @@ export type Place = {
   confidence?: string | null
   note?: string | null
   fields: Partial<Record<FieldKey, Field>>
-  photos: { file: string; index?: number | null; cover?: boolean; why?: string | null }[]
+  photos: { file: string; index?: number | null; cover?: boolean; why?: string | null; source?: 'website'; url?: string }[]
   pins: { algorithm?: Pin; contributor?: Pin; google?: GooglePin | null; agent?: Pin | null }
   google?: Record<string, any> | null
 }
