@@ -32,12 +32,23 @@ select, input { font: inherit; }
 .tabs button { flex: 1; background: none; border: 0; padding: 10px 4px; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 600; }
 .tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
 .tabs .n { font-size: 11px; background: var(--canvas); border-radius: 8px; padding: 0 6px; margin-left: 2px; }
-.pane { overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.pane { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .banner { margin: 8px 12px 0; padding: 7px 10px; background: #eef6ff; border-radius: 8px; font-size: 13px; }
 .banner.err { background: #fdecea; color: #8a1c1c; display: flex; justify-content: space-between; }
 .filters { display: flex; gap: 6px; flex-wrap: wrap; }
 .filters select, .filters input { flex: 1; min-width: 120px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .empty { padding: 18px; border: 2px dashed var(--line); border-radius: 12px; text-align: center; }
+.empty .ico { font-size: 28px; }
+.empty > b { display: block; font-size: 15px; margin-bottom: 4px; }
+.empty p { margin: 6px 0; }
+.empty ul { text-align: left; padding-left: 18px; margin: 8px 0; font-size: 13px; }
+.empty li { margin: 4px 0; }
+.empty.soft { border-style: solid; border-width: 1px; background: var(--canvas); }
+.empty.left { text-align: left; }
+.importbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--card); }
+.mapnote { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); z-index: 500; background: rgba(255,255,255,.95);
+  padding: 14px 18px; border-radius: 14px; box-shadow: 0 2px 12px rgba(0,0,0,.15); text-align: center; max-width: 320px; font-size: 13px; pointer-events: none; }
+.mapnote b { font-size: 15px; }
 
 .ses { display: flex; gap: 8px; align-items: flex-start; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
 .ses.open { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }

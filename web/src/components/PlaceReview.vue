@@ -114,7 +114,8 @@ const STATUS_LABEL: Record<string, string> = { open: 'open', closed: 'closed', f
       <div class="hd"><CopyLink :url="shareUrl(to.place(ds.id, place.id))" /><button class="ghost" title="Close" @click="emit('close')">✕</button></div>
     </header>
 
-    <div class="photos">
+    <div v-if="!photos.length" class="nophotos muted">No photo was kept for this place.</div>
+    <div v-else class="photos">
       <div class="frame">
         <Photo class="big" :ds="ds.id" :path="photos[big]?.file" :alt="place.name" @click="full = true" />
         <div class="tools">
@@ -210,6 +211,7 @@ h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing
 .hd { display: flex; align-items: flex-start; gap: 2px; }
 .cat { border: 0; border-bottom: 1px dashed var(--line); font: inherit; color: var(--muted); width: 140px; background: transparent; }
 .photos .big { width: 100%; max-height: 300px; object-fit: contain; background: #111; border-radius: 10px; display: block; }
+.nophotos { background: var(--canvas); border-radius: 10px; padding: 18px; text-align: center; font-size: 13px; }
 .why { font-size: 12px; margin-top: 4px; }
 .thumbs { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .thumbs button { padding: 0; border: 2px solid transparent; border-radius: 6px; background: none; cursor: pointer; }

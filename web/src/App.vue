@@ -62,6 +62,7 @@ function applyRoute() {
   }
   if (state.open) state.shown.add(state.open)
 }
+watch(fKind, (k) => { if (k === 'poi') fHold.value = '' })
 watch(() => route.fullPath, applyRoute)
 watch(() => state.loading, applyRoute)
 onMounted(load)
@@ -92,7 +93,9 @@ function onDrop(e: DragEvent) {
 }
 
 const sessions = computed(() => state.datasets.filter((d) =>
-  (!fKind.value || d.session.kind === fKind.value) && (!fHold.value || (d.session.holding || 'mount') === fHold.value)))
+  (!fKind.value || d.session.kind === fKind.value) &&
+  // mounted / in hand is a sweep property: a Place capture never matches it
+  (!fHold.value || (d.session.kind !== 'poi' && (d.session.holding || 'mount') === fHold.value))))
 
 function openSession(id: string) { router.push(to.session(id)) }
 function goTab(t: 'sessions' | 'places' | 'tasks') {
@@ -150,6 +153,13 @@ function exportTasks() {
   download(`poi-tasks-${stamp()}.geojson`, tasksGeojson(state.datasets.filter((d) => state.shown.has(d.id))), 'application/geo+json')
 }
 
+const filtersOn = computed(() => !!(fKind.value || fHold.value))
+function clearSessionFilters() { fKind.value = ''; fHold.value = '' }
+const placeFiltersOn = computed(() => !!(q.value.trim() || fDecision.value || fGoogle.value))
+function clearPlaceFilters() { q.value = ''; fDecision.value = ''; fGoogle.value = '' }
+const shownCount = computed(() => state.datasets.filter((d) => state.shown.has(d.id)).length)
+const allTasks = computed(() => state.datasets.reduce((n, d) => n + d.tasks.length, 0))
+
 const decisionLabel = { todo: 'to review', confirmed: 'confirmed', rejected: 'rejected', visit: 'needs a visit' }
 function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])?.file }
 </script>
@@ -159,12 +169,10 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
     <header class="top">
       <div class="brand"><span class="logo">◉</span> POI Capture Reviewer</div>
       <div class="actions">
-        <button class="secondary" @click="dirInput?.click()">Import folder</button>
-        <button class="secondary" @click="fileInput?.click()">Import zip</button>
         <input ref="dirInput" type="file" webkitdirectory multiple hidden @change="onPick" />
         <input ref="fileInput" type="file" accept=".zip" multiple hidden @change="onPick" />
         <input class="who" :value="state.reviewer" placeholder="Your name (reviewer)" @change="setReviewer(($event.target as HTMLInputElement).value)" />
-        <button class="primary" @click="publishOpen = true">Publish ({{ confirmed.length }})</button>
+        <button class="primary" :title="confirmed.length ? '' : 'Nothing confirmed yet'" @click="publishOpen = true">Publish ({{ confirmed.length }})</button>
       </div>
     </header>
 
@@ -180,39 +188,79 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
       <div v-if="state.error" class="banner err">{{ state.error }} <button class="ghost" @click="state.error = ''">✕</button></div>
 
       <section v-if="tab === 'sessions'" class="pane">
-        <div class="filters">
-          <select v-model="fKind"><option value="">All kinds</option><option value="sweep">Street sweep</option><option value="poi">Place capture</option></select>
-          <select v-model="fHold"><option value="">Mounted + in hand</option><option value="mount">Mounted</option><option value="hand">In hand</option></select>
-        </div>
-        <div v-if="!state.loading && !state.datasets.length" class="empty">
-          <b>No sessions yet.</b>
-          <p>Drop a processed session folder (with <code>result.json</code>), a zip of it, or a zip exported from the phone anywhere on this page.</p>
-          <p class="muted">Everything stays in this browser; nothing is uploaded.</p>
-        </div>
-        <article v-for="d in sessions" :key="d.id" :class="['ses', { open: state.open === d.id }]">
-          <input type="checkbox" :checked="state.shown.has(d.id)" title="Show on the map" @change="toggleShown(d.id)" />
-          <div class="body" @click="openSession(d.id)">
-            <b>{{ d.session.name || d.session.id }}</b>
-            <div class="muted">{{ (d.session.startedAt || '').slice(0, 10) }} · {{ d.session.kind === 'poi' ? 'Place capture' : d.session.holding === 'hand' ? 'Sweep, in hand' : 'Sweep, mounted' }}{{ d.source === 'raw' ? ' · raw, not processed' : '' }}</div>
-            <div class="stats">
-              <span>{{ d.places.length }} places</span>
-              <span class="chip ok" v-if="counts(d).confirmed">{{ counts(d).confirmed }} confirmed</span>
-              <span class="chip todo" v-if="counts(d).todo">{{ counts(d).todo }} to review</span>
-              <span class="chip new" v-if="d.places.filter((p) => gstat(p) === 'new').length">{{ d.places.filter((p) => gstat(p) === 'new').length }} new to Google</span>
-              <span class="chip rm" v-if="d.tasks.filter((t) => t.type !== 'visit').length">{{ d.tasks.filter((t) => t.type !== 'visit').length }} removals</span>
-            </div>
+        <div v-if="state.loading" class="empty soft">Loading the sessions saved in this browser…</div>
+        <template v-else-if="!state.datasets.length">
+          <div class="empty">
+            <div class="ico">📂</div>
+            <b>No sessions yet</b>
+            <p>Import one of these, with the buttons below or by dropping it anywhere on the page:</p>
+            <ul>
+              <li><b>A processed session folder</b> (with <code>result.json</code>), from the process-sweep skill, or a zip of it: places ready to review.</li>
+              <li><b>A zip exported from the phone</b>: the ride and its photos, or the places of a Place capture, not processed yet.</li>
+            </ul>
+            <p class="muted small">Everything stays in this browser; nothing is uploaded.</p>
           </div>
-          <button class="ghost del" title="Remove from this browser" @click="del(d)">🗑</button>
-        </article>
+        </template>
+        <template v-else>
+          <div class="filters">
+            <select v-model="fKind"><option value="">All kinds</option><option value="sweep">Street sweep</option><option value="poi">Place capture</option></select>
+            <select v-if="fKind !== 'poi'" v-model="fHold"><option value="">Mounted + in hand</option><option value="mount">Mounted</option><option value="hand">In hand</option></select>
+          </div>
+          <div v-if="!sessions.length" class="empty soft">
+            <b>No session matches these filters</b>
+            <p class="muted">{{ state.datasets.length }} session{{ state.datasets.length > 1 ? 's are' : ' is' }} hidden by them.</p>
+            <button class="secondary" @click="clearSessionFilters">Clear filters</button>
+          </div>
+          <article v-for="d in sessions" :key="d.id" :class="['ses', { open: state.open === d.id }]">
+            <input type="checkbox" :checked="state.shown.has(d.id)" title="Show on the map" @change="toggleShown(d.id)" />
+            <div class="body" @click="openSession(d.id)">
+              <b>{{ d.session.name || d.session.id }}</b>
+              <div class="muted">{{ (d.session.startedAt || '').slice(0, 10) || 'no date' }} · {{ d.session.kind === 'poi' ? 'Place capture' : d.session.holding === 'hand' ? 'Sweep, in hand' : 'Sweep, mounted' }}{{ d.source === 'raw' ? ' · raw, not processed' : '' }}</div>
+              <div class="stats">
+                <span>{{ d.places.length ? `${d.places.length} places` : 'no places yet' }}</span>
+                <span class="chip ok" v-if="counts(d).confirmed">{{ counts(d).confirmed }} confirmed</span>
+                <span class="chip todo" v-if="counts(d).todo">{{ counts(d).todo }} to review</span>
+                <span class="chip new" v-if="d.places.filter((p) => gstat(p) === 'new').length">{{ d.places.filter((p) => gstat(p) === 'new').length }} new to Google</span>
+                <span class="chip rm" v-if="d.tasks.filter((t) => t.type !== 'visit').length">{{ d.tasks.filter((t) => t.type !== 'visit').length }} removals</span>
+              </div>
+            </div>
+            <button class="ghost del" title="Remove from this browser" @click="del(d)">🗑</button>
+          </article>
+        </template>
       </section>
+      <footer v-if="tab === 'sessions'" class="importbar">
+        <button class="primary" @click="dirInput?.click()">Import folder</button>
+        <button class="secondary" @click="fileInput?.click()">Import zip</button>
+        <span class="muted small">or drop it on the page</span>
+      </footer>
 
       <section v-if="tab === 'places' && openDataset" class="pane">
         <div class="ptitle"><b>{{ openDataset.session.name }}</b>
           <span><CopyLink :url="shareUrl(to.session(openDataset.id))" /><button class="ghost" @click="router.push(to.sessions())">all sessions</button></span></div>
-        <div class="filters">
+        <div v-if="openDataset.places.length" class="filters">
           <input v-model="q" placeholder="Search name, category, sign" />
           <select v-model="fDecision"><option value="">Any decision</option><option value="todo">To review</option><option value="confirmed">Confirmed</option><option value="visit">Needs a visit</option><option value="rejected">Rejected</option></select>
           <select v-model="fGoogle"><option value="">Google: any</option><option value="found">On Google</option><option value="new">Not on Google</option><option value="todo">Not checked</option></select>
+        </div>
+        <div v-if="!openDataset.places.length" class="empty soft">
+          <template v-if="openDataset.source === 'raw' && openDataset.session.kind !== 'poi'">
+            <b>Not processed yet</b>
+            <p>This is a street sweep straight from the phone: its places are found by the processing step. You can look at the ride and its photo positions on the map.</p>
+            <p class="muted small">Process it with the process-sweep skill, then import the processed folder (or its zip).</p>
+          </template>
+          <template v-else-if="openDataset.session.kind === 'poi'">
+            <b>No places in this session</b>
+            <p class="muted">No place was captured, or none had photos.</p>
+          </template>
+          <template v-else>
+            <b>No places found</b>
+            <p class="muted">The processing found no business on this ride.</p>
+          </template>
+        </div>
+        <div v-else-if="!places.length" class="empty soft">
+          <b>No place matches these filters</b>
+          <p class="muted">{{ openDataset.places.length }} places are hidden by them.</p>
+          <button class="secondary" @click="clearPlaceFilters">Clear filters</button>
         </div>
         <button v-for="{ p, i } in places" :key="p.id" :class="['prow', { sel: state.place === p.id }]" @click="selectPlace(openDataset.id, p.id)">
           <Photo class="th" :ds="openDataset.id" :path="cover(p)" />
@@ -227,8 +275,23 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
       </section>
 
       <section v-if="tab === 'tasks'" class="pane">
-        <p class="muted small">Visits go to Place capture on the phone; removals are confirmed here or checked on site. Tasks of the sessions shown on the map.</p>
-        <button class="secondary" :disabled="!tasks.length" @click="exportTasks">Export task list (GeoJSON)</button>
+        <div v-if="!state.datasets.length" class="empty soft">
+          <b>No tasks yet</b>
+          <p class="muted">Tasks come with processed street sweeps: <b>visits</b> for places to check with Place capture (new to Google, changed, or partly read) and <b>removals</b> for places seen closed or gone. Import a processed session first.</p>
+        </div>
+        <div v-else-if="!allTasks" class="empty soft">
+          <b>Nothing to do</b>
+          <p class="muted">The imported sessions have no tasks: every place is on Google and was read fully, and none was seen closed.</p>
+        </div>
+        <div v-else-if="!tasks.length" class="empty soft">
+          <b>No tasks in the sessions shown</b>
+          <p class="muted">{{ allTasks }} task{{ allTasks > 1 ? 's are' : ' is' }} in sessions hidden from the map. Tick them in Sessions to list their tasks.</p>
+          <button class="secondary" @click="goTab('sessions')">Go to Sessions</button>
+        </div>
+        <template v-else>
+          <p class="muted small">Visits go to Place capture on the phone; removals are confirmed here or checked on site. Tasks of the sessions shown on the map.</p>
+          <button class="secondary" @click="exportTasks">Export task list (GeoJSON)</button>
+        </template>
         <div v-for="{ d, t, i, r } in tasks" :key="d.id + i" :class="['task', { sel: state.open === d.id && state.task === i }]" @click="selectTask(d.id, i)">
           <span :class="['chip', t.type === 'visit' ? 'todo' : 'rm']">{{ t.type === 'visit' ? 'visit' : t.type === 'removal' ? 'removal' : 'verify removal' }}</span>
           <b>{{ t.name }}</b>
@@ -245,6 +308,10 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
 
     <main class="mapwrap">
       <MapView @select="selectPlace" @move-pin="movePin" />
+      <div v-if="!state.loading && (!state.datasets.length || !shownCount)" class="mapnote">
+        <template v-if="!state.datasets.length"><b>Your sessions show up here</b><br />Import a session to see its ride, its places and the photos that found them.</template>
+        <template v-else><b>No session on the map</b><br />Tick a session in the list to show it.</template>
+      </div>
     </main>
 
     <aside v-if="openPlace && openDataset" class="detail">
@@ -259,7 +326,12 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
     <div v-if="publishOpen" class="modal" @click.self="publishOpen = false">
       <div class="dialog">
         <h2>Publish</h2>
-        <p><b>{{ confirmed.length }}</b> confirmed places and <b>{{ removed.length }}</b> confirmed removals, from all sessions in this browser.</p>
+        <p v-if="confirmed.length || removed.length"><b>{{ confirmed.length }}</b> confirmed places and <b>{{ removed.length }}</b> confirmed removals, from all sessions in this browser.</p>
+        <div v-else class="empty soft left">
+          <b>Nothing to publish yet</b>
+          <p class="muted">{{ state.datasets.length ? 'Confirm places in the review panel (open a place, check its fields and pin, then Confirm), or confirm removals in Tasks.' : 'Import a processed session and confirm its places first.' }}</p>
+        </div>
+        <template v-if="confirmed.length || removed.length">
         <p class="muted small">Only what the photos showed and you confirmed is written, with the pin you chose. Google's details and pins are never included.</p>
         <div class="pubs">
           <button class="primary" :disabled="!confirmed.length && !removed.length" @click="pub('geojson')">GeoJSON</button>
@@ -267,6 +339,7 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
           <button class="primary" :disabled="!confirmed.length" @click="pub('osm')">OpenStreetMap (.osm)</button>
         </div>
         <p class="muted small">The .osm file holds new nodes for JOSM: check them against what is already mapped and follow the OSM import guidelines before uploading. Removals are only in the GeoJSON and CSV.</p>
+        </template>
         <button class="ghost" @click="publishOpen = false">Close</button>
       </div>
     </div>
