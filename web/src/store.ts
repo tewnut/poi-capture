@@ -4,6 +4,7 @@ import { reactive, computed } from 'vue'
 import { createStore, get, set, del, keys, getMany, clear } from 'idb-keyval'
 import type { Dataset, Review, RemovalReview, Place, Decision } from './types'
 import type { Imported } from './importer'
+import { googleMergeable } from './fields'
 
 const meta = createStore('poi-capture-reviewer', 'meta')      // dataset json, reviews
 const blobs = createStore('poi-capture-reviewer-files', 'files') // photos: `${datasetId}/${path}`
@@ -66,11 +67,13 @@ export async function clearAll() {
 export async function remove(id: string) {
   const d = state.datasets.find((x) => x.id === id)
   if (!d) return
-  for (const p of d.files) await del(`${id}/${p}`, blobs)
+  // its photos, and the ones the reviewer added or cropped
+  for (const k of (await keys(blobs)) as string[]) if (k.startsWith(id + '/')) await del(k, blobs)
   await del(`ds:${id}`, meta)
   state.datasets = state.datasets.filter((x) => x.id !== id)
   state.shown.delete(id)
   for (const k of Object.keys(state.reviews)) if (k.startsWith(id + '|')) delete state.reviews[k]
+  for (const k of Object.keys(state.removals)) if (k.startsWith(id + '|')) delete state.removals[k]
   await saveReviews()
   if (state.open === id) { state.open = null; state.place = null }
 }
@@ -82,6 +85,37 @@ export function photoUrl(ds: string, path: string | null | undefined): Promise<s
   const k = `${ds}/${path}`
   if (!urls.has(k)) urls.set(k, get(k, blobs).then((b: Blob | undefined) => (b ? URL.createObjectURL(b) : null)))
   return urls.get(k)!
+}
+
+/** A stored photo file (for export). */
+export async function photoBlob(ds: string, path: string): Promise<Blob | undefined> {
+  return get(`${ds}/${path}`, blobs)
+}
+
+/** Store a photo the reviewer added or cropped. */
+export async function putPhoto(ds: string, path: string, b: Blob) {
+  await set(`${ds}/${path}`, b, blobs)
+}
+
+export async function delPhoto(ds: string, path: string) {
+  const k = `${ds}/${path}`
+  await del(k, blobs)
+  urls.get(k)?.then((u) => u && URL.revokeObjectURL(u))
+  urls.delete(k)
+}
+
+/** A JPEG of part of a stored photo; rect in fractions of the photo as shown (EXIF rotation applied). */
+export async function cropPhoto(ds: string, path: string, [x, y, w, h]: [number, number, number, number]): Promise<Blob> {
+  const b = await photoBlob(ds, path)
+  if (!b) throw new Error('photo not found')
+  const bm = await createImageBitmap(b, { imageOrientation: 'from-image' })
+  const sx = Math.round(x * bm.width), sy = Math.round(y * bm.height)
+  const sw = Math.max(1, Math.round(w * bm.width)), sh = Math.max(1, Math.round(h * bm.height))
+  const c = document.createElement('canvas')
+  c.width = sw; c.height = sh
+  c.getContext('2d')!.drawImage(bm, sx, sy, sw, sh, 0, 0, sw, sh)
+  bm.close()
+  return new Promise((res, rej) => c.toBlob((o) => (o ? res(o) : rej(new Error('could not encode the crop'))), 'image/jpeg', 0.92))
 }
 
 export async function saveReviews() {
@@ -134,10 +168,11 @@ export function stageOf(d: Dataset): { stage: Stage; done: number; total: number
   return { stage: done >= total ? 'reviewed' : 'processed', done, total }
 }
 
-/** Google status of a place, from the agent's lookup. */
+/** Google status of a place, from the agent's lookup: a result too far or too unlike the sign is "new". */
 export function gstat(p: Place): 'found' | 'new' | 'todo' {
   const g = p.google
   if (!g) return 'todo'
-  if (g.name) return 'found'
-  return g.status ? 'new' : 'todo'
+  if (googleMergeable(g)) return 'found'
+  if (g.name) return 'new'
+  return g.status && !String(g.status).startsWith('error') ? 'new' : 'todo'
 }

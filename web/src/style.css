@@ -109,3 +109,13 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .side { grid-row: 2; border-right: 0; }
   .detail { grid-row: 3; width: auto; border-left: 0; border-top: 1px solid var(--line); }
 }
+
+/* cloud storage: settings block and the "From server" list */
+.settings .cloudset { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+.err-text { color: #8a1c1c; margin: 0; }
+.cloud { display: grid; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--canvas); max-height: 45vh; overflow: auto; }
+.cloud p { margin: 0; }
+.cloud .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.cloud .citem { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.cloud .citem .body { display: grid; flex: 1; min-width: 0; }
+.cloud .citem .body b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

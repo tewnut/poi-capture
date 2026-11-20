@@ -28,6 +28,13 @@ const en: Record<string, Msg> = {
   clearAll: 'Clear all data', clearAllHint: 'Sessions, photos and reviews in this browser, to import fresh ones',
   clearAllConfirm: (p) => `Remove all ${p.n} sessions, their photos and every review from this browser? This cannot be undone.`,
   settings: 'Settings', reviewer: 'Reviewer', reviewerHint: 'Your name, saved with each decision',
+  cloudStorage: 'Cloud storage', cloudUrl: 'Server', cloudToken: 'Token', cloudTokenNone: 'none',
+  cloudHint: 'The tus server the phone uploads to. Preset to the team server (empty the field to go back to it); the token comes from whoever runs the server. The address and token are kept only in this browser (localStorage): anyone using this browser profile can read them.',
+  cloudBadUrl: 'Not an http(s) address', fromServer: 'From server', fromServerTitle: 'Processed sessions on the cloud server',
+  cloudTitle: 'Processed sessions on the server', cloudNotSet: 'Set the server in Settings first.', cloudLoading: 'Asking the server…',
+  cloudEmpty: 'Nothing processed on the server yet. Sessions from the phone show here once the agent has processed them.',
+  cloudImported: 'imported', cloudUpdated: 'newer than imported', cloudRefresh: 'Refresh',
+  cloudImport: (p) => `Import ${p.n}`, cloudDownloading: (p) => `Downloading ${p.n} from the server…`,
   yourName: 'your name', language: 'Language', close: 'Close',
   sessions: 'Sessions', allTasks: 'All tasks', places: 'Places', tasks: 'Tasks', back: 'Sessions',
   loading: 'Loading the sessions saved in this browser…',
@@ -77,7 +84,7 @@ const en: Record<string, Msg> = {
   noTasksShown: 'No tasks in the sessions shown',
   tasksHidden: (p) => `${plural(p.n, 'task is', 'tasks are')} in sessions hidden from the map. Tick them in Sessions to list their tasks.`,
   goSessions: 'Go to Sessions', allTasksHint: 'Tasks of the sessions shown on the map, for planning visits.',
-  export: 'Export', exportTitle: 'Download these tasks as GeoJSON',
+  export: 'Export', exportTitle: 'Download the work left on site (GeoJSON): import it in the phone app: Settings → Tasks from the reviewer',
   sessionTasksHint: 'Visits go to Place capture on the phone; removals are confirmed here or checked on site.',
   noTasksSession: 'No tasks in this session',
   noTasksSessionRaw: 'Tasks come from the processing step: process this session first.',
@@ -105,6 +112,12 @@ const en: Record<string, Msg> = {
   fromGoogle: 'from Google', matchesGoogle: 'matches Google', googleOneDay: 'one day only',
   fromWebsite: 'from the website', matchesWebsite: 'matches the website',
   clarifiedBy: (p) => `Clarified with ${p.src}: the photo read "${p.v}"`,
+  fromRide: 'the road the photos were taken on', rideDiffers: (p) => `The photos were taken on ${p.v}`,
+  noStreet: 'no street', streetMissing: 'no street: type it if you know it',
+  suggestLow: 'unsure reading: ✓ to keep it', suggestRide: 'road the photos were taken on: ✓ if the place is on it',
+  pendingBeforeConfirm: (p) => `Confirm accepts the clear readings and the Google / website values. Not accepted until you press ✓: ${p.f}.`,
+  pendingAfterConfirm: (p) => `Not published until you accept it (✓) or type it: ${p.f}.`,
+  suggestionsOpen: (p) => `${p.n} to check`,
   osmNote: 'The .osm file holds new nodes for JOSM, without the fields filled from Google (OpenStreetMap does not accept them): check them against what is already mapped and follow the OSM import guidelines before uploading. Removals are only in the GeoJSON and CSV.',
   nothingConfirmed: 'Nothing confirmed yet',
   // place review
@@ -127,6 +140,16 @@ const en: Record<string, Msg> = {
   googleNotFound: 'Not found nearby: probably a place Google does not have.',
   comment: 'Comment (optional)', confirm: 'Confirm', confirmedBtn: '✓ Confirmed', visitQueued: 'Visit queued',
   reject: 'Reject', undo: 'Undo',
+  // photo edits
+  cropT: 'Crop this photo', cropHint: 'Drag on the photo to frame it; drag the frame to move it, a corner to resize.',
+  cropSave: 'Save crop', cropWhole: 'Whole photo', cancel: 'Cancel', cropping: 'Cropping…', adding: 'Adding…',
+  makeCover: 'Make this the cover', cover: 'cover', removePhoto: 'Remove this photo (you can restore it)',
+  deleteAdded: 'Delete this photo you added', addPhotos: 'Add', addedByYou: 'added by you', croppedTag: 'cropped',
+  addPhotosT: 'Add photos: pick files, drop them here, or paste an image (Ctrl+V)',
+  removedN: (p) => `Removed (${p.n}), click to restore:`, restore: 'Restore',
+  photoEditsNote: 'Photo changes are saved with your review; the imported photos stay as they were.',
+  pubPhotos: 'Photos (.zip)', pubPhotosNote: 'The photos you kept for each confirmed place (cropped where you cropped them), with places.geojson; the photos column lists them.',
+  pubProject: 'Project (.zip)', pubProjectNote: 'For the VMAP step, in one file: every place you decided (with your decision, fields, pin and kept photos), the removals, tasks.jsonl for the VMAP tools, and a README listing what to check (comments, added photos, places not reviewed).',
 }
 
 const vi: Record<string, Msg> = {
@@ -134,6 +157,13 @@ const vi: Record<string, Msg> = {
   clearAll: 'Xóa toàn bộ dữ liệu', clearAllHint: 'Các phiên, ảnh và kết quả duyệt trong trình duyệt này, để nạp phiên mới',
   clearAllConfirm: (p) => `Xóa cả ${p.n} phiên, ảnh và mọi kết quả duyệt khỏi trình duyệt này? Không thể hoàn tác.`,
   settings: 'Cài đặt', reviewer: 'Người duyệt', reviewerHint: 'Tên của bạn, lưu cùng mỗi quyết định',
+  cloudStorage: 'Lưu trữ đám mây', cloudUrl: 'Máy chủ', cloudToken: 'Mã truy cập', cloudTokenNone: 'không có',
+  cloudHint: 'Máy chủ tus mà điện thoại tải lên. Mặc định là máy chủ của nhóm (xoá trống ô để quay lại); mã truy cập do người quản lý máy chủ cung cấp. Địa chỉ và mã truy cập chỉ lưu trong trình duyệt này (localStorage): ai dùng hồ sơ trình duyệt này cũng đọc được.',
+  cloudBadUrl: 'Không phải địa chỉ http(s)', fromServer: 'Từ máy chủ', fromServerTitle: 'Các phiên đã xử lý trên máy chủ đám mây',
+  cloudTitle: 'Phiên đã xử lý trên máy chủ', cloudNotSet: 'Hãy đặt máy chủ trong Cài đặt trước.', cloudLoading: 'Đang hỏi máy chủ…',
+  cloudEmpty: 'Chưa có phiên nào được xử lý trên máy chủ. Phiên từ điện thoại hiện ở đây sau khi tác tử xử lý xong.',
+  cloudImported: 'đã nhập', cloudUpdated: 'mới hơn bản đã nhập', cloudRefresh: 'Làm mới',
+  cloudImport: (p) => `Nhập ${p.n}`, cloudDownloading: (p) => `Đang tải ${p.n} phiên từ máy chủ…`,
   yourName: 'tên của bạn', language: 'Ngôn ngữ', close: 'Đóng',
   sessions: 'Phiên', allTasks: 'Tất cả việc', places: 'Địa điểm', tasks: 'Việc cần làm', back: 'Các phiên',
   loading: 'Đang tải các phiên đã lưu trong trình duyệt…',
@@ -180,7 +210,7 @@ const vi: Record<string, Msg> = {
   noTasksShown: 'Không có việc trong các phiên đang hiện',
   tasksHidden: (p) => `${p.n} việc nằm trong các phiên đang ẩn khỏi bản đồ. Tích chọn chúng ở mục Phiên để xem.`,
   goSessions: 'Đến mục Phiên', allTasksHint: 'Việc của các phiên đang hiện trên bản đồ, để lên kế hoạch đi kiểm tra.',
-  export: 'Xuất', exportTitle: 'Tải các việc này dạng GeoJSON',
+  export: 'Xuất', exportTitle: 'Tải các việc cần làm tại chỗ (GeoJSON): mở trong ứng dụng điện thoại: Cài đặt → Việc từ người duyệt',
   sessionTasksHint: 'Đi kiểm tra bằng Place capture trên điện thoại; gỡ bỏ được xác nhận ở đây hoặc kiểm tra tại chỗ.',
   noTasksSession: 'Phiên này không có việc',
   noTasksSessionRaw: 'Việc cần làm đến từ bước xử lý: hãy xử lý phiên này trước.',
@@ -206,6 +236,12 @@ const vi: Record<string, Msg> = {
   fromGoogle: 'từ Google', matchesGoogle: 'khớp Google', googleOneDay: 'chỉ một ngày',
   fromWebsite: 'từ website', matchesWebsite: 'khớp website',
   clarifiedBy: (p) => `Làm rõ bằng ${p.src}: ảnh đọc được "${p.v}"`,
+  fromRide: 'đường nơi chụp ảnh', rideDiffers: (p) => `Ảnh được chụp trên đường ${p.v}`,
+  noStreet: 'chưa có đường', streetMissing: 'chưa có đường: nhập nếu bạn biết',
+  suggestLow: 'đọc chưa chắc: ✓ để giữ', suggestRide: 'đường nơi chụp ảnh: ✓ nếu địa điểm nằm trên đường này',
+  pendingBeforeConfirm: (p) => `Xác nhận sẽ nhận các giá trị đọc rõ và giá trị từ Google / website. Chưa nhận cho tới khi bạn bấm ✓: ${p.f}.`,
+  pendingAfterConfirm: (p) => `Chưa được xuất cho tới khi bạn nhận (✓) hoặc nhập: ${p.f}.`,
+  suggestionsOpen: (p) => `${p.n} cần kiểm tra`,
   osmNote: 'File .osm chứa các điểm mới cho JOSM, không gồm các trường lấy từ Google (OpenStreetMap không chấp nhận): đối chiếu với dữ liệu đã có và làm theo hướng dẫn nhập dữ liệu của OSM trước khi tải lên. Gỡ bỏ chỉ có trong GeoJSON và CSV.',
   nothingConfirmed: 'Chưa xác nhận gì',
   category: 'loại', status_open: 'đang mở', status_closed: 'đã đóng cửa', status_for_rent: 'cho thuê',
@@ -227,6 +263,16 @@ const vi: Record<string, Msg> = {
   googleNotFound: 'Không thấy gần đó: có thể là địa điểm Google chưa có.',
   comment: 'Ghi chú (không bắt buộc)', confirm: 'Xác nhận', confirmedBtn: '✓ Đã xác nhận', visitQueued: 'Đã đưa vào danh sách kiểm tra',
   reject: 'Loại', undo: 'Hoàn tác',
+  // photo edits
+  cropT: 'Cắt ảnh này', cropHint: 'Kéo trên ảnh để chọn khung; kéo khung để di chuyển, kéo góc để đổi kích thước.',
+  cropSave: 'Lưu ảnh cắt', cropWhole: 'Cả ảnh', cancel: 'Huỷ', cropping: 'Đang cắt…', adding: 'Đang thêm…',
+  makeCover: 'Đặt làm ảnh bìa', cover: 'ảnh bìa', removePhoto: 'Bỏ ảnh này (có thể khôi phục)',
+  deleteAdded: 'Xoá ảnh bạn đã thêm', addPhotos: 'Thêm', addedByYou: 'bạn thêm', croppedTag: 'đã cắt',
+  addPhotosT: 'Thêm ảnh: chọn file, thả vào đây, hoặc dán ảnh (Ctrl+V)',
+  removedN: (p) => `Đã bỏ (${p.n}), bấm để khôi phục:`, restore: 'Khôi phục',
+  photoEditsNote: 'Thay đổi ảnh được lưu cùng đánh giá của bạn; ảnh đã nhập vẫn giữ nguyên.',
+  pubPhotos: 'Ảnh (.zip)', pubPhotosNote: 'Các ảnh bạn giữ cho mỗi địa điểm đã xác nhận (đã cắt nếu bạn cắt), kèm places.geojson; cột photos liệt kê chúng.',
+  pubProject: 'Dự án (.zip)', pubProjectNote: 'Cho bước VMAP, trong một file: mọi địa điểm bạn đã quyết định (kèm quyết định, các trường, ghim và ảnh giữ lại), các yêu cầu xóa, tasks.jsonl cho công cụ VMAP, và README liệt kê những gì cần kiểm tra (ghi chú, ảnh thêm vào, địa điểm chưa duyệt).',
 }
 
 const M: Record<Lang, Record<string, Msg>> = { en, vi }
@@ -240,5 +286,9 @@ export function t(key: string, p: Record<string, any> = {}): string {
 /** Task reasons are written by the processing step in English ("a; b"): translate the known parts. */
 export function tWhy(why: string): string {
   const known: Record<string, string> = { 'not on Google Maps nearby': 'why.notOnGoogle', 'name only partly read': 'why.partly' }
-  return why.split('; ').map((s) => (known[s] ? t(known[s]) : s)).join('; ')
+  // a known reason may carry details after it: "not on Google Maps nearby (nearest: …, 253 m, …)"
+  return why.split('; ').map((s) => {
+    const k = Object.keys(known).find((x) => s === x || s.startsWith(x + ' ('))
+    return k ? t(known[k]) + s.slice(k.length) : s
+  }).join('; ')
 }

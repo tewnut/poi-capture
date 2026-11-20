@@ -3,12 +3,15 @@
 
 export type LatLon = { lat: number; lon: number }
 
-/** A value read on the photos, or filled from Google when the photos lack it (source "google"); compared with a
- *  matched Google place: google = "match" | "differs" (then googleValue is Google's). */
+/** A value read on the photos, or filled from the website / Google when the photos lack it (source "website" /
+ *  "google"); compared with a matched Google place: google = "match" | "differs" (then googleValue is Google's).
+ *  A street nobody gives is the road the photos were taken on (source "ride", a suggestion: fields.ts); ride =
+ *  "differs" + rideValue when another source names a different street. */
 export type Field = {
   value: string; photo?: number | string | null; sure?: 'high' | 'medium' | 'low'
-  source?: 'photo' | 'google' | 'website'; google?: 'match' | 'differs'; googleValue?: string; note?: string | null
+  source?: 'photo' | 'google' | 'website' | 'ride'; google?: 'match' | 'differs'; googleValue?: string; note?: string | null
   website?: 'match' | 'differs'; websiteValue?: string
+  ride?: 'match' | 'differs'; rideValue?: string
   /** an unclear photo reading made clear by the source; photoValue = what the photo showed */
   clarified?: boolean; photoValue?: string
 }
@@ -74,8 +77,21 @@ export type Review = {
   category?: string
   pin?: LatLon & { source: PinSource }
   comment?: string
+  photos?: PhotoEdits
   reviewer?: string
   at?: string
+}
+
+/** Crop rectangle as fractions of the photo: [x, y, width, height]. */
+export type CropRect = [number, number, number, number]
+
+/** The reviewer's changes to a place's photos. The imported photos are never changed: a removed one is only
+ *  listed, a crop is a new image stored beside the original, an added one is stored under added/. */
+export type PhotoEdits = {
+  removed?: string[]                                        // imported photo files left out
+  added?: string[]                                          // stored paths of photos the reviewer added
+  crops?: Record<string, { rect: CropRect; file: string }>  // photo file -> its cropped copy
+  cover?: string                                            // photo file chosen as the cover
 }
 
 /** A removal task's outcome: confirmed (the place is gone) or turned into a check on site. */

@@ -9,11 +9,16 @@ import TaskDetail from './components/TaskDetail.vue'
 import TaskRow from './components/TaskRow.vue'
 import StageBar from './components/StageBar.vue'
 import Photo from './components/Photo.vue'
-import { state, load, add, remove, clearAll, reviewOf, gstat, openDataset, openPlace, openTask, setReviewer, stageOf, STAGES } from './store'
+import { state, load, add, remove, clearAll, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, setReviewer, stageOf, STAGES } from './store'
 import { to } from './router'
 import { t, lang, setLang, LANGS, type Lang } from './i18n'
 import { importFiles } from './importer'
+import { keptPhotos, exportNames } from './photos'
+import { zipSync, strToU8 } from 'fflate'
 import { geojson, csv, osm, tasksGeojson, download, type Published, type Removed } from './publish'
+import { buildProject, projectName } from './project'
+import { missingStreet, pendingSuggestions } from './fields'
+import { loadCloud, saveCloud, DEFAULT_CLOUD_URL, fetchIndex, downloadItem, processedItems, importState, humanSize, endpoint, type CloudItem } from './cloud'
 import type { Dataset, Place } from './types'
 
 type View = 'sessions' | 'allTasks' | 'places' | 'tasks'
@@ -102,6 +107,53 @@ function onDrop(e: DragEvent) {
   doImport([...(e.dataTransfer?.files || [])])
 }
 
+// cloud storage (cloud.ts): list the processed sessions on the server, pull the picked ones through the importer
+const cloud = ref(loadCloud())
+function setCloud(k: 'url' | 'token', v: string) {
+  cloud.value = { ...cloud.value, [k]: v.trim() || (k === 'url' ? DEFAULT_CLOUD_URL : '') }
+  saveCloud(cloud.value)
+}
+const cloudOk = computed(() => endpoint(cloud.value.url) != null)
+const cloudOpen = ref(false)
+const cloudItems = ref<CloudItem[] | null>(null)
+const cloudErr = ref('')
+const cloudLoading = ref(false)
+const cloudPick = ref<string[]>([])
+async function refreshCloud() {
+  if (!cloudOk.value) return
+  cloudLoading.value = true; cloudErr.value = ''
+  try {
+    cloudItems.value = processedItems(await fetchIndex(cloud.value))
+    // preselect what is not in this browser yet
+    cloudPick.value = cloudItems.value.filter((i) => importState(i, state.datasets) !== 'imported').map((i) => i.id)
+  } catch (e: any) {
+    cloudErr.value = e.message || String(e)
+  } finally {
+    cloudLoading.value = false
+  }
+}
+function toggleCloud() {
+  cloudOpen.value = !cloudOpen.value
+  if (cloudOpen.value) refreshCloud()
+}
+async function pullCloud() {
+  const items = (cloudItems.value || []).filter((i) => cloudPick.value.includes(i.id))
+  if (!items.length) return
+  busy.value = t('cloudDownloading', { n: items.length })
+  state.error = ''
+  const files: File[] = []
+  try {
+    for (const i of items) files.push(await downloadItem(cloud.value, i))
+  } catch (e: any) {
+    state.error = e.message || String(e)
+    busy.value = ''
+    return
+  }
+  busy.value = ''
+  await doImport(files)
+  if (!state.error) { cloudOpen.value = false; cloudPick.value = [] }
+}
+
 // sessions
 const sessions = computed(() => state.datasets.filter((d) =>
   (!fStage.value || stageOf(d).stage === fStage.value) &&
@@ -172,13 +224,51 @@ function pub(kind: 'geojson' | 'csv' | 'osm') {
   if (kind === 'csv') download(`${base}.csv`, csv(confirmed.value, removed.value), 'text/csv')
   if (kind === 'osm') download(`${base}.osm`, osm(confirmed.value), 'application/xml')
 }
+/** The kept (and cropped) photos of the confirmed places, named as in the photos column, with places.geojson. */
+async function pubPhotos() {
+  const d = openDataset.value
+  if (!d) return
+  const files: Record<string, Uint8Array> = { 'places.geojson': strToU8(geojson(confirmed.value, removed.value)) }
+  for (const x of confirmed.value) {
+    const names = exportNames(x.place, x.review)
+    for (const [k, p] of keptPhotos(x.place, x.review).entries()) {
+      const b = await photoBlob(d.id, p.show)
+      if (b) files[names[k]] = new Uint8Array(await b.arrayBuffer())
+    }
+  }
+  download(`poi-published-${d.session.id}-${stamp()}-photos.zip`, zipSync(files, { level: 0 }), 'application/zip')
+}
+/** The reviewed session as one package for the VMAP step: project.json, tasks.jsonl, README.md and the photos
+ *  (project.ts; docs/pipeline.md). */
+async function pubProject() {
+  const d = openDataset.value
+  if (!d) return
+  const reviews = Object.fromEntries(d.places.map((p) => [p.id, reviewOf(d.id, p)]))
+  const removals = Object.fromEntries(d.tasks.map((_t, i) => [i, state.removals[`${d.id}|${i}`]]).filter(([, r]) => r))
+  const exportedAt = new Date().toISOString()
+  const input = { dataset: d, reviews, removals, reviewer: state.reviewer, exportedAt }
+  const blobs: Record<string, Uint8Array> = {}
+  const missing = new Set<string>()
+  for (const f of buildProject(input).files) {
+    const b = await photoBlob(d.id, f.from)
+    if (b) blobs[f.path] = new Uint8Array(await b.arrayBuffer())
+    else missing.add(f.from)
+  }
+  const pj = buildProject({ ...input, missing })
+  const files: Record<string, Uint8Array | [Uint8Array, { level: 0 | 6 }]> = {
+    'README.md': [strToU8(pj.readme), { level: 6 }], 'project.json': [strToU8(pj.json), { level: 6 }],
+    'tasks.jsonl': [strToU8(pj.tasksJsonl), { level: 6 }],
+  }
+  for (const f of pj.files) if (blobs[f.path]) files[f.path] = blobs[f.path]
+  download(projectName(d.session.id, exportedAt), zipSync(files, { level: 0 }), 'application/zip')
+}
 function exportTasks(ds?: Dataset) {
   const list = ds ? [ds] : state.datasets.filter((d) => state.shown.has(d.id))
-  download(`poi-tasks-${ds ? ds.session.id + '-' : ''}${stamp()}.geojson`, tasksGeojson(list), 'application/geo+json')
+  download(`poi-tasks-${ds ? ds.session.id + '-' : ''}${stamp()}.geojson`, tasksGeojson(list, state.reviews, state.removals, state.reviewer), 'application/geo+json')
 }
 
 const DECISION = { todo: 'decTodo', confirmed: 'decConfirmed', rejected: 'decRejected', visit: 'decVisit' } as const
-function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])?.file }
+function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p, reviewOf(d.id, p))[0]?.show : undefined }
 </script>
 
 <template>
@@ -196,6 +286,15 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
             <option v-for="l in LANGS" :key="l.key" :value="l.key">{{ l.label }}</option>
           </select></label>
         <p class="muted small">{{ t('reviewerHint') }}</p>
+        <div class="cloudset">
+          <b class="small">{{ t('cloudStorage') }}</b>
+          <label><span>{{ t('cloudUrl') }}</span>
+            <input :value="cloud.url" :placeholder="DEFAULT_CLOUD_URL" spellcheck="false" @change="setCloud('url', ($event.target as HTMLInputElement).value)" /></label>
+          <label><span>{{ t('cloudToken') }}</span>
+            <input type="password" autocomplete="off" :value="cloud.token" :placeholder="t('cloudTokenNone')" @change="setCloud('token', ($event.target as HTMLInputElement).value)" /></label>
+          <p v-if="cloud.url && !cloudOk" class="small err-text">{{ t('cloudBadUrl') }}</p>
+          <p class="muted small">{{ t('cloudHint') }}</p>
+        </div>
         <div class="wipe">
           <button class="danger small" :disabled="!state.datasets.length" @click="wipe">{{ t('clearAll') }}</button>
           <span class="muted small">{{ t('clearAllHint') }}</span>
@@ -279,9 +378,35 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
           </template>
         </section>
 
+        <section v-if="view === 'sessions' && cloudOpen" class="cloud">
+          <div class="row">
+            <b>{{ t('cloudTitle') }}</b>
+            <span>
+              <button v-if="cloudOk" class="ghost small" :disabled="cloudLoading" @click="refreshCloud">{{ t('cloudRefresh') }}</button>
+              <button class="ghost small" :aria-label="t('close')" @click="cloudOpen = false">✕</button>
+            </span>
+          </div>
+          <p v-if="!cloudOk" class="muted small">{{ t('cloudNotSet') }} <button class="ghost small" @click="settingsOpen = true">⚙ {{ t('settings') }}</button></p>
+          <p v-else-if="cloudLoading" class="muted small">{{ t('cloudLoading') }}</p>
+          <p v-else-if="cloudErr" class="small err-text">{{ cloudErr }}</p>
+          <p v-else-if="cloudItems && !cloudItems.length" class="muted small">{{ t('cloudEmpty') }}</p>
+          <template v-else-if="cloudItems">
+            <label v-for="i in cloudItems" :key="i.id" class="citem">
+              <input type="checkbox" :value="i.id" v-model="cloudPick" />
+              <span class="body">
+                <b>{{ i.name || i.sessionId || i.filename }}</b>
+                <span class="muted small">{{ (i.createdAt || '').slice(0, 16).replace('T', ' ') }} · {{ humanSize(i.size) }}{{ i.kind ? ' · ' + (i.kind === 'poi' ? t('poi') : t('sweep')) : '' }}</span>
+              </span>
+              <span v-if="importState(i, state.datasets) === 'imported'" class="chip ok">{{ t('cloudImported') }}</span>
+              <span v-else-if="importState(i, state.datasets) === 'updated'" class="chip todo">{{ t('cloudUpdated') }}</span>
+            </label>
+            <button class="primary small" :disabled="!cloudPick.length || !!busy" @click="pullCloud">{{ t('cloudImport', { n: cloudPick.length }) }}</button>
+          </template>
+        </section>
         <footer v-if="view === 'sessions'" class="importbar">
           <button class="primary" @click="dirInput?.click()">{{ t('importFolder') }}</button>
           <button class="secondary" @click="fileInput?.click()">{{ t('importZip') }}</button>
+          <button :class="['secondary', { on: cloudOpen }]" :title="t('fromServerTitle')" @click="toggleCloud">☁ {{ t('fromServer') }}</button>
           <span class="muted small">{{ t('orDrop') }}</span>
         </footer>
       </template>
@@ -336,6 +461,9 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
                 <div class="muted">{{ p.category }}<template v-if="p.fields.phone"> · {{ p.fields.phone.value }}</template></div>
                 <span :class="['chip', reviewOf(openDataset.id, p).decision]">{{ t(DECISION[reviewOf(openDataset.id, p).decision]) }}</span>
                 <span v-if="gstat(p) === 'new'" class="chip new">{{ t('notOnGoogleChip') }}</span>
+                <span v-if="missingStreet(p, reviewOf(openDataset.id, p))" class="chip new">{{ t('noStreet') }}</span>
+                <span v-else-if="reviewOf(openDataset.id, p).decision === 'confirmed' && pendingSuggestions(p, reviewOf(openDataset.id, p)).length" class="chip visit"
+                  :title="pendingSuggestions(p, reviewOf(openDataset.id, p)).map((k) => t('field.' + k)).join(', ')">{{ t('suggestionsOpen', { n: pendingSuggestions(p, reviewOf(openDataset.id, p)).length }) }}</span>
                 <span v-if="p.status !== 'open'" class="chip rm">{{ t('status_' + p.status) }}</span>
               </div>
             </button>
@@ -387,7 +515,11 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
             <button class="primary" @click="pub('geojson')">GeoJSON</button>
             <button class="primary" @click="pub('csv')">CSV</button>
             <button class="primary" :disabled="!confirmed.length" @click="pub('osm')">OpenStreetMap (.osm)</button>
+            <button class="primary" :disabled="!confirmed.length" @click="pubPhotos">{{ t('pubPhotos') }}</button>
+            <button class="primary" @click="pubProject">{{ t('pubProject') }}</button>
           </div>
+          <p class="muted small">{{ t('pubProjectNote') }}</p>
+          <p class="muted small">{{ t('pubPhotosNote') }}</p>
           <p class="muted small">{{ t('osmNote') }}</p>
         </template>
         <button class="ghost" @click="publishOpen = false">{{ t('close') }}</button>
