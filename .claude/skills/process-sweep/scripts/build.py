@@ -6,7 +6,12 @@ usage: python build.py <workdir> <outdir> [--best N] [--keep-all] [--doors <plac
 --doors: a Place capture session made at the same shops (doors photographed on site, GPS at the door). A place
 with "truth": "P3" in places.json (the 3rd place of that session, in capture order) gets `groundTruth` with the
 distance from its estimate; "truth": {"lat": .., "lon": ..} works without the session. The map shows both.
-A rebuild keeps each place's Google Maps result from the previous run (same folder and name).
+A rebuild keeps each place's Google Maps result and website block (with its WEB_ images) from the previous run
+(same folder and name, else same name).
+place.street is the road the place was photographed from (the phone's roadName: the cover photo's, else the most
+common over its photos); the ride-level "street" of places.json only when the photos carry none.
+"bearingOffsetDeg" in places.json is added to every photo's camera bearing, compass-measured ones too (a compass that
+read a few degrees off on that ride); without it only "assumed" bearings get the compass correction.
 
 <workdir>/places.json (written while reading the contact sheets):
 {
@@ -23,10 +28,11 @@ A rebuild keeps each place's Google Maps result from the previous run (same fold
 Position: rays from >= 2 sightings that span >= 8 degrees are intersected (weighted least squares, the handoff's step 4);
 otherwise the cover sighting is pushed out defaultFacadeDistanceM along its bearing (single-photo estimate).
 """
-import csv, html, json, math, os, re, shutil, sys, urllib.parse
+import csv, html, json, math, os, re, shutil, sys, tempfile, urllib.parse
 
 import mapview
 import result
+from paths import arg_path, folder_no, place_folders
 
 FIELDS = ('name', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'signText', 'other')
 
@@ -69,6 +75,7 @@ def to_ll(x, y, lat0, lon0):
 
 
 BEARING_OFFSET = 0.0   # set by build(): the session's mount correction (see bearing_correction)
+BEARING_ALL = False    # True when bearingOffsetDeg is set in places.json: the offset applies to every photo
 
 
 def bearing_correction(photos, spec):
@@ -78,7 +85,8 @@ def bearing_correction(photos, spec):
     68 photos within 28-36 deg; correcting it halved the error against Google Maps). `bearingOffsetDeg` in places.json
     overrides it."""
     if spec.get('bearingOffsetDeg') is not None:
-        return float(spec['bearingOffsetDeg']), 'set in places.json'
+        off = float(spec['bearingOffsetDeg'])
+        return off, f'every camera bearing (compass ones too) corrected by {off:+.0f} deg, set in places.json'
     assumed = [p for p in photos if p.get('cameraBearingSource') == 'assumed' and p.get('cameraBearing') is not None
                and p.get('compassDeg') is not None and (p.get('speedMps') or 0) >= 2]
     if len(assumed) < 15:
@@ -90,11 +98,17 @@ def bearing_correction(photos, spec):
     return med, f'assumed bearing corrected by {med:+.0f} deg from the compass (median of {len(d)} photos, middle half {q1:+.0f}..{q3:+.0f})'
 
 
+def offset_applies(photo):
+    """The automatic correction is for bearings the app assumed (90 deg to travel), also when borrowed from a
+    neighbour ("assumed+neighbour"); compass-measured ones get it only when bearingOffsetDeg is set (BEARING_ALL)."""
+    return str(photo.get('cameraBearingSource') or '').startswith('assumed')
+
+
 def bearing_of(photo, x):
     """Bearing from the camera to a point at horizontal position x (0..1) in the upright photo."""
     hf = photo.get('hFovDeg') or 69.1
     f = 0.5 / math.tan(math.radians(hf / 2))
-    base = photo['cameraBearing'] + (BEARING_OFFSET if photo.get('cameraBearingSource') == 'assumed' else 0)
+    base = photo['cameraBearing'] + (BEARING_OFFSET if BEARING_ALL or offset_applies(photo) else 0)
     return (base + math.degrees(math.atan((x - 0.5) / f))) % 360
 
 
@@ -277,22 +291,30 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             p['cameraBearingSource'] = (photos[j].get('cameraBearingSource') or 'assumed') + '+neighbour'
     default_d = float(spec.get('defaultFacadeDistanceM') or 30)
     best_n = int(spec.get('bestPhotos') or best_n)
-    global BEARING_OFFSET
+    global BEARING_OFFSET, BEARING_ALL
     BEARING_OFFSET, bearing_note = bearing_correction(photos, spec)
+    BEARING_ALL = spec.get('bearingOffsetDeg') is not None
     print('camera bearing:', bearing_note)
     door_pos = doors(door_folder)
     door_session = None
     if door_folder and os.path.isfile(os.path.join(door_folder, 'session.json')):
         ds = json.load(open(os.path.join(door_folder, 'session.json'), encoding='utf-8'))
         door_session = f"place capture {ds.get('id')} ({ds.get('name')})"
-    previous = {}   # folder -> (name, googleMaps) from the last run, so a rebuild does not need a new lookup
+    # folder -> (name, googleMaps, website) from the last run, so a rebuild needs no new lookup; the website's
+    # images (WEB_*) wait in a temporary folder while <out> is emptied
+    previous, web_keep = {}, tempfile.mkdtemp(prefix='poi-web-')
     if os.path.isdir(out):
         for d in os.listdir(out):
             f = os.path.join(out, d, 'place.json')
             if os.path.isfile(f):
                 m = json.load(open(f, encoding='utf-8'))
-                if m.get('googleMaps'):
-                    previous[d] = (m['place']['name'], m['googleMaps'])
+                if m.get('googleMaps') or m.get('website'):
+                    previous[d] = (m['place']['name'], m.get('googleMaps'), m.get('website'))
+                for x in (m.get('website') or {}).get('images') or []:
+                    src = os.path.join(out, d, x.get('file') or '')
+                    if x.get('file') and os.path.isfile(src):
+                        os.makedirs(os.path.join(web_keep, d), exist_ok=True)
+                        shutil.copy2(src, os.path.join(web_keep, d, x['file']))
     if os.path.exists(out):
         for d in os.listdir(out):   # keep nothing from an earlier run but the folder itself
             q = os.path.join(out, d)
@@ -323,15 +345,24 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
                 shutil.copy2(p['file'], os.path.join(d, fn))
             others.append({'id': p['id'], 'sweepIndex': i, 'file': fn})
         cover = photos[pl['cover']]
-        old = previous.get(os.path.basename(d))
+        old_dir = os.path.basename(d)
+        old = previous.get(old_dir)
         if not old or old[0] != pl['name']:   # renumbered: find it by name
-            old = next((v for v in previous.values() if v[0] == pl['name']), None)
+            old_dir, old = next(((k, v) for k, v in previous.items() if v[0] == pl['name']), (None, None))
+        if old and old[2]:
+            for x in old[2].get('images') or []:
+                kept = os.path.join(web_keep, old_dir, x.get('file') or '')
+                if x.get('file') and os.path.isfile(kept):
+                    shutil.copy2(kept, os.path.join(d, x['file']))
+        # the road it was photographed from (phone's roadName), not the ride's street
+        road, road_from = result.pick_road(cover.get('roadName'), [photos[i].get('roadName') for i in range(a, b + 1)],
+                                           spec.get('street'))
         meta = {
             'place': {'name': pl['name'], 'category': pl.get('category'), 'signText': pl.get('signText'),
                       'confidence': pl.get('confidence'), 'note': pl.get('note') or None,
                       'status': pl.get('status') or 'open',
                       'readBy': 'vision model, from the photos in this folder',
-                      'street': spec.get('street') or cover.get('roadName'),
+                      'street': road, 'streetFrom': road_from,
                       'address': None, 'phone': None, 'openingHours': None, 'website': None,
                       'position': {'lat': round(lat, 6), 'lon': round(lon, 6), **how,
                                    'cameraBearing': bearing_note,
@@ -341,6 +372,7 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             'fields': fields_of(pl),
             'pins': {'agent': agent_pin(pl, lat, lon, photos, default_d)},
             'googleMaps': old[1] if old and old[0] == pl['name'] else None,
+            **({'website': old[2]} if old and old[0] == pl['name'] and old[2] else {}),
             'groundTruth': ground_truth(pl, lat, lon, door_pos, door_session),
             'session': {'id': session.get('id'), 'name': session.get('name'), 'kind': session.get('kind')},
             'photos': files,
@@ -364,6 +396,7 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             shutil.copy2(p['file'], os.path.join(out, '_removals', fn))
             r['photo'] = f'_removals/{fn}'
         rem.append(r)
+    shutil.rmtree(web_keep, ignore_errors=True)
     json.dump(rem, open(os.path.join(out, 'removals.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     # the ride for the map: every photo's camera position, in order
     shots = [[p['idx'], round(p['lat'], 6), round(p['lon'], 6),
@@ -380,11 +413,7 @@ def csv_cell(v):
 
 
 def write_indexes(out, session=None):
-    rows = []
-    for d in sorted(os.listdir(out)):
-        f = os.path.join(out, d, 'place.json')
-        if os.path.isfile(f):
-            rows.append((d, json.load(open(f, encoding='utf-8'))))
+    rows = [(d, json.load(open(os.path.join(out, d, 'place.json'), encoding='utf-8'))) for d in place_folders(out)]
     if session is None and rows:
         session = rows[0][1]['session']
     g = lambda m, k: (m.get('googleMaps') or {}).get(k)
@@ -396,7 +425,7 @@ def write_indexes(out, session=None):
                     'google distance m', 'folder'])
         for d, m in rows:
             p = m['place']; pos = p['position']
-            w.writerow([csv_cell(x) for x in [d[:2], p['name'], p['category'], p['confidence'], len(m['photos']), pos['lat'], pos['lon'],
+            w.writerow([csv_cell(x) for x in [folder_no(d), p['name'], p['category'], p['confidence'], len(m['photos']), pos['lat'], pos['lon'],
                         pos['method'], pos['googleMaps'], g(m, 'name'), g(m, 'address'), g(m, 'phone'),
                         ' | '.join(g(m, 'openingHours') or []), g(m, 'website'), g(m, 'url'), g(m, 'distanceM'), d]])
     feats = [{'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [m['place']['position']['lon'], m['place']['position']['lat']]},
@@ -404,7 +433,7 @@ def write_indexes(out, session=None):
                              'confidence': m['place']['confidence'], 'googleName': g(m, 'name')}} for d, m in rows]
     json.dump({'type': 'FeatureCollection', 'features': feats}, open(os.path.join(out, 'places.geojson'), 'w', encoding='utf-8'),
               ensure_ascii=False, indent=1)
-    lines = [f"{d[:2]}  {m['place']['name']:<38} {len(m['photos']):>2} photos  {m['place']['position']['googleMaps']}"
+    lines = [f"{folder_no(d):>2}  {m['place']['name']:<38} {len(m['photos']):>2} photos  {m['place']['position']['googleMaps']}"
              + (f"\n    Google: {g(m, 'name')} | {g(m, 'address')} | {g(m, 'phone') or '-'}" if g(m, 'name') else '')
              for d, m in rows]
     open(os.path.join(out, 'README.txt'), 'w', encoding='utf-8').write(
@@ -429,7 +458,7 @@ def write_indexes(out, session=None):
         tr = m.get('groundTruth')
         tline = (f'<p class="t">Door captured on site ({e(tr["label"])}): <b>{tr["errorM"]} m</b> from the estimate</p>'
                  if tr else '')
-        cards.append(f'''<section class="place" id="{e(d)}"><h2 title="show on the map">{e(d[:2])} · {e(p["name"])} <span class="c {e(p.get("confidence") or "")}">{e(p.get("confidence") or "")}</span></h2>
+        cards.append(f'''<section class="place" id="{e(d)}"><h2 title="show on the map">{e(folder_no(d))} · {e(p["name"])} <span class="c {e(p.get("confidence") or "")}">{e(p.get("confidence") or "")}</span></h2>
 <p>{e(p.get("category") or "")}{" · " + e(p["note"]) if p.get("note") else ""}</p>
 <a href="{u(d, cover["file"])}" target="_blank"><img class="cover" src="{u(d, cover["file"])}"></a>
 <div class="thumbs">{thumbs}</div>
@@ -465,8 +494,8 @@ photos that located it (green lines) and Google's pin (blue dots); red dashes go
 
 if __name__ == '__main__':
     if sys.argv[1] == '--index':
-        write_indexes(sys.argv[2])
+        write_indexes(arg_path(sys.argv[2]))
     else:
         n = int(sys.argv[sys.argv.index('--best') + 1]) if '--best' in sys.argv else 2
-        dz = sys.argv[sys.argv.index('--doors') + 1] if '--doors' in sys.argv else None
-        build(sys.argv[1], sys.argv[2], best_n=n, keep_all='--keep-all' in sys.argv, door_folder=dz)
+        dz = arg_path(sys.argv[sys.argv.index('--doors') + 1]) if '--doors' in sys.argv else None
+        build(arg_path(sys.argv[1]), arg_path(sys.argv[2]), best_n=n, keep_all='--keep-all' in sys.argv, door_folder=dz)

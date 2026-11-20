@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build  # noqa: E402
+from paths import arg_path, place_folders  # noqa: E402
 
 FIELDS = ','.join('places.' + f for f in [
     'id', 'displayName', 'formattedAddress', 'location', 'nationalPhoneNumber', 'internationalPhoneNumber',
@@ -71,16 +72,16 @@ def best(places, name, lat, lon):
 
 
 def main():
-    out = sys.argv[1]
+    out = arg_path(sys.argv[1])
     force = '--force' in sys.argv
     manual = None
     if '--from' in sys.argv:
-        manual = json.load(open(sys.argv[sys.argv.index('--from') + 1], encoding='utf-8'))
+        manual = json.load(open(arg_path(sys.argv[sys.argv.index('--from') + 1]), encoding='utf-8'))
     key = os.environ.get('GOOGLE_MAPS_API_KEY')
     if manual is None and not key:
         sys.exit('GOOGLE_MAPS_API_KEY is not set: look the places up by web search and pass them with --from (see SKILL.md)')
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    for d in sorted(os.listdir(out)):
+    for d in place_folders(out):
         f = os.path.join(out, d, 'place.json')
         if not os.path.isfile(f):
             continue
