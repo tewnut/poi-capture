@@ -77,6 +77,9 @@ import io.github.tewnut.poicapture.core.CapturePlan
 import io.github.tewnut.poicapture.core.MountEstimate
 import io.github.tewnut.poicapture.core.MountEstimator
 import io.github.tewnut.poicapture.core.LatLon
+import io.github.tewnut.poicapture.core.FieldTask
+import io.github.tewnut.poicapture.core.FieldTaskStore
+import io.github.tewnut.poicapture.core.FieldTasks
 import io.github.tewnut.poicapture.core.PhotoRoles
 import io.github.tewnut.poicapture.core.SignReading
 import io.github.tewnut.poicapture.core.SignText
@@ -193,6 +196,8 @@ class CaptureService : LifecycleService() {
         fun store(ctx: Context): SessionStore = storeInstance ?: synchronized(this) {
             storeInstance ?: SessionStore(File(ctx.applicationContext.filesDir, "sessions")).also { storeInstance = it }
         }
+        /** Work to do on site, imported from the reviewer (Settings → Tasks). */
+        fun tasks(ctx: Context) = FieldTaskStore(File(ctx.applicationContext.filesDir, "tasks.json"))
     }
 
     private val binder = LocalBinder()
@@ -999,7 +1004,19 @@ class CaptureService : LifecycleService() {
                 .put("positionUnsure", c.unsure && !pinMoved).put("photoSpreadM", Math.round(c.spreadM)))
         }
         placeEstimates.clear()
+        doneTaskNear(id)
         _state.update { it.copy(poiId = null, poiRoles = emptyMap(), poiRead = null, readNote = null, poiUnsure = false, poiIndoor = false) }
+    }
+
+    /** A place finished close to an open task from the reviewer does that task: both are linked (place.taskId). */
+    private fun doneTaskNear(poiId: String) = runCatching {
+        val poi = store.pois(session.id).firstOrNull { it.optString("id") == poiId } ?: return@runCatching
+        val pos = poi.optJSONObject("position") ?: return@runCatching
+        val tasks = tasks(this)
+        val t = FieldTasks.nearestOpen(tasks.all(), LatLon(pos.getDouble("lat"), pos.getDouble("lon")))
+            ?: return@runCatching
+        store.patchPoi(session.id, poiId, org.json.JSONObject().put("taskId", t.id).put("taskType", t.type))
+        tasks.set(t.id, FieldTask.DONE, iso(System.currentTimeMillis()), "$poiId in ${session.id}")
     }
 
     // ---------- session control ----------
@@ -1043,6 +1060,7 @@ class CaptureService : LifecycleService() {
         io.execute { runCatching { Coverage.forSession(store, sid) } }   // (a full package name here would hit the `io` executor)
         runCatching { wake?.release() }
         activeSession.value = null
+        runCatching { Uploads.onSessionEnded(this, sid) }   // to the upload server, if set to upload automatically
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

@@ -74,7 +74,7 @@ import io.github.tewnut.poicapture.net.RoadSource
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class Step { LANGUAGE, WELCOME, EMAIL, PERMISSIONS, ROADS, READY }
+private enum class Step { LANGUAGE, WELCOME, EMAIL, PERMISSIONS, ROADS, UPLOAD, READY }
 
 /**
  * First run, once per phone: language → what the app does → email (not verified) → permissions → offline road data for
@@ -105,7 +105,8 @@ fun OnboardingScreen(onDone: () -> Unit) {
             Step.WELCOME -> WelcomeStep { step = Step.EMAIL }
             Step.EMAIL -> EmailStep(ctx) { step = Step.PERMISSIONS }
             Step.PERMISSIONS -> PermissionsStep(ctx) { step = Step.ROADS }
-            Step.ROADS -> RoadsStep(ctx) { step = Step.READY }
+            Step.ROADS -> RoadsStep(ctx) { step = Step.UPLOAD }
+            Step.UPLOAD -> UploadStep { step = Step.READY }
             Step.READY -> ReadyStep(ctx) { Prefs.setOnboarded(ctx, true); onDone() }
         }
     }
@@ -397,7 +398,26 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------- 5. ready
+// ---------------------------------------------------------------- 5. upload server (optional)
+
+/** The team's upload server, if it has one; Skip leaves it empty (sessions are then sent by hand, as before). */
+@Composable
+private fun UploadStep(onNext: () -> Unit) {
+    val ctx = LocalContext.current
+    var tick by remember { mutableIntStateOf(0) }
+    // the card saves as typed; the button says Continue once a usable address is in
+    val set = remember(tick) { io.github.tewnut.poicapture.capture.UploadServer.configured(ctx) }
+    StepFrame(stringResource(R.string.onboarding_upload_title), stringResource(R.string.onboarding_upload_lead),
+        stringResource(if (set) R.string.onboarding_continue else R.string.onboarding_upload_skip), onNext = onNext) {
+        WhiteCard {
+            IconRow("☁️", stringResource(R.string.upload_title), stringResource(R.string.upload_sub))
+            UploadServerCard(onUrlChange = { tick++ })
+        }
+        Hint(stringResource(R.string.onboarding_upload_later))
+    }
+}
+
+// ---------------------------------------------------------------- 6. ready
 
 @Composable
 private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
@@ -424,6 +444,8 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
             Summary(packs.isNotEmpty(), if (packs.isNotEmpty()) stringResource(R.string.onboarding_summary_roads, packs.joinToString(", "))
                 else stringResource(R.string.onboarding_summary_roads_online),
                 if (packs.isNotEmpty()) null else stringResource(R.string.onboarding_summary_roads_pending))
+            val upload = remember { io.github.tewnut.poicapture.capture.UploadServer.url(ctx).takeIf { io.github.tewnut.poicapture.capture.UploadServer.configured(ctx) } }
+            Summary(true, if (upload != null) stringResource(R.string.onboarding_summary_upload, upload) else stringResource(R.string.onboarding_summary_no_upload), null)
         }
         Hint(stringResource(R.string.onboarding_ready_after))
     }

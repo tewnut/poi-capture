@@ -81,6 +81,10 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
 
         SettingsCard("🗺️", stringResource(R.string.settings_road_data)) { RoadPacksCard() }
 
+        SettingsCard("📋", stringResource(R.string.settings_tasks)) { TasksCard() }
+
+        SettingsCard("☁️", stringResource(R.string.upload_title), stringResource(R.string.upload_sub)) { UploadServerCard() }
+
         var advanced by remember { mutableStateOf(false) }
         SettingsRow("⚙️", stringResource(R.string.settings_advanced), stringResource(R.string.settings_advanced_sub),
             trailing = if (advanced) "▴" else "▾") { advanced = !advanced }
