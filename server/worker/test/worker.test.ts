@@ -1,0 +1,185 @@
+import { SELF, env } from 'cloudflare:test'
+import { describe, expect, it } from 'vitest'
+import { PART_SIZE, corsOrigin, encodeMetadata, parseMetadata } from '../src/tus'
+
+const BASE = 'https://cloud.test/files/'
+const AUTH = { Authorization: 'Bearer test-token', 'Tus-Resumable': '1.0.0' }
+const MiB = 1024 * 1024
+
+function bytes(n: number, seed = 1): Uint8Array {
+  const b = new Uint8Array(n)
+  let x = seed
+  for (let i = 0; i < n; i++) { x = (x * 1103515245 + 12345) >>> 0; b[i] = x >>> 24 }
+  return b
+}
+
+async function create(size: number, meta: Record<string, string> = { filename: 't.zip', type: 'raw-session' }) {
+  const r = await SELF.fetch(BASE, { method: 'POST', headers: { ...AUTH, 'Upload-Length': String(size), 'Upload-Metadata': encodeMetadata(meta) } })
+  expect(r.status).toBe(201)
+  expect(r.headers.get('Location')).toMatch(/^https:\/\/cloud\.test\/files\/[0-9a-f]{32}$/)
+  return r.headers.get('Location')!
+}
+
+/** As the phone sends it: POST + X-HTTP-Method-Override: PATCH. */
+function patch(url: string, offset: number, body: Uint8Array, viaOverride = true) {
+  return SELF.fetch(url, {
+    method: viaOverride ? 'POST' : 'PATCH',
+    headers: { ...AUTH, 'Upload-Offset': String(offset), 'Content-Type': 'application/offset+octet-stream', ...(viaOverride ? { 'X-HTTP-Method-Override': 'PATCH' } : {}) },
+    body,
+  })
+}
+
+async function upload(data: Uint8Array, chunks: number[] | number, viaOverride = true) {
+  const url = await create(data.length)
+  let off = 0
+  let i = 0
+  while (off < data.length) {
+    const n = Array.isArray(chunks) ? chunks[Math.min(i++, chunks.length - 1)] : chunks
+    const r = await patch(url, off, data.subarray(off, Math.min(off + n, data.length)), viaOverride)
+    expect(r.status).toBe(204)
+    const next = Number(r.headers.get('Upload-Offset'))
+    expect(next).toBe(Math.min(off + n, data.length))
+    off = next
+  }
+  return url
+}
+
+async function download(url: string) {
+  const r = await SELF.fetch(url, { headers: { Authorization: 'Bearer test-token' } })
+  expect(r.status).toBe(200)
+  expect(r.headers.get('Content-Type')).toBe('application/octet-stream')
+  return new Uint8Array(await r.arrayBuffer())
+}
+
+const same = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i])
+
+describe('auth and CORS', () => {
+  it('needs the token, preflight excepted', async () => {
+    expect((await SELF.fetch(BASE + 'index.json')).status).toBe(401)
+    expect((await SELF.fetch(BASE, { method: 'OPTIONS' })).status).toBe(401)
+    expect((await SELF.fetch(BASE + 'index.json', { headers: { Authorization: 'Bearer wrong' } })).status).toBe(401)
+    const pre = await SELF.fetch(BASE, { method: 'OPTIONS', headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'PATCH' } })
+    expect(pre.status).toBe(204)
+    expect(pre.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
+    expect(pre.headers.get('Access-Control-Allow-Methods')).toContain('PATCH')
+    expect(pre.headers.get('Access-Control-Allow-Headers')).toContain('Upload-Offset')
+    const res = await SELF.fetch(BASE + 'index.json', { headers: { Authorization: 'Bearer test-token', Origin: 'https://abc.poi-capture-reviewer.pages.dev' } })
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://abc.poi-capture-reviewer.pages.dev')
+    expect(res.headers.get('Access-Control-Expose-Headers')).toContain('Upload-Offset')
+    const other = await SELF.fetch(BASE + 'index.json', { headers: { Authorization: 'Bearer test-token', Origin: 'https://evil.example' } })
+    expect(other.headers.get('Access-Control-Allow-Origin')).toBeNull()
+  })
+
+  it('matches origins', () => {
+    expect(corsOrigin(undefined, 'http://x')).toBe('*')
+    expect(corsOrigin('https://*.a.dev', 'https://b.a.dev')).toBe('https://b.a.dev')
+    expect(corsOrigin('https://*.a.dev', 'https://a.dev')).toBeNull()
+    expect(corsOrigin('https://*.a.dev', 'http://b.a.dev')).toBeNull()
+    expect(corsOrigin('https://*.a.dev', 'https://b.evil.dev/.a.dev')).toBeNull()
+  })
+
+  it('answers OPTIONS with what it speaks', async () => {
+    const r = await SELF.fetch(BASE, { method: 'OPTIONS', headers: AUTH })
+    expect(r.status).toBe(204)
+    expect(r.headers.get('Tus-Version')).toBe('1.0.0')
+    expect(r.headers.get('Tus-Extension')!.split(',')).toContain('creation')
+    expect(Number(r.headers.get('Tus-Max-Size'))).toBe(4 * 1024 ** 3)
+  })
+})
+
+describe('metadata', () => {
+  it('round-trips UTF-8 and bare keys', () => {
+    const m = { name: 'Nguyễn Thanh Sơn [261117]', empty: '', filename: 'a.zip' }
+    expect(parseMetadata(encodeMetadata(m))).toEqual(m)
+    expect(parseMetadata('a !!!')).toBeNull()
+    expect(parseMetadata('a YQ==,a YQ==')).toBeNull()
+  })
+})
+
+describe('uploads', () => {
+  it('phone: 2 MiB PATCHes as POST + override, HEAD as override, then index and download', async () => {
+    const data = bytes(19 * MiB + 12345)
+    const url = await upload(data, 2 * MiB)
+    const h = await SELF.fetch(url, { method: 'POST', headers: { ...AUTH, 'X-HTTP-Method-Override': 'HEAD' } })
+    expect(h.status).toBe(200)
+    expect(h.headers.get('Upload-Offset')).toBe(String(data.length))
+    expect(same(await download(url), data)).toBe(true)
+    const idx = await (await SELF.fetch(BASE + 'index.json?type=raw-session', { headers: AUTH })).json() as any
+    expect(idx.schema).toBe('poi-cloud-index/1')
+    const u = idx.uploads.find((x: any) => url.endsWith(x.id))
+    expect(u).toMatchObject({ size: data.length, offset: data.length, complete: true, metadata: { filename: 't.zip', type: 'raw-session' } })
+    expect((await (await SELF.fetch(BASE + 'index.json?type=processed-result', { headers: AUTH })).json() as any).uploads).toEqual([])
+  })
+
+  it('uneven chunks across part boundaries, real PATCH', async () => {
+    const data = bytes(3 * PART_SIZE + 777, 7)
+    const url = await upload(data, [3 * MiB, 7 * MiB, 1, PART_SIZE, PART_SIZE + 5, 13 * MiB], false)
+    expect(same(await download(url), data)).toBe(true)
+  })
+
+  it('agent: 8 MiB chunks; small and empty uploads', async () => {
+    const data = bytes(2 * PART_SIZE + 5, 3)
+    expect(same(await download(await upload(data, 8 * MiB, false)), data)).toBe(true)
+    const small = bytes(1000, 9)
+    expect(same(await download(await upload(small, [10, 990])), small)).toBe(true)
+    const empty = await create(0)
+    expect((await SELF.fetch(empty, { method: 'HEAD', headers: AUTH })).headers.get('Upload-Offset')).toBe('0')
+    expect((await download(empty)).length).toBe(0)
+  })
+
+  it('creation-with-upload', async () => {
+    const data = bytes(3 * MiB, 4)
+    const r = await SELF.fetch(BASE, { method: 'POST', body: data.subarray(0, MiB),
+      headers: { ...AUTH, 'Upload-Length': String(data.length), 'Content-Type': 'application/offset+octet-stream' } })
+    expect(r.status).toBe(201)
+    expect(r.headers.get('Upload-Offset')).toBe(String(MiB))
+    const url = r.headers.get('Location')!
+    expect((await patch(url, MiB, data.subarray(MiB))).status).toBe(204)
+    expect(same(await download(url), data)).toBe(true)
+  })
+
+  it('refuses wrong offsets, too much, unfinished download, too large, no tus header', async () => {
+    const url = await create(4 * MiB)
+    expect((await patch(url, 0, bytes(MiB))).status).toBe(204)
+    expect((await patch(url, 0, bytes(10))).status).toBe(409)
+    expect((await patch(url, MiB, bytes(4 * MiB))).status).toBe(413)
+    expect((await SELF.fetch(url, { method: 'HEAD', headers: AUTH })).headers.get('Upload-Offset')).toBe(String(MiB))
+    const dl = await SELF.fetch(url, { headers: AUTH })
+    expect(dl.status).toBe(404)
+    expect(await dl.text()).toMatch(/not finished/)
+    const big = await SELF.fetch(BASE, { method: 'POST', headers: { ...AUTH, 'Upload-Length': String(5 * 1024 ** 3) } })
+    expect(big.status).toBe(413)
+    expect((await SELF.fetch(BASE, { method: 'POST', headers: { Authorization: 'Bearer test-token', 'Upload-Length': '1' } })).status).toBe(412)
+    expect((await SELF.fetch(BASE + 'nope', { method: 'HEAD', headers: AUTH })).status).toBe(404)
+  })
+
+  it('one PATCH at a time per upload (lease)', async () => {
+    const url = await create(100)
+    const id = url.split('/').pop()!
+    const s = env.UPLOADS.get(env.UPLOADS.idFromName('uploads'))
+    const a = await s.begin(id, 0)
+    expect(a.ok).toBe(true)
+    expect((await patch(url, 0, bytes(10))).status).toBe(423)
+    if (a.ok) await s.release(id, a.lease)
+    expect((await patch(url, 0, bytes(10))).status).toBe(204)
+  })
+
+  it('deletes unfinished uploads only, and expires abandoned ones', async () => {
+    const done = await upload(bytes(10), 10)
+    expect((await SELF.fetch(done, { method: 'POST', headers: { ...AUTH, 'X-HTTP-Method-Override': 'DELETE' } })).status).toBe(400)
+    expect((await download(done)).length).toBe(10)
+    const part = await create(PART_SIZE * 2)
+    expect((await patch(part, 0, bytes(PART_SIZE + 10))).status).toBe(204)
+    expect((await SELF.fetch(part, { method: 'DELETE', headers: AUTH })).status).toBe(204)
+    expect((await SELF.fetch(part, { method: 'HEAD', headers: AUTH })).status).toBe(404)
+    const id = part.split('/').pop()!
+    expect((await env.BUCKET.list({ prefix: `carry/${id}/` })).objects.length).toBe(0)
+
+    const old = await create(PART_SIZE * 2)
+    expect((await patch(old, 0, bytes(100))).status).toBe(204)
+    const s = env.UPLOADS.get(env.UPLOADS.idFromName('uploads'))
+    const gone = await s.expire(Date.now() + 1000)
+    expect(gone.map((g) => g.id)).toContain(old.split('/').pop())
+    expect(gone.map((g) => g.id)).not.toContain(done.split('/').pop())
+  })
+})
