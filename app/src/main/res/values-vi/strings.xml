@@ -559,10 +559,22 @@
     <!-- Máy chủ tải lên (tus): Cài đặt, hướng dẫn đầu, thẻ phiên -->
     <string name="upload_title">Máy chủ tải lên</string>
     <string name="upload_sub">Gửi phiên lên máy chủ của nhóm (tus)</string>
+    <string name="upload_scan">Quét mã QR thiết lập</string>
+    <string name="upload_scan_done">Đã thiết lập với tên “%1$s”</string>
+    <string name="upload_scan_done_unnamed">Đã thiết lập từ mã QR</string>
+    <string name="upload_scan_not_setup">Đây không phải mã QR thiết lập: không có địa chỉ máy chủ http:// hoặc https://.</string>
+    <string name="upload_scan_no_token">Mã QR này không có mã truy cập. Hỏi trưởng dự án để lấy mã QR thiết lập mới.</string>
+    <string name="upload_scan_unavailable">Trình quét QR chưa sẵn sàng: Dịch vụ Google Play vẫn đang tải xuống. Hãy thử lại sau một phút.</string>
+    <string name="upload_scan_failed">Không mở được trình quét QR: %s</string>
+    <string name="upload_test_me">Đã kết nối với tên %1$s (%2$s)</string>
+    <string name="upload_role_uploader">người tải lên</string>
+    <string name="upload_role_reviewer">người duyệt</string>
+    <string name="upload_role_admin">quản trị viên</string>
     <string name="upload_url_label">Địa chỉ máy chủ</string>
     <string name="upload_url_invalid">Nhập địa chỉ bắt đầu bằng http:// hoặc https://</string>
     <string name="upload_http_warning">http:// gửi ảnh và mã truy cập không mã hóa: hãy dùng https:// ngoài mạng thử nghiệm.</string>
     <string name="upload_token_label">Mã truy cập (không bắt buộc)</string>
+    <string name="upload_token_label_required">Mã truy cập (bắt buộc)</string>
     <string name="upload_token_help">Gửi trong Authorization: Bearer. Được mã hóa trên điện thoại này, không bao giờ có trong file xuất.</string>
     <string name="upload_default_needs_token">Đây là máy chủ của dự án: nhập mã truy cập để tải lên. Hỏi trưởng dự án để lấy mã.</string>
     <string name="upload_token_show">Hiện</string>

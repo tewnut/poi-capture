@@ -32,11 +32,17 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.content.Context
 import androidx.work.NetworkType
 import androidx.work.WorkInfo
+import com.google.mlkit.common.MlKitException
+import com.google.mlkit.vision.barcode.common.Barcode
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.capture.UploadServer
 import io.github.tewnut.poicapture.capture.Uploads
+import io.github.tewnut.poicapture.core.SetupLink
 import io.github.tewnut.poicapture.core.Tus
 import io.github.tewnut.poicapture.core.UploadStatus
 import io.github.tewnut.poicapture.net.TusClient
@@ -48,11 +54,12 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * The upload server's settings (Settings → Upload server, and the onboarding step): tus endpoint, optional token,
- * a connection test (OPTIONS), and automatic uploads. Saved as typed; [onUrlChange] after each change of the address.
+ * The upload server's settings (Settings → Upload server, and the onboarding step): Scan setup QR, tus endpoint,
+ * optional token, a connection test (OPTIONS, then who the token is from GET /me), and automatic uploads. Saved as
+ * typed; [onChange] after each change of the address or the token.
  */
 @Composable
-fun UploadServerCard(onUrlChange: () -> Unit = {}) {
+fun UploadServerCard(onChange: () -> Unit = {}) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var url by remember { mutableStateOf(UploadServer.url(ctx)) }
@@ -62,9 +69,63 @@ fun UploadServerCard(onUrlChange: () -> Unit = {}) {
     var wifi by remember { mutableStateOf(UploadServer.wifiOnly(ctx)) }
     var testing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Pair<String, Boolean>?>(null) }   // text, ok
+    var scanned by remember { mutableStateOf<Pair<String, Boolean>?>(null) }  // what the last scan did, ok
     val valid = Tus.endpoint(url) != null
+    /** The project's server answers 401 without its token: the field says so instead of "optional". */
+    val projectServer = valid && Tus.endpoint(url) == Tus.endpoint(UploadServer.DEFAULT_URL)
 
-    OutlinedTextField(url, { url = it.take(300); UploadServer.setUrl(ctx, url); result = null; onUrlChange() },
+    fun test() {
+        testing = true; result = null
+        scope.launch {
+            result = try {
+                val client = TusClient(url, token)
+                val info = withContext(Dispatchers.IO) { client.options() }
+                when {
+                    info.versions.isEmpty() -> ctx.getString(R.string.upload_test_not_tus) to false
+                    !info.supports100 || !info.canCreate -> ctx.getString(R.string.upload_test_no_create, info.versions.joinToString()) to false
+                    else -> {
+                        val ok = ctx.getString(R.string.upload_test_ok, info.versions.joinToString(), info.extensions.joinToString(", "))
+                        // who the token is from; a server without /me (plain tus) is skipped silently
+                        val me = withContext(Dispatchers.IO) {
+                            try { client.me() } catch (e: TusClient.HttpError) { throw e } catch (_: Exception) { null }
+                        }
+                        val who = me?.let { ctx.getString(R.string.upload_test_me, it.name, roleLabel(ctx, it.role)) }
+                        listOfNotNull(ok, who).joinToString("\n") to true
+                    }
+                }
+            } catch (e: TusClient.HttpError) {
+                ctx.getString(if (e.code == 401 || e.code == 403) R.string.upload_test_token else R.string.upload_test_http, e.code) to false
+            } catch (e: Exception) {
+                ctx.getString(R.string.upload_test_failed, errorText(ctx, e)) to false
+            }
+            testing = false
+        }
+    }
+
+    OutlinedButton(enabled = !testing, onClick = {
+        scanned = null
+        scanSetupQr(ctx, onError = { scanned = it to false }) { text ->
+            when (val p = SetupLink.parse(text)) {
+                is SetupLink.Parsed.Bad -> scanned = ctx.getString(when (p.problem) {
+                    SetupLink.Problem.NOT_HTTP -> R.string.upload_scan_not_setup
+                    SetupLink.Problem.NO_TOKEN -> R.string.upload_scan_no_token
+                }) to false
+                is SetupLink.Parsed.Ok -> {
+                    val link = p.link
+                    url = link.endpoint; UploadServer.setUrl(ctx, url)
+                    token = link.token; UploadServer.setToken(ctx, token)
+                    showToken = false
+                    scanned = (link.name?.let { ctx.getString(R.string.upload_scan_done, it) }
+                        ?: ctx.getString(R.string.upload_scan_done_unnamed)) to true
+                    onChange()
+                    test()
+                }
+            }
+        }
+    }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.upload_scan)) }
+    scanned?.let { (text, ok) -> Hint(text, color = if (ok) Palette.Green else Palette.Red) }
+
+    OutlinedTextField(url, { url = it.take(300); UploadServer.setUrl(ctx, url); result = null; scanned = null; onChange() },
         label = { Text(stringResource(R.string.upload_url_label)) },
         placeholder = { Text("https://example.org/files/") }, singleLine = true,
         isError = url.isNotBlank() && !valid,
@@ -72,35 +133,18 @@ fun UploadServerCard(onUrlChange: () -> Unit = {}) {
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
         shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
     if (valid && url.trim().startsWith("http://", ignoreCase = true)) Hint(stringResource(R.string.upload_http_warning), color = Palette.Amber)
-    OutlinedTextField(token, { token = it.take(500); UploadServer.setToken(ctx, token); result = null },
-        label = { Text(stringResource(R.string.upload_token_label)) }, singleLine = true,
+    OutlinedTextField(token, { token = it.take(500); UploadServer.setToken(ctx, token); result = null; scanned = null; onChange() },
+        label = { Text(stringResource(if (projectServer) R.string.upload_token_label_required else R.string.upload_token_label)) }, singleLine = true,
         supportingText = { Text(stringResource(R.string.upload_token_help)) },
         visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = if (token.isNotEmpty()) { { TextButton(onClick = { showToken = !showToken }) {
             Text(stringResource(if (showToken) R.string.upload_token_hide else R.string.upload_token_show)) } } } else null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
         shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
-    if (valid && token.isBlank() && Tus.endpoint(url) == Tus.endpoint(UploadServer.DEFAULT_URL))
+    if (projectServer && token.isBlank())
         Hint(stringResource(R.string.upload_default_needs_token), color = Palette.Amber)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        OutlinedButton(enabled = valid && !testing, onClick = {
-            testing = true; result = null
-            scope.launch {
-                result = try {
-                    val info = withContext(Dispatchers.IO) { TusClient(url, token).options() }
-                    when {
-                        info.versions.isEmpty() -> ctx.getString(R.string.upload_test_not_tus) to false
-                        !info.supports100 || !info.canCreate -> ctx.getString(R.string.upload_test_no_create, info.versions.joinToString()) to false
-                        else -> ctx.getString(R.string.upload_test_ok, info.versions.joinToString(), info.extensions.joinToString(", ")) to true
-                    }
-                } catch (e: TusClient.HttpError) {
-                    ctx.getString(if (e.code == 401 || e.code == 403) R.string.upload_test_token else R.string.upload_test_http, e.code) to false
-                } catch (e: Exception) {
-                    ctx.getString(R.string.upload_test_failed, errorText(ctx, e)) to false
-                }
-                testing = false
-            }
-        }) { Text(stringResource(if (testing) R.string.upload_testing else R.string.upload_test)) }
+        OutlinedButton(enabled = valid && !testing, onClick = { test() }) { Text(stringResource(if (testing) R.string.upload_testing else R.string.upload_test)) }
         if (testing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
     }
     result?.let { (text, ok) -> Hint(text, color = if (ok) Palette.Green else Palette.Red) }
@@ -113,6 +157,34 @@ fun UploadServerCard(onUrlChange: () -> Unit = {}) {
         Switch(wifi, { wifi = it; UploadServer.setWifiOnly(ctx, it) })
     }
     Hint(stringResource(R.string.upload_never_recording))
+}
+
+/**
+ * Google's code scanner (Play services): its own camera screen, so no camera permission and no camera UI here.
+ * [onText] gets the QR's text, [onError] a message to show; a cancel does nothing. The text is never logged: it
+ * holds the token.
+ */
+private fun scanSetupQr(ctx: Context, onError: (String) -> Unit, onText: (String) -> Unit) {
+    val error = { e: Exception ->
+        onError(if (e is MlKitException && e.errorCode == MlKitException.UNAVAILABLE) ctx.getString(R.string.upload_scan_unavailable)
+                else ctx.getString(R.string.upload_scan_failed, e.message ?: e.javaClass.simpleName))
+    }
+    try {
+        val options = GmsBarcodeScannerOptions.Builder().setBarcodeFormats(Barcode.FORMAT_QR_CODE).enableAutoZoom().build()
+        GmsBarcodeScanning.getClient(ctx, options).startScan()
+            .addOnSuccessListener { code -> onText(code.rawValue.orEmpty()) }
+            .addOnFailureListener { e -> error(e) }
+    } catch (e: Exception) {
+        error(e)
+    }
+}
+
+/** uploader / reviewer / admin in the phone's language; anything else as the server sent it. */
+private fun roleLabel(ctx: Context, role: String): String = when (role) {
+    "uploader" -> ctx.getString(R.string.upload_role_uploader)
+    "reviewer" -> ctx.getString(R.string.upload_role_reviewer)
+    "admin" -> ctx.getString(R.string.upload_role_admin)
+    else -> role
 }
 
 /**

@@ -180,7 +180,7 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                     part.outputStream().use { Exporter.writeZip(store, sid, it) }
                     if (!part.renameTo(zip)) { zip.delete(); if (!part.renameTo(zip)) throw IOException("could not keep the zip") }
                     val photos = store.items(sid).count { it.optString("kind") == "photo" }
-                    val u = client.create(zip.length(), sessionUploadMetadata(session, Exporter.fileName(session), photos))
+                    val u = client.create(zip.length(), sessionUploadMetadata(session, Exporter.fileName(session), photos, store.trackFile(sid)))
                     u to 0L
                 }
             }

@@ -14,6 +14,18 @@ object Tus {
     /** PATCH size: small enough that a dropped mobile connection loses little, big enough to keep requests few. */
     const val CHUNK = 2L * 1024 * 1024
 
+    /**
+     * The `X-Client` header (server/README.md, "Last seen"): `POI Capture/<version> (Android <release>; <manufacturer>
+     * <model>)`, printable ASCII only (anything else becomes '?', blanks collapse), at most 120 characters.
+     */
+    fun clientHeader(versionName: String, androidRelease: String?, manufacturer: String?, model: String?): String {
+        fun clean(s: String?) = (s ?: "").map { if (it in ' '..'~') it else '?' }.joinToString("")
+            .replace(Regex("\\s+"), " ").trim()
+        val device = listOf(clean(manufacturer), clean(model)).filter { it.isNotEmpty() }.joinToString(" ")
+        val h = "POI Capture/${clean(versionName)} (Android ${clean(androidRelease)}; $device)"
+        return h.take(120).trim()
+    }
+
     /** Upload-Metadata: comma-separated "key base64(value)"; an empty value is sent as the bare key, null is left out. */
     fun encodeMetadata(meta: Map<String, String?>): String = meta.entries.mapNotNull { (k, v) ->
         require(k.isNotEmpty() && k.none { it == ' ' || it == ',' }) { "bad metadata key '$k'" }
@@ -110,8 +122,12 @@ data class UploadRecord(
     }
 }
 
-/** Upload-Metadata of a raw session (what the agent and `cloud.py list` see). */
-fun sessionUploadMetadata(s: Session, fileName: String, photoCount: Int): Map<String, String?> = linkedMapOf(
+/**
+ * Upload-Metadata of a raw session (what the agent, `cloud.py list` and the admin map see). With the session's
+ * track.jsonl ([track]): `track`, the ride as a Google encoded polyline (≤ 2,000 characters, left out under 2 usable
+ * fixes), and `distanceM`; `endedAt` and `photos` (= `photoCount`) per server/README.md "Trip metadata". Nothing private.
+ */
+fun sessionUploadMetadata(s: Session, fileName: String, photoCount: Int, track: java.io.File? = null): Map<String, String?> = linkedMapOf(
     "filename" to fileName,
     "filetype" to "application/zip",
     "type" to "raw-session",
@@ -120,5 +136,9 @@ fun sessionUploadMetadata(s: Session, fileName: String, photoCount: Int): Map<St
     "kind" to s.kind.json,
     "createdAt" to s.createdAt,
     "startedAt" to s.startedAt,
+    "endedAt" to s.endedAt,
     "photoCount" to photoCount.toString(),
+    "photos" to photoCount.toString(),
+    "distanceM" to track?.takeIf { it.exists() }?.let { Math.round(TrackStats.of(it).distanceM).toString() },
+    "track" to track?.let { Polyline.capped(Polyline.trackPoints(it)) },
 )

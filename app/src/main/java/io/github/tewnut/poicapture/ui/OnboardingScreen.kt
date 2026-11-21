@@ -411,7 +411,7 @@ private fun UploadStep(onNext: () -> Unit) {
         stringResource(if (set) R.string.onboarding_continue else R.string.onboarding_upload_skip), onNext = onNext) {
         WhiteCard {
             IconRow("☁️", stringResource(R.string.upload_title), stringResource(R.string.upload_sub))
-            UploadServerCard(onUrlChange = { tick++ })
+            UploadServerCard(onChange = { tick++ })
         }
         Hint(stringResource(R.string.onboarding_upload_later))
     }

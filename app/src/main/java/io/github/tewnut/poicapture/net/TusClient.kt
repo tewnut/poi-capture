@@ -1,5 +1,8 @@
 package io.github.tewnut.poicapture.net
 
+import android.os.Build
+import io.github.tewnut.poicapture.BuildConfig
+import io.github.tewnut.poicapture.core.CloudMe
 import io.github.tewnut.poicapture.core.Tus
 import java.io.File
 import java.io.IOException
@@ -22,6 +25,11 @@ class TusClient(endpoint: String, token: String?) {
         val permanent get() = code in setOf(400, 401, 403, 412, 413)
     }
 
+    companion object {
+        /** `X-Client` on every request: the app version and the device, so the server's "last seen" can tell phones apart. */
+        val CLIENT: String by lazy { Tus.clientHeader(BuildConfig.VERSION_NAME, Build.VERSION.RELEASE, Build.MANUFACTURER, Build.MODEL) }
+    }
+
     private fun open(url: String, method: String, timeoutMs: Int = 30_000): HttpURLConnection =
         (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 15_000
@@ -34,6 +42,7 @@ class TusClient(endpoint: String, token: String?) {
             } else requestMethod = method
             setRequestProperty("Tus-Resumable", Tus.VERSION)
             auth?.let { setRequestProperty("Authorization", it) }
+            setRequestProperty("X-Client", CLIENT)
         }
 
     /** OPTIONS on the endpoint: what the server supports (the test in Settings). Checks the token too (server/). */
@@ -43,6 +52,28 @@ class TusClient(endpoint: String, token: String?) {
             val code = c.responseCode
             if (code !in 200..299) throw HttpError(code, "OPTIONS")
             return Tus.serverInfo(c.getHeaderField("Tus-Version"), c.getHeaderField("Tus-Extension"), c.getHeaderField("Tus-Max-Size"))
+        } finally { c.disconnect() }
+    }
+
+    /**
+     * `GET <origin>/me`: who the token belongs to (server/README.md). null when the server has no /me (a plain tus
+     * server: 404 and the like) or answers something else; 401 / 403 throw [HttpError] (bad or revoked token).
+     */
+    fun me(): CloudMe? {
+        val url = CloudMe.url(endpoint) ?: return null
+        val c = open(url, "GET", timeoutMs = 15_000)
+        try {
+            c.setRequestProperty("Accept", "application/json")
+            val code = c.responseCode
+            if (code == 401 || code == 403) throw HttpError(code, "me")
+            if (code !in 200..299) return null
+            val body = c.inputStream.use { input ->            // small JSON; read at most 16 KB of anything else
+                val buf = java.io.ByteArrayOutputStream()
+                val b = ByteArray(4096)
+                while (buf.size() < 16 * 1024) { val n = input.read(b); if (n < 0) break; buf.write(b, 0, n) }
+                buf.toString("UTF-8")
+            }
+            return CloudMe.parse(body)
         } finally { c.disconnect() }
     }
 
