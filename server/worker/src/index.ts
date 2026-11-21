@@ -6,8 +6,8 @@
 //   GET <BASE>/index.json[?type=...]            {schema: "poi-cloud-index/1", uploads: [...]}, newest first
 //   GET /me, GET|POST /admin/tokens, DELETE /admin/tokens/<id>   who am I; personal tokens (admin)
 //
-// Tokens and roles (../README.md, "Tokens and roles"): ADMIN_TOKEN = admin, TOKEN = the old shared token (reviewer),
-// personal tokens issued by an admin (uploader | reviewer), kept as SHA-256 hashes in the Durable Object.
+// Tokens and permissions (../README.md): ADMIN_TOKEN = the admin password, TOKEN = the old shared token, personal
+// tokens issued by an admin with independent scopes (upload, read, process, delete), kept as SHA-256 hashes.
 //
 // Chunks: R2 multipart parts must all be the same size (>= 5 MiB) except the last, while tus PATCHes come in any size
 // (the phone sends 2 MB, cloud.py 8 MiB). Each PATCH is streamed into PART_SIZE buffers; every full buffer becomes a
@@ -57,14 +57,37 @@ export type UploadState = {
   by?: By | null             // the token that created it
 }
 export type By = { id: string; name: string }
-export type Role = 'uploader' | 'reviewer' | 'admin'
-export type Principal = { id: string; name: string; role: Role }
-export type Token = { id: string; name: string; role: Role; prefix: string; createdAt: string; lastUsedAt: string | null; revokedAt: string | null; uploads: number; seen: Seen | null }
+export type Scope = 'upload' | 'read' | 'process' | 'delete'
+const SCOPES: Scope[] = ['upload', 'read', 'process', 'delete']
+/** A summary of the scopes for older clients (README, GET /me). */
+export type Role = 'admin' | 'uploader' | 'reviewer' | 'agent' | 'custom'
+export type Principal = { id: string; name: string; scopes: Scope[]; admin: boolean }
+export type Token = { id: string; name: string; scopes: Scope[]; role: Role; prefix: string; createdAt: string; lastUsedAt: string | null; revokedAt: string | null; uploads: number; seen: Seen | null }
 /** The latest request of a token (README "Last seen"): Cloudflare's approximate IP location, no IP, no history. */
 export type Seen = { at: string; country: string | null; region: string | null; city: string | null; network: string | null;
   lat: number | null; lon: number | null; client: string | null; userAgent: string | null; prevClient: string | null; prevAt: string | null }
 export type SeenInput = Omit<Seen, 'at' | 'prevClient' | 'prevAt'>
-export const ROLE_RANK: Record<Role, number> = { uploader: 1, reviewer: 2, admin: 3 }
+/** Tokens issued before scopes: their role column. */
+const LEGACY: Record<string, Scope[]> = { uploader: ['upload'], reviewer: ['upload', 'read', 'process'] }
+
+function roleOf(scopes: Scope[], admin = false): Role {
+  if (admin) return 'admin'
+  if (scopes.length === 1 && scopes[0] === 'upload') return 'uploader'
+  if (scopes.includes('read')) return 'reviewer'
+  if (scopes.includes('process')) return 'agent'
+  return 'custom'
+}
+
+/** Known scopes, once each, in SCOPES order; null when none is valid or one is unknown. */
+function cleanScopes(v: unknown): Scope[] | null {
+  if (!Array.isArray(v) || !v.length || v.some((x) => !SCOPES.includes(x as Scope))) return null
+  return SCOPES.filter((sc) => v.includes(sc))
+}
+
+function rowScopes(r: Row): Scope[] {
+  if (r.scopes) { try { return cleanScopes(JSON.parse(String(r.scopes))) ?? [] } catch { /* fall through */ } }
+  return LEGACY[String(r.role)] ?? []
+}
 export type Begin = { ok: true; state: UploadState; lease: string } | { ok: false; status: 404 | 409 | 423 | 400; state?: UploadState }
 export type Commit = Pick<UploadState, 'offset' | 'mpId' | 'parts' | 'carryKey' | 'carryLen' | 'complete'>
 
@@ -110,6 +133,8 @@ export class Uploads extends DurableObject<Env> {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS tokens (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, prefix TEXT NOT NULL,
       created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER)`)
+    const tcols = this.sql.exec('PRAGMA table_info(tokens)').toArray().map((c) => String(c.name))
+    if (!tcols.includes('scopes')) this.sql.exec('ALTER TABLE tokens ADD COLUMN scopes TEXT')   // null: from role (LEGACY)
     this.sql.exec(`CREATE TABLE IF NOT EXISTS seen (
       id TEXT PRIMARY KEY, at INTEGER NOT NULL, country TEXT, region TEXT, city TEXT, network TEXT, lat REAL, lon REAL,
       client TEXT, user_agent TEXT, prev_client TEXT, prev_at INTEGER)`)
@@ -142,22 +167,33 @@ export class Uploads extends DurableObject<Env> {
     if (!r) return null
     const now = Date.now()
     if (!r.last_used_at || now - Number(r.last_used_at) > TOUCH_MS) this.sql.exec('UPDATE tokens SET last_used_at = ? WHERE id = ?', now, r.id)
-    return { id: String(r.id), name: String(r.name), role: String(r.role) as Role }
+    return { id: String(r.id), name: String(r.name), scopes: rowScopes(r), admin: false }
   }
 
   hasTokens(): boolean {
     return this.sql.exec('SELECT 1 FROM tokens LIMIT 1').toArray().length > 0
   }
 
-  issueToken(id: string, name: string, role: Role, hash: string, prefix: string): Token {
-    this.sql.exec('INSERT INTO tokens (id, name, role, hash, prefix, created_at) VALUES (?, ?, ?, ?, ?, ?)', id, name, role, hash, prefix, Date.now())
+  issueToken(id: string, name: string, scopes: Scope[], hash: string, prefix: string): Token {
+    this.sql.exec('INSERT INTO tokens (id, name, role, scopes, hash, prefix, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      id, name, roleOf(scopes), JSON.stringify(scopes), hash, prefix, Date.now())
     return this.listTokens().find((t) => t.id === id)!
+  }
+
+  /** New scopes and/or name; 404 unknown, 409 revoked. */
+  updateToken(id: string, scopes: Scope[] | null, name: string | null): { status: 200 | 404 | 409; token?: Token } {
+    const r = this.sql.exec('SELECT * FROM tokens WHERE id = ?', id).toArray()[0]
+    if (!r) return { status: 404 }
+    if (r.revoked_at) return { status: 409 }
+    if (scopes) this.sql.exec('UPDATE tokens SET scopes = ?, role = ? WHERE id = ?', JSON.stringify(scopes), roleOf(scopes), id)
+    if (name) this.sql.exec('UPDATE tokens SET name = ? WHERE id = ?', name, id)
+    return { status: 200, token: this.listTokens().find((t) => t.id === id)! }
   }
 
   listTokens(): Token[] {
     return this.sql.exec(`SELECT t.*, (SELECT COUNT(*) FROM uploads u WHERE u.by_id = t.id) AS n FROM tokens t
       ORDER BY created_at DESC`).toArray().map((r) => ({
-      id: String(r.id), name: String(r.name), role: String(r.role) as Role, prefix: String(r.prefix),
+      id: String(r.id), name: String(r.name), scopes: rowScopes(r), role: roleOf(rowScopes(r)), prefix: String(r.prefix),
       createdAt: iso(r.created_at)!, lastUsedAt: iso(r.last_used_at), revokedAt: iso(r.revoked_at), uploads: Number(r.n),
       seen: this.seenOf(String(r.id)),
     }))
@@ -261,18 +297,21 @@ async function same(given: string, secret: string): Promise<boolean> {
   return crypto.subtle.timingSafeEqual(a, b)
 }
 
+const ADMIN: Principal = { id: 'admin', name: 'Admin', scopes: [...SCOPES], admin: true }
+const SHARED: Principal = { id: 'shared', name: 'Shared token', scopes: ['upload', 'read', 'process'], admin: false }
+
 /** Who sent the request, or null (401). Open (admin) only while no secret is set and no token was issued. */
 async function principal(env: Env, req: Request): Promise<Principal | null> {
   const given = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
   if (given) {
-    if (env.ADMIN_TOKEN && (await same(given, env.ADMIN_TOKEN))) return { id: 'admin', name: 'Admin', role: 'admin' }
-    if (env.TOKEN && (await same(given, env.TOKEN))) return { id: 'shared', name: 'Shared token', role: 'reviewer' }
+    if (env.ADMIN_TOKEN && (await same(given, env.ADMIN_TOKEN))) return ADMIN
+    if (env.TOKEN && (await same(given, env.TOKEN))) return SHARED
     if (given.startsWith('pct_')) {
       const p = await stub(env).findToken(await sha256hex(given))
       if (p) return p
     }
   }
-  if (!env.ADMIN_TOKEN && !env.TOKEN && !(await stub(env).hasTokens())) return { id: 'open', name: 'Open server', role: 'admin' }
+  if (!env.ADMIN_TOKEN && !env.TOKEN && !(await stub(env).hasTokens())) return { ...ADMIN, id: 'open', name: 'Open server' }
   return null
 }
 
@@ -288,7 +327,11 @@ function seenInput(req: Request): SeenInput {
   }
 }
 
-const can = (p: Principal, role: Role) => ROLE_RANK[p.role] >= ROLE_RANK[role]
+const has = (p: Principal, sc: Scope) => p.admin || p.scopes.includes(sc)
+const canRead = (p: Principal) => has(p, 'read') || has(p, 'process')
+/** May this token create (and so HEAD / PATCH) an upload of this type? */
+const canWrite = (p: Principal, type: string | undefined) => (type === 'processed-result' ? has(p, 'process') : has(p, 'upload'))
+const me = (p: Principal) => ({ id: p.id, name: p.name, scopes: p.scopes, admin: p.admin, role: roleOf(p.scopes, p.admin) })
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
@@ -303,22 +346,37 @@ async function admin(env: Env, req: Request, rest: string): Promise<Response> {
   const tokens = stub(env)
   if (rest === 'tokens' && req.method === 'GET') {
     const builtins = []
-    if (env.ADMIN_TOKEN) builtins.push({ id: 'admin', name: 'Admin', role: 'admin', seen: await tokens.seenOf('admin') })
-    if (env.TOKEN) builtins.push({ id: 'shared', name: 'Shared token', role: 'reviewer', seen: await tokens.seenOf('shared') })
+    if (env.ADMIN_TOKEN) builtins.push({ ...me(ADMIN), seen: await tokens.seenOf('admin') })
+    if (env.TOKEN) builtins.push({ ...me(SHARED), seen: await tokens.seenOf('shared') })
     return json(200, { schema: 'poi-cloud-tokens/1', tokens: await tokens.listTokens(), builtins })
   }
   if (rest === 'tokens' && req.method === 'POST') {
-    let body: { name?: unknown; role?: unknown }
+    let body: { name?: unknown; role?: unknown; scopes?: unknown }
     try { body = await req.json() } catch { return text(400, 'JSON body required\n') }
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     if (!name || name.length > 80) return text(400, 'name: 1 to 80 characters\n')
-    if (body.role !== 'uploader' && body.role !== 'reviewer') return text(400, 'role: uploader or reviewer\n')
+    const scopes = body.scopes !== undefined ? cleanScopes(body.scopes) : (LEGACY[String(body.role)] ?? null)
+    if (!scopes) return text(400, `scopes: one or more of ${SCOPES.join(', ')}\n`)
     const secret = newSecret()
-    const token = await tokens.issueToken(crypto.randomUUID().replace(/-/g, '').slice(0, 16), name, body.role, await sha256hex(secret), secret.slice(0, 12))
-    console.log(`token issued: ${token.id} ${token.role}`)
+    const token = await tokens.issueToken(crypto.randomUUID().replace(/-/g, '').slice(0, 16), name, scopes, await sha256hex(secret), secret.slice(0, 12))
+    console.log(`token issued: ${token.id} ${token.scopes.join(',')}`)
     return json(201, { token, secret })
   }
   const m = /^tokens\/([A-Za-z0-9_-]{1,64})$/.exec(rest)
+  if (m && req.method === 'PATCH') {
+    let body: { name?: unknown; scopes?: unknown }
+    try { body = await req.json() } catch { return text(400, 'JSON body required\n') }
+    const scopes = body?.scopes === undefined ? null : cleanScopes(body.scopes)
+    if (body?.scopes !== undefined && !scopes) return text(400, `scopes: one or more of ${SCOPES.join(', ')}\n`)
+    const name = body?.name === undefined ? null : typeof body.name === 'string' ? body.name.trim() : ''
+    if (name !== null && (!name || name.length > 80)) return text(400, 'name: 1 to 80 characters\n')
+    if (!scopes && !name) return text(400, 'nothing to change\n')
+    const r = await tokens.updateToken(m[1], scopes, name)
+    if (r.status === 404) return text(404, 'Not found\n')
+    if (r.status === 409) return text(409, 'Token revoked\n')
+    console.log(`token changed: ${m[1]} ${r.token!.scopes.join(',')}`)
+    return json(200, { token: r.token })
+  }
   if (m && req.method === 'DELETE') {
     if (!(await tokens.revokeToken(m[1]))) return text(404, 'Not found\n')
     console.log(`token revoked: ${m[1]}`)
@@ -362,7 +420,8 @@ class TusError extends Error {
  * Append [body] at [offset] (already checked against the state by begin()); returns the new offset. All R2 writes
  * happen before the commit; nothing is committed when the body breaks off, so the offset stays where it was.
  */
-async function append(env: Env, ctx: ExecutionContext, id: string, offset: number, body: ReadableStream<Uint8Array> | null): Promise<UploadState> {
+async function append(env: Env, ctx: ExecutionContext, id: string, offset: number, body: ReadableStream<Uint8Array> | null,
+  allowed: (s: UploadState) => boolean = () => true): Promise<UploadState> {
   const uploads = stub(env)
   const b = await uploads.begin(id, offset)
   if (!b.ok) {
@@ -373,6 +432,11 @@ async function append(env: Env, ctx: ExecutionContext, id: string, offset: numbe
   }
   const s = b.state
   const lease = b.lease
+  if (!allowed(s)) {
+    await uploads.release(id, lease)
+    await body?.cancel().catch(() => {})
+    throw new TusError(403, 'Forbidden')
+  }
   let newCarryKey: string | null = null
   try {
     let buf = new Uint8Array(PART_SIZE)
@@ -470,6 +534,7 @@ async function create(env: Env, ctx: ExecutionContext, req: Request, base: strin
   if (metaH && metaH.length > MAX_METADATA) return text(400, 'Upload-Metadata too long\n')
   const metadata = parseMetadata(metaH)
   if (!metadata) return text(400, 'Bad Upload-Metadata\n')
+  if (!canWrite(by, metadata.type)) return text(403, 'Forbidden\n')
   const id = crypto.randomUUID().replace(/-/g, '')
   const now = Date.now()
   const s: UploadState = { id, size, offset: 0, metadata, createdAt: new Date(now).toISOString(), updatedAt: now,
@@ -496,12 +561,12 @@ async function create(env: Env, ctx: ExecutionContext, req: Request, base: strin
   return new Response(null, { status: 201, headers: h })
 }
 
-async function patch(env: Env, ctx: ExecutionContext, req: Request, id: string): Promise<Response> {
+async function patch(env: Env, ctx: ExecutionContext, req: Request, id: string, p: Principal): Promise<Response> {
   if (!(req.headers.get('Content-Type') || '').startsWith('application/offset+octet-stream')) return text(415, 'Content-Type must be application/offset+octet-stream\n')
   const offH = req.headers.get('Upload-Offset')
   if (!offH || !/^\d+$/.test(offH)) return text(400, 'Upload-Offset required\n')
   try {
-    const s = await append(env, ctx, id, Number(offH), req.body)
+    const s = await append(env, ctx, id, Number(offH), req.body, (st) => canWrite(p, st.metadata.type))
     if (s.complete) console.log(`finished ${id}`)
     return new Response(null, { status: 204, headers: tusHeaders(env, s) })
   } catch (e) {
@@ -510,16 +575,17 @@ async function patch(env: Env, ctx: ExecutionContext, req: Request, id: string):
   }
 }
 
-async function head(env: Env, id: string): Promise<Response> {
+async function head(env: Env, id: string, p: Principal): Promise<Response> {
   const s = await stub(env).get(id)
+  if (s && !canWrite(p, s.metadata.type) && !canRead(p)) return text(403, 'Forbidden\n', { 'Tus-Resumable': TUS_VERSION })
   if (!s) return new Response(null, { status: 404, headers: { 'Tus-Resumable': TUS_VERSION, 'Cache-Control': 'no-store' } })
   return new Response(null, { status: 200, headers: tusHeaders(env, s) })
 }
 
 async function terminate(env: Env, id: string, p: Principal): Promise<Response> {
-  const r = await stub(env).terminate(id, can(p, 'admin') ? null : p.id)
+  const r = await stub(env).terminate(id, has(p, 'delete') ? null : p.id)
   const h = { 'Tus-Resumable': TUS_VERSION }
-  if (r.status === 400) return text(400, 'A finished upload can only be deleted by an admin\n', h)
+  if (r.status === 400) return text(400, 'A finished upload can only be deleted with the Delete uploads permission\n', h)
   if (r.status === 403) return text(403, 'Not your upload\n', h)
   if (r.status === 423) return text(423, 'Another PATCH is writing this upload\n', h)
   if (r.status !== 204) return text(404, 'Not found\n', h)
@@ -583,8 +649,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (!p) return text(401, 'Unauthorized\n', { 'WWW-Authenticate': 'Bearer' })
   if (p.id !== 'open') ctx.waitUntil(stub(env).touchSeen(p.id, seenInput(req)).catch(() => {}))
   const forbidden = () => text(403, 'Forbidden\n')
-  if (isMe) return req.method === 'GET' ? json(200, { schema: 'poi-cloud-me/1', ...p }) : text(405, 'Method not allowed\n')
-  if (isAdmin) return can(p, 'admin') ? admin(env, req, url.pathname.slice('/admin/'.length)) : forbidden()
+  if (isMe) return req.method === 'GET' ? json(200, { schema: 'poi-cloud-me/1', ...me(p) }) : text(405, 'Method not allowed\n')
+  if (isAdmin) return p.admin ? admin(env, req, url.pathname.slice('/admin/'.length)) : forbidden()
 
   const rest = url.pathname.slice(base.length).replace(/^\/+/, '')
   let method = req.method
@@ -593,7 +659,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (method === 'POST' && ['PATCH', 'HEAD', 'DELETE'].includes(override)) method = override
 
   if (method === 'GET' && rest) {
-    if (!can(p, 'reviewer')) return forbidden()
+    if (!canRead(p)) return forbidden()
     return rest === 'index.json' ? index(env, url.searchParams.get('type') || '') : download(env, rest)
   }
   if (method === 'OPTIONS') {
@@ -606,8 +672,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (tr !== TUS_VERSION) return text(412, 'Tus-Resumable 1.0.0 required\n', { 'Tus-Version': TUS_VERSION })
   if (method === 'POST' && !rest) return create(env, ctx, req, base, p)
   if (!rest || !isId(rest)) return text(404, 'Not found\n')
-  if (method === 'HEAD') return head(env, rest)
-  if (method === 'PATCH') return patch(env, ctx, req, rest)
+  if (method === 'HEAD') return head(env, rest, p)
+  if (method === 'PATCH') return patch(env, ctx, req, rest, p)
   if (method === 'DELETE') return terminate(env, rest, p)
   return text(405, 'Method not allowed\n')
 }

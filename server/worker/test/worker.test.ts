@@ -311,3 +311,74 @@ describe('last seen', () => {
     expect(r.headers.get('Access-Control-Allow-Headers')).toContain('X-Client')
   })
 })
+
+describe('permissions (scopes)', () => {
+  const ROOT = 'https://cloud.test'
+  const ADMIN = { Authorization: 'Bearer admin-token' }
+  const T = (secret: string) => ({ Authorization: `Bearer ${secret}`, 'Tus-Resumable': '1.0.0' })
+  async function issue(name: string, scopes: string[]) {
+    const r = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { ...ADMIN, 'Content-Type': 'application/json' }, body: JSON.stringify({ name, scopes }) })
+    expect(r.status).toBe(201)
+    return r.json<{ token: { id: string; scopes: string[]; role: string }; secret: string }>()
+  }
+  const createAs = (secret: string, type: string) => SELF.fetch(BASE, { method: 'POST', headers: { ...T(secret), 'Upload-Length': '4', 'Upload-Metadata': encodeMetadata({ filename: 'x.zip', type }) } })
+
+  it('checks each scope on its own', async () => {
+    const phone = await issue('Phone', ['upload'])
+    const reader = await issue('Partner', ['read'])
+    const agent = await issue('Agent', ['process'])
+    const cleaner = await issue('Lead', ['delete', 'upload'])
+    expect(phone.token).toMatchObject({ scopes: ['upload'], role: 'uploader' })
+    expect(reader.token).toMatchObject({ scopes: ['read'], role: 'reviewer' })
+    expect(agent.token).toMatchObject({ scopes: ['process'], role: 'agent' })
+    expect(cleaner.token.scopes).toEqual(['upload', 'delete'])   // known order
+
+    // send rides: raw sessions yes, processed results no, no listing
+    const raw = await createAs(phone.secret, 'raw-session')
+    expect(raw.status).toBe(201)
+    expect((await createAs(phone.secret, 'processed-result')).status).toBe(403)
+    expect((await SELF.fetch(BASE + 'index.json', { headers: T(phone.secret) })).status).toBe(403)
+    // read only: lists and downloads, cannot upload or PATCH someone's upload
+    expect((await SELF.fetch(BASE + 'index.json', { headers: T(reader.secret) })).status).toBe(200)
+    expect((await createAs(reader.secret, 'raw-session')).status).toBe(403)
+    const rawUrl = raw.headers.get('Location')!
+    expect((await SELF.fetch(rawUrl, { method: 'PATCH', headers: { ...T(reader.secret), 'Upload-Offset': '0', 'Content-Type': 'application/offset+octet-stream' }, body: bytes(4) })).status).toBe(403)
+    expect((await SELF.fetch(rawUrl, { method: 'PATCH', headers: { ...T(phone.secret), 'Upload-Offset': '0', 'Content-Type': 'application/offset+octet-stream' }, body: bytes(4) })).status).toBe(204)
+    // process: reads, uploads processed results only
+    expect((await SELF.fetch(BASE + 'index.json', { headers: T(agent.secret) })).status).toBe(200)
+    expect((await SELF.fetch(rawUrl, { headers: T(agent.secret) })).status).toBe(200)
+    expect((await createAs(agent.secret, 'processed-result')).status).toBe(201)
+    expect((await createAs(agent.secret, 'raw-session')).status).toBe(403)
+    // delete: anyone's finished upload; without it, not even a finished own one
+    expect((await SELF.fetch(rawUrl, { method: 'DELETE', headers: T(phone.secret) })).status).toBe(400)
+    expect((await SELF.fetch(rawUrl, { method: 'DELETE', headers: T(cleaner.secret) })).status).toBe(204)
+    // /me
+    const m = await (await SELF.fetch(ROOT + '/me', { headers: T(agent.secret) })).json()
+    expect(m).toMatchObject({ scopes: ['process'], admin: false, role: 'agent' })
+    expect(await (await SELF.fetch(ROOT + '/me', { headers: ADMIN })).json()).toMatchObject({ admin: true, scopes: ['upload', 'read', 'process', 'delete'] })
+  })
+
+  it('changes a token\'s scopes and name; refuses bad changes', async () => {
+    const t = await issue('Changing', ['upload'])
+    const patchTok = (body: unknown, id = t.token.id) => SELF.fetch(ROOT + '/admin/tokens/' + id, { method: 'PATCH', headers: { ...ADMIN, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    let r = await patchTok({ scopes: ['read'], name: 'Changed' })
+    expect(r.status).toBe(200)
+    expect((await r.json<{ token: unknown }>()).token).toMatchObject({ name: 'Changed', scopes: ['read'], role: 'reviewer' })
+    expect((await createAs(t.secret, 'raw-session')).status).toBe(403)
+    expect((await SELF.fetch(BASE + 'index.json', { headers: T(t.secret) })).status).toBe(200)
+    expect((await patchTok({ scopes: [] })).status).toBe(400)
+    expect((await patchTok({ scopes: ['upload', 'admin'] })).status).toBe(400)
+    expect((await patchTok({})).status).toBe(400)
+    expect((await patchTok({ scopes: ['read'] }, 'nope')).status).toBe(404)
+    await SELF.fetch(ROOT + '/admin/tokens/' + t.token.id, { method: 'DELETE', headers: ADMIN })
+    expect((await patchTok({ scopes: ['upload'] })).status).toBe(409)
+    const nonAdmin = await issue('Not admin', ['read', 'process', 'delete', 'upload'])
+    expect((await SELF.fetch(ROOT + '/admin/tokens/' + t.token.id, { method: 'PATCH', headers: { ...T(nonAdmin.secret), 'Content-Type': 'application/json' }, body: '{"scopes":["read"]}' })).status).toBe(403)
+  })
+
+  it('lists built-ins with their scopes', async () => {
+    const l = await (await SELF.fetch(ROOT + '/admin/tokens', { headers: ADMIN })).json<{ builtins: { id: string; scopes: string[] }[] }>()
+    expect(l.builtins.find((b) => b.id === 'shared')!.scopes).toEqual(['upload', 'read', 'process'])
+    expect(l.builtins.find((b) => b.id === 'admin')!.scopes).toEqual(['upload', 'read', 'process', 'delete'])
+  })
+})

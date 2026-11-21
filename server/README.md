@@ -126,26 +126,34 @@ daily cron, with their R2 parts).
 Why not the alternatives: storing every PATCH as its own object and concatenating on download makes many small
 objects and slow downloads; per-upload state in R2 object metadata cannot serialise two PATCHes to the same upload.
 
-### Tokens and roles
+### Tokens and permissions
 
-Every request carries `Authorization: Bearer <token>` (CORS preflights excepted). The Worker resolves the token to a
-role; roles nest (each can do everything the one before can):
+Every request carries `Authorization: Bearer <token>` (CORS preflights excepted). A token has a set of independent
+**permissions** (scopes), ticked by the admin when issuing it and changeable later:
 
-| Role | Who | Can |
+| Scope | Label | Allows |
 |---|---|---|
-| `uploader` | a phone | `OPTIONS`, create (`POST`), `HEAD`, `PATCH`; `DELETE` (termination) of its **own unfinished** uploads; `GET /me` |
-| `reviewer` | the web app, `cloud.py` | + `GET <BASE>/index.json`, `GET <BASE>/<id>` (download); pushes processed results like an uploader |
-| `admin` | whoever runs the server | + the `/admin/...` requests below; `DELETE <BASE>/<id>` of **any** upload, finished ones included (R2 object and row) |
+| `upload` | Send rides | create (`POST`), `HEAD`, `PATCH` uploads of any type except `processed-result` (phones: `raw-session`) |
+| `read` | View & download | `GET <BASE>/index.json`, `GET <BASE>/<id>` (every upload) |
+| `process` | Process rides | list and download (as `read`), and create / `HEAD` / `PATCH` `processed-result` uploads (the agent pipeline, `cloud.py`) |
+| `delete` | Delete uploads | `DELETE <BASE>/<id>` of any upload, finished ones included (R2 object and row) |
+
+Any valid token may `GET /me`, send `OPTIONS`, and `DELETE` (tus termination) its **own unfinished** uploads. `HEAD` /
+`PATCH` need the scope that allows creating that upload's type. Managing tokens (`/admin/...`) is the admin password's
+alone and is never a scope. Presets in the admin page: Phone = `upload`; Reviewer = `read`; Agent = `process`.
 
 Where the token comes from:
-- `ADMIN_TOKEN` (secret, `npx wrangler secret put ADMIN_TOKEN`): role `admin`, id `admin`, name `Admin`. Never on a phone.
-- `TOKEN` (secret, optional): the old shared token, role `reviewer`, id `shared`, name `Shared token`. Kept so phones set
-  up before personal tokens keep working; delete it (`npx wrangler secret delete TOKEN`) once everyone has their own.
+- `ADMIN_TOKEN` (secret, `npx wrangler secret put ADMIN_TOKEN`): id `admin`, name `Admin`, every scope plus `/admin/...`.
+  Never on a phone.
+- `TOKEN` (secret, optional): the old shared token, id `shared`, name `Shared token`, scopes `upload`, `read`, `process`.
+  Kept so clients set up before personal tokens keep working; delete it (`npx wrangler secret delete TOKEN`) once
+  everyone has their own (the admin page shows when it was last seen).
 - Personal tokens issued by an admin (below), stored in the Durable Object as a SHA-256 hash only: the secret is shown
-  once, when issued. A revoked token gets 401 at once.
+  once, when issued. A revoked token gets 401 at once. Tokens issued before scopes existed: role `uploader` → `upload`;
+  `reviewer` → `upload`, `read`, `process`.
 - With neither secret set and no personal token issued, the server is open (local tests only).
 
-A wrong or revoked token gets `401`; a valid token without the role gets `403 Forbidden`.
+A wrong or revoked token gets `401`; a valid token without the scope gets `403 Forbidden`.
 
 **Attribution.** Each upload records the token that created it; `index.json` entries get
 `"by": {"id": "<token id>", "name": "<token name>"}` (`null` for uploads made before this).
@@ -168,27 +176,33 @@ history is kept:
   from two different clients within 7 days (a copied token, or a new phone).
 
 `GET /admin/tokens` adds `"seen": Seen | null` to each Token, and a list of the built-in identities:
-`"builtins": [{"id": "admin" | "shared", "name", "role", "seen": Seen | null}]`.
+`"builtins": [{"id": "admin" | "shared", "name", "scopes", "role", "seen": Seen | null}]`.
 
 **Trip metadata.** A phone's `raw-session` upload carries, besides `filename`, `type`, `sessionId`, `name`, …:
 `track` (the ride as a Google encoded polyline, precision 5, simplified so it stays under 2,000 characters),
 `startedAt`, `endedAt` (ISO), `distanceM`, `photos` (count). All optional: older uploads have none. `index.json`
 returns them in `metadata`, so the admin map draws trips without downloading the zips.
 
-**`GET /me`** (any valid token): `{"schema": "poi-cloud-me/1", "id": "...", "name": "...", "role": "uploader|reviewer|admin"}`.
-Used by the web app (show the Admin tab) and the phone (connection test).
+**`GET /me`** (any valid token): `{"schema": "poi-cloud-me/1", "id", "name", "scopes": ["upload", ...], "admin": bool,
+"role": "admin" | "uploader" | "reviewer" | "agent" | "custom"}` (`role`: a summary of the scopes for older clients:
+exactly `upload` → uploader, has `read` → reviewer, has `process` → agent). Used by the admin page and the phone's
+connection test.
 
-**Admin requests** (role `admin`, JSON bodies, `Content-Type: application/json`):
+**Admin requests** (admin password only, JSON bodies, `Content-Type: application/json`):
 
-- `GET /admin/tokens` → `{"schema": "poi-cloud-tokens/1", "tokens": [Token...]}`, newest first, revoked ones included.
-  `Token = {"id", "name", "role", "prefix", "createdAt", "lastUsedAt": ISO | null, "revokedAt": ISO | null, "uploads": n}`.
-  `prefix`: the first 12 characters of the secret (`pct_` + 8), to tell tokens apart; `lastUsedAt` is updated at most
-  every 10 minutes.
-- `POST /admin/tokens` with `{"name": "Sơn – phone", "role": "uploader" | "reviewer"}` (name 1–80 characters; admin
-  tokens cannot be issued) → `201 {"token": Token, "secret": "pct_<43 base64url chars>"}`. The only time the secret is
-  returned.
+- `GET /admin/tokens` → `{"schema": "poi-cloud-tokens/1", "tokens": [Token...], "builtins": [...]}`, newest first,
+  revoked ones included.
+  `Token = {"id", "name", "scopes": [...], "role": <summary as in /me>, "prefix", "createdAt", "lastUsedAt": ISO | null,
+  "revokedAt": ISO | null, "uploads": n, "seen": Seen | null}`. `prefix`: the first 12 characters of the secret
+  (`pct_` + 8), to tell tokens apart; `lastUsedAt` is updated at most every 10 minutes.
+- `POST /admin/tokens` with `{"name": "Sơn – phone", "scopes": ["upload"]}` (name 1–80 characters; at least one known
+  scope; `{"role": "uploader" | "reviewer"}` is still accepted and mapped as above) → `201 {"token": Token, "secret":
+  "pct_<43 base64url chars>"}`. The only time the secret is returned.
+- `PATCH /admin/tokens/<id>` with `{"scopes": [...]}` (at least one) and/or `{"name": "..."}` → `200 {"token": Token}`;
+  takes effect on the token's next request. `404` unknown, `409` revoked.
 - `DELETE /admin/tokens/<id>` → `204` (revoked: kept in the list with `revokedAt`, for attribution), `404` unknown.
-- `DELETE <BASE>/<upload id>` with `Tus-Resumable: 1.0.0` → `204`: removes any upload, finished or not.
+- `DELETE <BASE>/<upload id>` with `Tus-Resumable: 1.0.0` → `204`: removes any upload, finished or not (admin, or a
+  token with `delete`).
 
 **Setup QR / link.** A token is handed to a phone as one string, shown as a QR code by the web app:
 `<tus endpoint>#token=<secret>&name=<url-encoded token name>`, e.g.
