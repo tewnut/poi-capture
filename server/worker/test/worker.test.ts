@@ -382,3 +382,91 @@ describe('permissions (scopes)', () => {
     expect(l.builtins.find((b) => b.id === 'admin')!.scopes).toEqual(['upload', 'read', 'process', 'delete'])
   })
 })
+
+describe('parallel uploads (concatenation)', () => {
+  const ROOT = 'https://cloud.test'
+  const ADMIN = { Authorization: 'Bearer admin-token' }
+  async function key(name: string, scopes: string[]) {
+    const r = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { ...ADMIN, 'Content-Type': 'application/json' }, body: JSON.stringify({ name, scopes }) })
+    return { Authorization: `Bearer ${(await r.json<{ secret: string }>()).secret}`, 'Tus-Resumable': '1.0.0' }
+  }
+  async function partial(h: Record<string, string>, data: Uint8Array, chunk: number) {
+    const r = await SELF.fetch(BASE, { method: 'POST', headers: { ...h, 'Upload-Concat': 'partial', 'Upload-Length': String(data.length) } })
+    expect(r.status).toBe(201)
+    const url = r.headers.get('Location')!
+    for (let off = 0; off < data.length; off += chunk) {
+      const p = await SELF.fetch(url, { method: 'POST', headers: { ...h, 'X-HTTP-Method-Override': 'PATCH', 'Upload-Offset': String(off), 'Content-Type': 'application/offset+octet-stream' }, body: data.subarray(off, Math.min(off + chunk, data.length)) })
+      expect(p.status).toBe(204)
+    }
+    return url
+  }
+  const final = (h: Record<string, string>, urls: string[], meta = { filename: 's.zip', type: 'raw-session', sessionId: 's_cat' }) =>
+    SELF.fetch(BASE, { method: 'POST', headers: { ...h, 'Upload-Concat': 'final;' + urls.join(' '), 'Upload-Metadata': encodeMetadata(meta) } })
+
+  it('joins partials uploaded in parallel; lists and downloads the whole file; deletes the parts with it', async () => {
+    const phone = await key('Phone cat', ['upload'])
+    const data = bytes(3 * PART_SIZE + 12345, 7)
+    const cuts = [0, PART_SIZE, 2 * PART_SIZE, data.length]
+    const urls = await Promise.all([0, 1, 2].map((i) => partial(phone, data.subarray(cuts[i], cuts[i + 1]), 3 * MiB)))
+    expect((await SELF.fetch(BASE + 'index.json', { headers: AUTH })).status).toBe(200)
+    const head = await SELF.fetch(urls[0], { method: 'HEAD', headers: phone })
+    expect(head.headers.get('Upload-Concat')).toBe('partial')
+    expect((await SELF.fetch(urls[0], { headers: AUTH })).status).toBe(404)   // a partial alone is not downloadable
+
+    const r = await final(phone, urls)
+    expect(r.status).toBe(201)
+    const url = r.headers.get('Location')!
+    expect(r.headers.get('Upload-Offset')).toBe(String(data.length))
+    const h = await SELF.fetch(url, { method: 'HEAD', headers: phone })
+    expect(h.headers.get('Upload-Length')).toBe(String(data.length))
+    expect(h.headers.get('Upload-Offset')).toBe(String(data.length))
+    expect(h.headers.get('Upload-Concat')).toMatch(/^final;\/files\/[0-9a-f]{32} /)
+
+    const idx = await (await SELF.fetch(BASE + 'index.json', { headers: AUTH })).json<{ uploads: { id: string; size: number; complete: boolean }[] }>()
+    const ids = idx.uploads.map((u) => u.id)
+    expect(ids).toContain(url.split('/').pop())
+    for (const u of urls) expect(ids).not.toContain(u.split('/').pop())   // partials are not listed
+    expect(idx.uploads.find((u) => u.id === url.split('/').pop())).toMatchObject({ size: data.length, complete: true })
+
+    const got = await download(url)
+    expect(same(got, data)).toBe(true)
+
+    expect((await final(phone, urls)).status).toBe(409)                       // used once only
+    expect((await SELF.fetch(urls[1], { method: 'DELETE', headers: { ...ADMIN, 'Tus-Resumable': '1.0.0' } })).status).toBe(409)   // part of a joined upload
+    expect((await SELF.fetch(url, { method: 'DELETE', headers: { ...ADMIN, 'Tus-Resumable': '1.0.0' } })).status).toBe(204)
+    for (const u of urls) {
+      expect((await SELF.fetch(u, { method: 'HEAD', headers: AUTH })).status).toBe(404)
+      expect(await env.BUCKET.head(`files/${u.split('/').pop()}`)).toBeNull()
+    }
+  })
+
+  it('refuses bad joins', async () => {
+    const a = await key('Cat A', ['upload'])
+    const b = await key('Cat B', ['upload'])
+    const reader = await key('Cat reader', ['read'])
+    const done = await partial(a, bytes(100), 100)
+    const r = await SELF.fetch(BASE, { method: 'POST', headers: { ...a, 'Upload-Concat': 'partial', 'Upload-Length': '100' } })
+    const unfinished = r.headers.get('Location')!
+    const normal = await upload(bytes(10), 10)
+    expect((await final(a, [done, unfinished])).status).toBe(400)            // not finished
+    expect((await final(a, [done, normal])).status).toBe(400)                // not a partial
+    expect((await final(a, [done, BASE + 'f'.repeat(32)])).status).toBe(404)
+    expect((await final(b, [done])).status).toBe(403)                         // someone else's partial
+    expect((await final(a, [done], { filename: 'r.zip', type: 'processed-result', sessionId: 'x' })).status).toBe(403)   // scope for the type
+    expect((await final(a, [done, done])).status).toBe(400)                  // duplicates
+    expect((await final(a, [])).status).toBe(400)
+    expect((await SELF.fetch(BASE, { method: 'POST', headers: { ...reader, 'Upload-Concat': 'partial', 'Upload-Length': '5' } })).status).toBe(403)
+    expect((await SELF.fetch(BASE, { method: 'POST', headers: { ...a, 'Upload-Concat': 'nonsense', 'Upload-Length': '5' } })).status).toBe(400)
+    expect((await final(a, [done])).status).toBe(201)                         // still usable after the refusals
+  })
+
+  it('expires partials nobody joined; lists concatenation', async () => {
+    const a = await key('Cat exp', ['upload'])
+    const lonely = await partial(a, bytes(50), 50)
+    const s = env.UPLOADS.get(env.UPLOADS.idFromName('uploads'))
+    const gone = await s.expire(Date.now() + 1000)
+    expect(gone.map((g) => g.id)).toContain(lonely.split('/').pop())
+    const o = await SELF.fetch(BASE, { method: 'OPTIONS', headers: AUTH })
+    expect(o.headers.get('Tus-Extension')!.split(',')).toContain('concatenation')
+  })
+})

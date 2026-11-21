@@ -126,6 +126,31 @@ daily cron, with their R2 parts).
 Why not the alternatives: storing every PATCH as its own object and concatenating on download makes many small
 objects and slow downloads; per-upload state in R2 object metadata cannot serialise two PATCHes to the same upload.
 
+### Parallel uploads (tus concatenation)
+
+Uploads from Vietnam to Cloudflare's free hostnames are throttled per connection (measured 2026-11-21: one connection
+~0.1 MB/s, four in parallel ~0.3 MB/s, while Cloudflare's own speed test reaches 2.5 MB/s), so a client may send one
+file as several **partial** uploads at once and then join them (tus `concatenation` extension; `Tus-Extension`
+lists it).
+
+- `POST <BASE>/` with `Upload-Concat: partial` and `Upload-Length` → `201` + `Location`. Needs the `upload` or
+  `process` scope. Upload-Metadata is optional and ignored. A partial is written with `PATCH` / `HEAD` like any
+  upload (`HEAD` also returns `Upload-Concat: partial`); it is never listed in `index.json` and cannot be downloaded
+  on its own (`404`).
+- `POST <BASE>/` with `Upload-Concat: final;<url> <url> …` (1–16 partials, in file order, absolute URLs or paths)
+  and the file's `Upload-Metadata`, no `Upload-Length` → `201` + `Location` of a **complete** upload whose size is the
+  sum of the partials. Needs the scope for the metadata's `type` (as a normal create). Every partial must exist
+  (`404`), be complete (`400`), not be used by another final upload (`409`) and have been created by the same key
+  (`403`; the admin is exempt).
+- `HEAD` of the final upload: `Upload-Offset` = `Upload-Length` = the size, `Upload-Concat: final;…`. `GET` streams
+  the partials one after the other (one `Content-Length`). `DELETE` (with `delete`) removes the partials too.
+- The daily cron removes unfinished partials untouched for `EXPIRE_DAYS` (as any upload) and finished partials no
+  final upload uses after `EXPIRE_DAYS`.
+
+Clients: the phone splits files over 16 MiB into up to 4 contiguous parts (cut at multiples of 8 MiB), uploads them
+concurrently, then sends the final request; with a server that does not list `concatenation` it uploads in one part
+as before. Each PATCH's size adapts to the measured speed (about 20 s per request, 256 KiB – 8 MiB).
+
 ### Tokens and permissions
 
 Every request carries `Authorization: Bearer <token>` (CORS preflights excepted). A token has a set of independent
