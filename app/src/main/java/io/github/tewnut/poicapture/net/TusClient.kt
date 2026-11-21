@@ -9,9 +9,12 @@ import java.io.IOException
 import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * A small tus 1.0 client on HttpURLConnection (the app's only HTTP stack): OPTIONS, creation (POST), HEAD and PATCH.
+ * A small tus 1.0 client on HttpURLConnection (the app's only HTTP stack): OPTIONS, creation (POST), HEAD, PATCH,
+ * termination (DELETE) and concatenation (partial and final uploads).
  * HttpURLConnection has no PATCH, so PATCH goes as POST with `X-HTTP-Method-Override: PATCH` (tusd and server/ accept
  * it). The token goes in the Authorization header only; it is never logged or put in an exception message.
  */
@@ -30,8 +33,16 @@ class TusClient(endpoint: String, token: String?) {
         val CLIENT: String by lazy { Tus.clientHeader(BuildConfig.VERSION_NAME, Build.VERSION.RELEASE, Build.MANUFACTURER, Build.MODEL) }
     }
 
+    /** Connections open now, so [abortAll] can cut them (blocking socket I/O does not notice coroutine cancellation). */
+    private val live: MutableSet<HttpURLConnection> = Collections.newSetFromMap(ConcurrentHashMap())
+
+    /** Disconnect every request in flight: they fail at once with an IOException. */
+    fun abortAll() { live.toList().forEach { runCatching { it.disconnect() } } }
+
+    private fun close(c: HttpURLConnection) { live.remove(c); c.disconnect() }
+
     private fun open(url: String, method: String, timeoutMs: Int = 30_000): HttpURLConnection =
-        (URL(url).openConnection() as HttpURLConnection).apply {
+        (URL(url).openConnection() as HttpURLConnection).also { live.add(it) }.apply {
             connectTimeout = 15_000
             readTimeout = timeoutMs
             instanceFollowRedirects = false
@@ -52,7 +63,7 @@ class TusClient(endpoint: String, token: String?) {
             val code = c.responseCode
             if (code !in 200..299) throw HttpError(code, "OPTIONS")
             return Tus.serverInfo(c.getHeaderField("Tus-Version"), c.getHeaderField("Tus-Extension"), c.getHeaderField("Tus-Max-Size"))
-        } finally { c.disconnect() }
+        } finally { close(c) }
     }
 
     /**
@@ -74,15 +85,27 @@ class TusClient(endpoint: String, token: String?) {
                 buf.toString("UTF-8")
             }
             return CloudMe.parse(body)
-        } finally { c.disconnect() }
+        } finally { close(c) }
     }
 
     /** POST with Upload-Length and Upload-Metadata; returns the new upload's URL. */
-    fun create(size: Long, metadata: Map<String, String?>): String {
+    fun create(size: Long, metadata: Map<String, String?>): String = post(size, metadata, null)
+
+    /** A partial upload of [size] bytes (tus concatenation, `Upload-Concat: partial`); returns its URL. */
+    fun createPartial(size: Long): String = post(size, null, "partial")
+
+    /**
+     * The final upload joining [partUrls] (complete partials, in file order) with the file's [metadata]; returns its
+     * URL. 409: a partial is already used by another final upload.
+     */
+    fun createFinal(partUrls: List<String>, metadata: Map<String, String?>): String = post(null, metadata, Tus.finalConcat(partUrls))
+
+    private fun post(size: Long?, metadata: Map<String, String?>?, concat: String?): String {
         val c = open(endpoint, "POST")
         try {
-            c.setRequestProperty("Upload-Length", size.toString())
-            c.setRequestProperty("Upload-Metadata", Tus.encodeMetadata(metadata))
+            size?.let { c.setRequestProperty("Upload-Length", it.toString()) }
+            metadata?.let { c.setRequestProperty("Upload-Metadata", Tus.encodeMetadata(it)) }
+            concat?.let { c.setRequestProperty("Upload-Concat", it) }
             c.doOutput = true
             c.setFixedLengthStreamingMode(0)
             c.outputStream.close()
@@ -90,7 +113,7 @@ class TusClient(endpoint: String, token: String?) {
             if (code != 201) throw HttpError(code, "create")
             val loc = c.getHeaderField("Location") ?: throw IOException("create: no Location from the server")
             return Tus.resolve(endpoint, loc)
-        } finally { c.disconnect() }
+        } finally { close(c) }
     }
 
     /** HEAD: the server's offset for this upload; null when the server does not know it (any more). */
@@ -101,22 +124,31 @@ class TusClient(endpoint: String, token: String?) {
             if (code == 404 || code == 410) return null
             if (code !in 200..299) throw HttpError(code, "HEAD")
             return c.getHeaderField("Upload-Offset")?.toLongOrNull() ?: throw IOException("HEAD: no Upload-Offset")
-        } finally { c.disconnect() }
+        } finally { close(c) }
+    }
+
+    /** tus termination of an unfinished upload of ours (best effort: false when the server said no). */
+    fun delete(url: String): Boolean {
+        val c = open(url, "DELETE")
+        try { return c.responseCode in 200..299 } finally { close(c) }
     }
 
     /**
-     * PATCH [length] bytes of [file] from [offset]; returns the server's new offset. [onSent] gets the bytes sent so
-     * far in this request (for progress). 409: the offsets disagree, the caller asks again with HEAD.
+     * PATCH [length] bytes of [file] at upload offset [offset], read from [fileOffset] of the file (a partial's
+     * offsets count from its own start); returns the server's new offset. [timeoutMs]: the read timeout (ChunkSizer).
+     * [onSent] gets the bytes sent so far in this request (for progress). 409: the offsets disagree, the caller asks
+     * again with HEAD.
      */
-    fun patch(url: String, file: File, offset: Long, length: Long, onSent: (Long) -> Unit = {}): Long {
-        val c = open(url, "PATCH", timeoutMs = 120_000)
+    fun patch(url: String, file: File, offset: Long, length: Long, fileOffset: Long = offset, timeoutMs: Int = 120_000,
+              onSent: (Long) -> Unit = {}): Long {
+        val c = open(url, "PATCH", timeoutMs = timeoutMs)
         try {
             c.setRequestProperty("Upload-Offset", offset.toString())
             c.setRequestProperty("Content-Type", "application/offset+octet-stream")
             c.doOutput = true
             c.setFixedLengthStreamingMode(length)
             RandomAccessFile(file, "r").use { raf ->
-                raf.seek(offset)
+                raf.seek(fileOffset)
                 c.outputStream.use { out ->
                     val buf = ByteArray(64 * 1024)
                     var left = length
@@ -134,6 +166,6 @@ class TusClient(endpoint: String, token: String?) {
             val code = c.responseCode
             if (code !in 200..299) throw HttpError(code, "PATCH")
             return c.getHeaderField("Upload-Offset")?.toLongOrNull() ?: throw IOException("PATCH: no Upload-Offset")
-        } finally { c.disconnect() }
+        } finally { close(c) }
     }
 }

@@ -622,10 +622,10 @@
     <string name="upload_action">Upload</string>
     <string name="upload_now">Upload now</string>
     <string name="upload_retry">Retry</string>
-    <string name="onboarding_upload_title">Upload server</string>
-    <string name="onboarding_upload_lead">If your team runs a server for the sessions, enter it here: each session then uploads by itself when it ends. Without one, you send the zip yourself as before.</string>
-    <string name="onboarding_upload_skip">Skip</string>
     <string name="onboarding_upload_later">You can set or change it later in Settings → Upload server.</string>
-    <string name="onboarding_summary_upload">Sessions upload to %s</string>
-    <string name="onboarding_summary_no_upload">No upload server: you send sessions yourself</string>
+    <string name="onboarding_key_title">Access key</string>
+    <string name="onboarding_key_lead">Scan the QR code your admin gave you, or type your access key. Each ride is then sent to the server by itself when it ends.</string>
+    <string name="onboarding_key_skip">Skip and start</string>
+    <string name="upload_server_at">Server: %s</string>
+    <string name="upload_server_change">Change</string>
 </resources>

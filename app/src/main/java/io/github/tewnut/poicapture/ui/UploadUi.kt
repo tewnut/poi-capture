@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
@@ -60,7 +62,7 @@ import java.time.format.DateTimeFormatter
  * typed; [onChange] after each change of the address or the token.
  */
 @Composable
-fun UploadServerCard(onChange: () -> Unit = {}) {
+fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var url by remember { mutableStateOf(UploadServer.url(ctx)) }
@@ -73,6 +75,8 @@ fun UploadServerCard(onChange: () -> Unit = {}) {
     var noUpload by remember { mutableStateOf(false) }   // the tested token lacks the upload scope
     var scanned by remember { mutableStateOf<Pair<String, Boolean>?>(null) }  // what the last scan did, ok
     val valid = Tus.endpoint(url) != null
+    // keyFirst (the onboarding's access key step): the project's server is one line with Change, the scan comes first
+    var editUrl by remember { mutableStateOf(false) }
     /** The project's server answers 401 without its token: the field says so instead of "optional". */
     val projectServer = valid && Tus.endpoint(url) == Tus.endpoint(UploadServer.DEFAULT_URL)
 
@@ -105,7 +109,7 @@ fun UploadServerCard(onChange: () -> Unit = {}) {
         }
     }
 
-    OutlinedButton(enabled = !testing, onClick = {
+    val scanClick = {
         scanned = null
         scanSetupQr(ctx, onError = { scanned = it to false }) { text ->
             when (val p = SetupLink.parse(text)) {
@@ -125,10 +129,17 @@ fun UploadServerCard(onChange: () -> Unit = {}) {
                 }
             }
         }
-    }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.upload_scan)) }
+    }
+    if (keyFirst) Button(enabled = !testing, onClick = scanClick, modifier = Modifier.fillMaxWidth().height(52.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Palette.Green)) { Text(stringResource(R.string.upload_scan), fontSize = 16.sp) }
+    else OutlinedButton(enabled = !testing, onClick = scanClick, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.upload_scan)) }
     scanned?.let { (text, ok) -> Hint(text, color = if (ok) Palette.Green else Palette.Red) }
 
-    OutlinedTextField(url, { url = it.take(300); UploadServer.setUrl(ctx, url); result = null; scanned = null; onChange() },
+    val host = remember(url) { runCatching { java.net.URI(url.trim()).host }.getOrNull() }
+    if (keyFirst && projectServer && !editUrl && host != null) Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.upload_server_at, host), modifier = Modifier.weight(1f), color = Palette.Muted, fontSize = 13.sp)
+        TextButton(onClick = { editUrl = true }) { Text(stringResource(R.string.upload_server_change)) }
+    } else OutlinedTextField(url, { url = it.take(300); UploadServer.setUrl(ctx, url); result = null; scanned = null; onChange() },
         label = { Text(stringResource(R.string.upload_url_label)) },
         placeholder = { Text("https://example.org/files/") }, singleLine = true,
         isError = url.isNotBlank() && !valid,

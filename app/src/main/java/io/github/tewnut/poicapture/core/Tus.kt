@@ -1,5 +1,6 @@
 package io.github.tewnut.poicapture.core
 
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
 import java.util.Base64
@@ -11,8 +12,12 @@ import java.util.Base64
  */
 object Tus {
     const val VERSION = "1.0.0"
-    /** PATCH size: small enough that a dropped mobile connection loses little, big enough to keep requests few. */
-    const val CHUNK = 2L * 1024 * 1024
+    /** Files up to this size go in one upload; bigger ones in parallel partials when the server has `concatenation`. */
+    const val PARALLEL_ABOVE = 16L * 1024 * 1024
+    /** Partials start at multiples of this. */
+    const val PART_ALIGN = 8L * 1024 * 1024
+    /** At most this many partials (= connections) per file. */
+    const val MAX_PARTS = 4
 
     /**
      * The `X-Client` header (server/README.md, "Last seen"): `POI Capture/<version> (Android <release>; <manufacturer>
@@ -61,8 +66,42 @@ object Tus {
         return if (t.isNullOrEmpty()) null else "Bearer $t"
     }
 
-    /** Bytes of the next PATCH from [offset] of [size]; 0 when done. */
-    fun chunkLength(offset: Long, size: Long, chunk: Long = CHUNK): Long = (size - offset).coerceIn(0, chunk)
+    /**
+     * The contiguous byte ranges a file of [size] is sent in (server/README.md, "Parallel uploads"): one range up to
+     * [PARALLEL_ABOVE]; above, at most [maxParts] ranges of equal length rounded up to a multiple of [align] (the last
+     * one shorter), so every cut is at a multiple of [align].
+     */
+    fun splitRanges(size: Long, maxParts: Int = MAX_PARTS, align: Long = PART_ALIGN, parallelAbove: Long = PARALLEL_ABOVE): List<UploadPart> {
+        require(size >= 0 && maxParts >= 1 && align > 0)
+        if (size <= parallelAbove || maxParts == 1) return listOf(UploadPart(0, size))
+        val blocks = (size + align - 1) / align
+        val perPart = (blocks + maxParts - 1) / maxParts * align
+        return generateSequence(0L) { it + perPart }.takeWhile { it < size }
+            .map { UploadPart(it, minOf(perPart, size - it)) }.toList()
+    }
+
+    /** Saved partials still describe a file of [size]: contiguous from 0, covering it exactly, offsets in range. */
+    fun partsFit(parts: List<UploadPart>, size: Long): Boolean {
+        if (parts.isEmpty()) return false
+        var at = 0L
+        for (p in parts) {
+            if (p.start != at || p.length <= 0 || p.offset < 0 || p.offset > p.length) return false
+            at += p.length
+        }
+        return at == size
+    }
+
+    /** `Upload-Concat` of the final upload: the partials' URLs in file order. */
+    fun finalConcat(urls: List<String>): String {
+        require(urls.isNotEmpty() && urls.none { it.isBlank() || it.contains(' ') })
+        return "final;" + urls.joinToString(" ")
+    }
+
+    /**
+     * An unfinished single upload (from before parallel uploads, or to a server without them) that could now go in
+     * parallel: keep it when at least half is on the server already, else start again in parts (faster overall).
+     */
+    fun keepSingle(serverOffset: Long, size: Long): Boolean = serverOffset * 2 >= size
 
     /** Where an upload (re)starts. */
     sealed class Start {
@@ -88,6 +127,7 @@ object Tus {
     data class ServerInfo(val versions: List<String>, val extensions: List<String>, val maxSize: Long?) {
         val supports100 get() = VERSION in versions
         val canCreate get() = "creation" in extensions
+        val canConcat get() = "concatenation" in extensions
     }
 
     fun serverInfo(tusVersion: String?, tusExtension: String?, tusMaxSize: String?) = ServerInfo(
@@ -101,7 +141,25 @@ enum class UploadStatus(val json: String) {
     companion object { fun of(s: String?) = entries.firstOrNull { it.json == s } ?: NONE }
 }
 
-/** What the phone remembers about one session's upload (kept across restarts, so an upload resumes). */
+/**
+ * One partial upload of a file sent in parallel: bytes [start] until start + [length] of the zip, the partial's [url]
+ * (null: not created yet) and how much of it the server has ([offset], relative to [start]).
+ */
+data class UploadPart(val start: Long, val length: Long, val url: String? = null, val offset: Long = 0) {
+    val done get() = url != null && offset >= length
+
+    fun toJson(): JSONObject = JSONObject().put("start", start).put("length", length).put("url", url.orNull()).put("offset", offset)
+
+    companion object {
+        fun fromJson(o: JSONObject) = UploadPart(o.optLong("start"), o.optLong("length"), o.optStr("url"), o.optLong("offset"))
+    }
+}
+
+/**
+ * What the phone remembers about one session's upload (kept across restarts, so an upload resumes). A single upload
+ * has [url] and [offset]. A parallel one has [parts] (the partials, in file order), [offset] = the sum of theirs, and
+ * [url] = the final upload once the server created it.
+ */
 data class UploadRecord(
     val sessionId: String,
     val status: UploadStatus = UploadStatus.NONE,
@@ -110,15 +168,21 @@ data class UploadRecord(
     val offset: Long = 0,
     val error: String? = null,
     val uploadedAt: String? = null,
+    val parts: List<UploadPart> = emptyList(),
 ) {
     val percent: Int get() = if (size <= 0) 0 else ((offset * 100) / size).toInt().coerceIn(0, 100)
 
+    /** These partials, with [offset] their sum. */
+    fun withParts(p: List<UploadPart>) = copy(parts = p, offset = p.sumOf { it.offset })
+
     fun toJson(): JSONObject = JSONObject().put("sessionId", sessionId).put("status", status.json).put("url", url.orNull())
         .put("size", size).put("offset", offset).put("error", error.orNull()).put("uploadedAt", uploadedAt.orNull())
+        .apply { if (parts.isNotEmpty()) put("parts", JSONArray().apply { parts.forEach { put(it.toJson()) } }) }
 
     companion object {
         fun fromJson(o: JSONObject) = UploadRecord(o.getString("sessionId"), UploadStatus.of(o.optStr("status")),
-            o.optStr("url"), o.optLong("size"), o.optLong("offset"), o.optStr("error"), o.optStr("uploadedAt"))
+            o.optStr("url"), o.optLong("size"), o.optLong("offset"), o.optStr("error"), o.optStr("uploadedAt"),
+            o.optJSONArray("parts")?.let { a -> (0 until a.length()).map { UploadPart.fromJson(a.getJSONObject(it)) } } ?: emptyList())
     }
 }
 

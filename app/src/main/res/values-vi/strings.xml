@@ -603,10 +603,10 @@
     <string name="upload_action">Tải lên</string>
     <string name="upload_now">Tải lên ngay</string>
     <string name="upload_retry">Thử lại</string>
-    <string name="onboarding_upload_title">Máy chủ tải lên</string>
-    <string name="onboarding_upload_lead">Nếu nhóm của bạn có máy chủ nhận phiên, hãy nhập ở đây: mỗi phiên sẽ tự tải lên khi kết thúc. Nếu không, bạn tự gửi file zip như trước.</string>
-    <string name="onboarding_upload_skip">Bỏ qua</string>
     <string name="onboarding_upload_later">Bạn có thể đặt hoặc đổi sau trong Cài đặt → Máy chủ tải lên.</string>
-    <string name="onboarding_summary_upload">Phiên được tải lên %s</string>
-    <string name="onboarding_summary_no_upload">Không có máy chủ tải lên: bạn tự gửi phiên</string>
+    <string name="onboarding_key_title">Mã truy cập</string>
+    <string name="onboarding_key_lead">Quét mã QR quản trị viên đưa cho bạn, hoặc nhập mã truy cập. Mỗi chuyến đi sẽ tự gửi lên máy chủ khi kết thúc.</string>
+    <string name="onboarding_key_skip">Bỏ qua và bắt đầu</string>
+    <string name="upload_server_at">Máy chủ: %s</string>
+    <string name="upload_server_change">Đổi</string>
 </resources>
