@@ -164,6 +164,11 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
         }
     }
 
+    // the upload server is set (Settings / onboarding): each card shows its upload
+    val uploads = remember { io.github.tewnut.poicapture.capture.UploadServer.configured(ctx) }
+    // an upload finishing marks the session sent: read the list again
+    val uploadFinished by io.github.tewnut.poicapture.capture.Uploads.finished.collectAsState()
+    LaunchedEffect(uploadFinished) { if (uploadFinished > 0) reload++ }
     val list = rows
     Box(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
     Column(Modifier.fillMaxSize()) {
@@ -206,7 +211,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
             }
         }
         items(list ?: emptyList(), key = { it.s.id }) { r ->
-            SessionCard(r, active == r.s.id, busy == r.s.id,
+            SessionCard(r, active == r.s.id, busy == r.s.id, uploads,
                 onSend = { send(r.s) },
                 onMap = { onOpenMap(r.s.id, r.title) },
                 onSave = { saving = r.s; saveLauncher.launch(Exporter.fileName(r.s)) },
@@ -235,7 +240,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                 confirmDel = null
                 msgError = false; msg = ctx.getString(R.string.sessions_deleting)
                 scope.launch {
-                    withContext(Dispatchers.IO) { store.delete(s.id) }
+                    withContext(Dispatchers.IO) { io.github.tewnut.poicapture.capture.Uploads.forget(ctx, s.id); store.delete(s.id) }
                     msg = ctx.getString(R.string.sessions_deleted)
                     reload++
                 }
@@ -250,7 +255,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
  * ride), then the name, what was recorded and the actions. Tapping the photos opens the map.
  */
 @Composable
-private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean,
+private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, uploads: Boolean,
                         onSend: () -> Unit, onMap: () -> Unit, onSave: () -> Unit, onDelete: () -> Unit) {
     val ctx = LocalContext.current
     val s = r.s
@@ -290,6 +295,7 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean,
                 if (r.relocated > 0) ctx.plural(R.plurals.sessions_relocated, r.relocated) else null,
             ).joinToString(" · "))
             if (s.endedAt == null && !recording) Hint(ctx.getString(R.string.sessions_interrupted), color = Palette.Amber)
+            if (uploads && !empty && !recording) UploadLine(s.id)
             if (!empty && !recording) {
                 Row(Modifier.padding(top = 8.dp, end = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val sendText = stringResource(if (busy) R.string.sessions_packing else if (s.exportedAt == null) R.string.sessions_send else R.string.sessions_send_again)

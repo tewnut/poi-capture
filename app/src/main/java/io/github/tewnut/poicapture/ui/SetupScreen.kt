@@ -138,6 +138,12 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
             CoverLayer(covs.flatMap { Coverage.lines(it) }, covs.flatMap { Coverage.points(it) })
         }
     }
+    // work to do on site, from the reviewer (Settings -> Tasks)
+    var tasks by remember { mutableStateOf<List<io.github.tewnut.poicapture.core.FieldTask>>(emptyList()) }
+    var tasksTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(tasksTick) { tasks = withContext(Dispatchers.IO) { CaptureService.tasks(ctx).all() } }
+    var tasksOpen by remember { mutableStateOf(false) }
+    var taskFocus by remember { mutableStateOf<String?>(null) }
     var mode by remember { mutableStateOf(Mode.PHOTO_AUTO) }
     var kind by remember { mutableStateOf(SessionKind.SWEEP) }
     var holding by remember { mutableStateOf(Prefs.holding(ctx)) }
@@ -200,10 +206,16 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
             }
         }
         if (info) SetupInfo(plan.photoEveryM, plan.maxSpeedKmh) { info = false }
+        if (tasksOpen) TasksSheet(loc.fix?.let { LatLon(it.lat, it.lon) }, taskFocus, onChanged = { tasksTick++ }) { tasksOpen = false; taskFocus = null }
         // ---------- map ----------
         Box(Modifier.weight(0.38f).heightIn(min = 150.dp).fillMaxWidth()) {
-            LiveMap(settings.tileUrl, loc.fix, recenter, if (showCoverage) mine else CoverLayer(),
-                Modifier.fillMaxSize().clipToBounds())
+            LiveMap(settings.tileUrl, loc.fix, recenter, if (showCoverage) mine else CoverLayer(), tasks,
+                { taskFocus = it; tasksOpen = true }, Modifier.fillMaxSize().clipToBounds())
+            val openTasks = tasks.count { it.open }
+            if (openTasks > 0) androidx.compose.material3.AssistChip(onClick = { taskFocus = null; tasksOpen = true },
+                label = { Text("📋 " + stringResource(R.string.setup_tasks_chip, openTasks), fontSize = 12.sp) },
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(containerColor = Color.White))
             if (mine.lines.isNotEmpty() || mine.points.isNotEmpty()) {
                 androidx.compose.material3.FilterChip(showCoverage, { showCoverage = !showCoverage },
                     { Text(stringResource(R.string.setup_coverage), fontSize = 12.sp) },
@@ -335,7 +347,8 @@ fun Hint(t: String, modifier: Modifier = Modifier, color: Color = Palette.Muted)
 
 /** Map centred on the rider: blue dot with an accuracy circle, re-centre on request. */
 @Composable
-private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: CoverLayer, modifier: Modifier) {
+private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: CoverLayer,
+                    tasks: List<io.github.tewnut.poicapture.core.FieldTask>, onTask: (String) -> Unit, modifier: Modifier) {
     val ctx = LocalContext.current
     val map = remember {
         MapView(ctx).apply {
@@ -382,6 +395,19 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: Cov
                 outlinePaint.strokeWidth = 2f
             })
         }
+        // tasks: open ones larger, on top of the coverage; tap -> the task in the list
+        for (t in tasks.sortedBy { it.open }) m.overlays.add(Marker(m).apply {
+            position = GeoPoint(t.at.lat, t.at.lon)
+            icon = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(taskColor(t).toArgb())
+                setStroke((2 * density).toInt(), 0xFFFFFFFF.toInt())
+                val px = ((if (t.open) 18 else 11) * density).toInt(); setSize(px, px)
+            }
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            setInfoWindow(null)
+            setOnMarkerClickListener { _, _ -> onTask(t.id); true }
+        })
         me?.let { l ->
             val here = GeoPoint(l.lat, l.lon)
             m.overlays.add(Polygon(m).apply {

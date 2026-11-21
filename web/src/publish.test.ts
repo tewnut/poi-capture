@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { cell, csv, geojson, osm, osmHours, record } from './publish'
+import { cell, csv, geojson, osm, osmHours, record, tasksGeojson } from './publish'
 import { _test } from './importer'
+import { keptPhotos, removedPhotos, exportNames } from './photos'
 import type { Dataset, Place, Review } from './types'
 
 const place: Place = {
@@ -120,5 +121,54 @@ describe('import', () => {
     expect(s('NTS/01_a/COVER.jpg')).toBe('01_a/COVER.jpg')
     const t = _test.stripTop(['result.json', '01_a/COVER.jpg'])
     expect(t('01_a/COVER.jpg')).toBe('01_a/COVER.jpg')
+  })
+})
+
+describe('tasks for the phone', () => {
+  const ds = { ...dataset, tasks: [
+    { type: 'visit', place: 's1-01', name: 'Visit me', lat: 10.1, lon: 106.1, why: 'sign unreadable' },
+    { type: 'removal', place: null, name: 'Gone shop', lat: 10.2, lon: 106.2, why: 'for rent' },
+    { type: 'removal', place: null, name: 'Check shop', lat: 10.3, lon: 106.3, why: 'shutter down' },
+    { type: 'verify_removal', place: null, name: 'Maybe gone', lat: 10.4, lon: 106.4, why: 'not seen' },
+  ] } as unknown as Dataset
+
+  it('sends only the work left on site, as poi-tasks/1', () => {
+    const j = JSON.parse(tasksGeojson([ds], {}, { 's1|1': { decision: 'confirmed' }, 's1|2': { decision: 'verify' } }, 'A'))
+    expect(j.schema).toBe('poi-tasks/1')
+    expect(j.features.map((f: any) => f.properties.name)).toEqual(['Visit me', 'Check shop', 'Maybe gone'])
+    expect(j.features[1].properties.type).toBe('verify_removal')
+    expect(j.features[0].geometry.coordinates).toEqual([106.1, 10.1])
+  })
+
+  it('adds places the reviewer marked "visit", once', () => {
+    const p2 = { ...place, id: 's1-02', name: 'Second' }
+    const d2 = { ...dataset, places: [place, p2], tasks: [] } as unknown as Dataset
+    const reviews = { 's1|s1-02': { decision: 'visit', fields: {}, comment: 'hours missing' } } as Record<string, Review>
+    const j = JSON.parse(tasksGeojson([d2], reviews, {}))
+    expect(j.features).toHaveLength(1)
+    expect(j.features[0].properties).toMatchObject({ type: 'visit', name: 'Second', why: 'hours missing', place: 's1-02' })
+    expect(j.features[0].geometry.coordinates).toEqual([106.75775, 10.77695])   // agent pin
+  })
+})
+
+describe('photo edits', () => {
+  const p: Place = { ...place, photos: [{ file: 'a/1.jpg', index: 1 }, { file: 'a/COVER.jpg', cover: true }, { file: 'a/WEB_1.png', source: 'website' }] }
+  it('keeps the photos, cover first, when nothing was edited', () => {
+    expect(keptPhotos(p).map((x) => x.file)).toEqual(['a/COVER.jpg', 'a/1.jpg', 'a/WEB_1.png'])
+  })
+  it('removes, adds, crops and picks the cover', () => {
+    const r: Review = { decision: 'confirmed', fields: {}, photos: {
+      removed: ['a/COVER.jpg'], added: ['added/x/1.jpg'], cover: 'added/x/1.jpg',
+      crops: { 'a/1.jpg': { rect: [0.1, 0.1, 0.5, 0.5], file: 'crop/x/c.jpg' } } } }
+    const k = keptPhotos(p, r)
+    expect(k.map((x) => x.show)).toEqual(['added/x/1.jpg', 'crop/x/c.jpg', 'a/WEB_1.png'])
+    expect(k[0].cover).toBe(true)
+    expect(removedPhotos(p, r).map((x) => x.file)).toEqual(['a/COVER.jpg'])
+    expect(exportNames(p, r)).toEqual(['s1-01/1.jpg', 's1-01/2.jpg', 's1-01/3.png'])
+    expect(record({ dataset, place: p, review: r }).photos).toBe('s1-01/1.jpg s1-01/2.jpg s1-01/3.png')
+  })
+  it('falls back to the first photo when the cover was removed', () => {
+    const k = keptPhotos(p, { decision: 'todo', fields: {}, photos: { removed: ['a/COVER.jpg'] } })
+    expect(k[0]).toMatchObject({ file: 'a/1.jpg', cover: true })
   })
 })

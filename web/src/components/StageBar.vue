@@ -20,6 +20,8 @@ const NAME = { captured: 'stageCaptured', processed: 'stageProcessed', reviewed:
     </ol>
     <div class="bar" v-if="st.stage !== 'captured'"><div :style="{ width: pct + '%' }"></div></div>
     <span class="muted">{{ st.stage === 'captured' ? t('notProcessed') : t('reviewedOf', { done: st.done, total: st.total }) }}</span>
+    <!-- no hover on touch screens: the stage's name is written out -->
+    <span class="stname">{{ t(NAME[st.stage]) }}</span>
   </div>
 </template>
 
@@ -38,4 +40,10 @@ li:hover::after { content: attr(data-tip); position: absolute; bottom: 150%; lef
 .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; min-width: 40px; }
 .bar div { height: 100%; background: var(--accent); }
 .muted { white-space: nowrap; }
+.stname { display: none; }
+@media (hover: none) {
+  .stagebar { flex-wrap: wrap; row-gap: 2px; }
+  .stname { display: block; flex-basis: 100%; color: var(--muted); font-weight: 600; }
+}
+@media (max-width: 700px) { .muted { white-space: normal; } }
 </style>

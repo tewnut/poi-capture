@@ -1,6 +1,15 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      // <site>/admin or /admin/ (Cloudflare Pages serves this page for unknown paths) -> the admin page, #/admin,
+      // before the relative ./assets/ paths would resolve under /admin/
+      // pinned to this origin, leading slashes collapsed: "//evil.example/admin" must not become a protocol-relative URL
+      if (/\/admin\/?$/.test(location.pathname)) {
+        var base = location.pathname.replace(/admin\/?$/, '').replace(/^\/+/, '/')
+        location.replace(location.origin + base + '#/admin')
+      }
+    </script>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>POI Capture Reviewer</title>

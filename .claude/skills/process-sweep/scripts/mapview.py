@@ -12,6 +12,9 @@ disk cannot load separate JSON files.
 import html, json, os, sys
 from datetime import datetime, timezone
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import arg_path, folder_no, place_folders  # noqa: E402
+
 LEAFLET = ('<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" '
            'integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" '
            'crossorigin="anonymous" referrerpolicy="no-referrer">\n'
@@ -35,16 +38,14 @@ def median(v):
 def session_data(folder, rel=''):
     """Everything the map draws for one processed session; None when the folder holds no places."""
     places = []
-    for d in sorted(os.listdir(folder)):
+    for d in place_folders(folder):
         f = os.path.join(folder, d, 'place.json')
-        if not os.path.isfile(f):
-            continue
         m = json.load(open(f, encoding='utf-8'))
         p, pos, gm = m['place'], m['place']['position'], m.get('googleMaps') or {}
         cover = next((x for x in m['photos'] if x.get('cover')), m['photos'][0] if m['photos'] else None)
         truth = m.get('groundTruth')
         places.append({
-            'folder': d, 'n': d[:2], 'name': p['name'], 'category': p.get('category'), 'confidence': p.get('confidence'),
+            'folder': d, 'n': folder_no(d), 'name': p['name'], 'category': p.get('category'), 'confidence': p.get('confidence'),
             'lat': pos['lat'], 'lon': pos['lon'], 'method': pos.get('method'), 'unc': pos.get('uncertaintyM'),
             'sightings': pos.get('sightings') or [],
             'cover': f"{d}/{cover['file']}" if cover else None,
@@ -252,4 +253,4 @@ updated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC</div>
 
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
-    print(write_hub(sys.argv[1]) or 'no processed sessions found')
+    print(write_hub(arg_path(sys.argv[1])) or 'no processed sessions found')

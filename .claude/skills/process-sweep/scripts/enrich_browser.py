@@ -7,6 +7,8 @@ results Google lists nearby, pick the one whose name matches best and is closest
 address, phone, website, plus code, opening hours (all days), rating and its exact position. Writes the "googleMaps"
 block of place.json (with the other candidates, for review) and rewrites the indexes.
 
+The opened result is checked again with the position on its own page (300 m / name match). Runs in its own
+agent-browser session (AGENT_BROWSER_SESSION, default poi-<output folder>-<hash>), so parallel runs do not collide.
 Needs the agent-browser CLI (npm i -g agent-browser). One search per place with a pause between them; no API key.
 Kept for review only: see "Terms" in SKILL.md.
 """
@@ -17,6 +19,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build  # noqa: E402
 from enrich import similarity, dist_m  # noqa: E402
+from paths import arg_path, place_folders  # noqa: E402
 
 import shutil  # noqa: E402
 
@@ -86,6 +89,33 @@ MIN_MATCH = 0.5       # share of the sign's words found in Google's name
 NEAR_M, NEAR_MATCH = 30, 0.3   # right next to the estimate, a weaker name match is enough ("ANH HAI BẮP", 4 m)
 
 
+def acceptable(c):
+    """A result close enough and named enough like the sign to be this place."""
+    return ((c['nameMatch'] >= MIN_MATCH and c['distanceM'] <= MAX_M)
+            or (c['nameMatch'] >= NEAR_MATCH and c['distanceM'] <= NEAR_M))
+
+
+def checked(pick, det, lat, lon, cands=()):
+    """The opened result, re-checked with the position on its own page (the list's position can be stale or another
+    branch's: a shop 1,134 km away once passed). None when it is now too far; the candidate then says why."""
+    if det.get('lat') is not None:
+        pick = {**pick, 'distanceM': round(dist_m(lat, lon, det['lat'], det['lon']))}
+    if not acceptable(pick):
+        for c in cands:
+            if c.get('name') == pick['name']:
+                c['distanceM'] = pick['distanceM']
+                c['summary'] = f"rejected: {pick['distanceM']} m away on its own page; " + (c.get('summary') or '')
+        return None
+    return {'name': pick['name'], **det, 'distanceM': pick['distanceM'], 'nameMatch': pick['nameMatch']}
+
+
+def session_name(out):
+    """agent-browser session for this run: one per output folder, so parallel runs do not share a browser tab."""
+    import hashlib
+    base = re.sub(r'[^A-Za-z0-9]+', '-', build.result._fold(os.path.basename(os.path.abspath(out)))).strip('-')[:24]
+    return f"poi-{base or 'out'}-{hashlib.sha1(os.path.abspath(out).encode('utf-8')).hexdigest()[:6]}"
+
+
 def name_match(sign, google):
     """How much of the name read on the sign is in Google's name ("Ông Bầu" in "Cà Phê Ông Bầu - The Sun Avenue" =
     1.0): Google names add the branch, the kind of shop and the building, the sign rarely does. The better of that
@@ -131,8 +161,7 @@ def lookup(name, lat, lon):
         s = name_match(name, c['name'])
         cands.append({'name': c['name'], 'distanceM': round(d), 'nameMatch': s, 'summary': c['text'], '_score': s - d / 500})
     cands.sort(key=lambda c: -c['_score'])
-    pick = next((c for c in cands if (c['nameMatch'] >= MIN_MATCH and c['distanceM'] <= MAX_M)
-                 or (c['nameMatch'] >= NEAR_MATCH and c['distanceM'] <= NEAR_M)), None)
+    pick = next((c for c in cands if acceptable(c)), None)
     if not found:
         # one obvious match: Google shows that place straight away, without a list
         h1 = place_h1()
@@ -142,8 +171,7 @@ def lookup(name, lat, lon):
         d = dist_m(lat, lon, float(m.group(1)), float(m.group(2)))
         only = {'name': h1, 'distanceM': round(d), 'nameMatch': name_match(name, h1), 'summary': 'the only result'}
         cands = [only]
-        if not ((only['nameMatch'] >= MIN_MATCH and only['distanceM'] <= MAX_M)
-                or (only['nameMatch'] >= NEAR_MATCH and only['distanceM'] <= NEAR_M)):
+        if not acceptable(only):
             return None, cands
         pick = dict(only)
     elif pick is None:
@@ -159,20 +187,19 @@ def lookup(name, lat, lon):
     except RuntimeError:
         pass
     det = ev(DETAIL_JS)
-    if det.get('lat') is not None:
-        pick['distanceM'] = round(dist_m(lat, lon, det['lat'], det['lon']))
-    return {'name': pick['name'], **det, 'distanceM': pick['distanceM'], 'nameMatch': pick['nameMatch']}, cands
+    return checked(pick, det, lat, lon, cands), cands
 
 
 def main():
-    out = sys.argv[1]
+    out = arg_path(sys.argv[1])
+    os.environ.setdefault('AGENT_BROWSER_SESSION', session_name(out))   # inherited by every agent-browser call
     force = '--force' in sys.argv
     only = set(sys.argv[sys.argv.index('--only') + 1].split(',')) if '--only' in sys.argv else None
     now = lambda: datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     try:
-        for d in sorted(os.listdir(out)):
+        for d in place_folders(out):
             f = os.path.join(out, d, 'place.json')
-            if not os.path.isfile(f) or (only and d not in only):
+            if only and d not in only:
                 continue
             m = json.load(open(f, encoding='utf-8'))
             if (m.get('googleMaps') or {}).get('name') and not force:

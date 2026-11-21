@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Left panel: the sessions (or all tasks across them); open a session to review its places and tasks. The map
 // is in the middle, the selected place or task on the right. The address (#/...) decides what is open.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MapView from './components/MapView.vue'
 import PlaceReview from './components/PlaceReview.vue'
@@ -9,11 +9,18 @@ import TaskDetail from './components/TaskDetail.vue'
 import TaskRow from './components/TaskRow.vue'
 import StageBar from './components/StageBar.vue'
 import Photo from './components/Photo.vue'
-import { state, load, add, remove, clearAll, reviewOf, gstat, openDataset, openPlace, openTask, setReviewer, stageOf, STAGES } from './store'
+import AdminPanel from './components/AdminPanel.vue'
+import { state, load, add, remove, clearAll, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, setReviewer, stageOf, STAGES } from './store'
 import { to } from './router'
 import { t, lang, setLang, LANGS, type Lang } from './i18n'
 import { importFiles } from './importer'
+import { keptPhotos, exportNames } from './photos'
+import { zipSync, strToU8 } from 'fflate'
 import { geojson, csv, osm, tasksGeojson, download, type Published, type Removed } from './publish'
+import { buildProject, projectName } from './project'
+import { missingStreet, pendingSuggestions } from './fields'
+import { loadCloud, saveCloud, DEFAULT_CLOUD_URL, fetchIndex, downloadItem, processedItems, importState, humanSize, endpoint, type CloudItem } from './cloud'
+import { swipeStep, neighbour, blocksSwipe, type Step } from './swipe'
 import type { Dataset, Place } from './types'
 
 type View = 'sessions' | 'allTasks' | 'places' | 'tasks'
@@ -102,6 +109,53 @@ function onDrop(e: DragEvent) {
   doImport([...(e.dataTransfer?.files || [])])
 }
 
+// cloud storage (cloud.ts): list the processed sessions on the server, pull the picked ones through the importer
+const cloud = ref(loadCloud())
+function setCloud(k: 'url' | 'token', v: string) {
+  cloud.value = { ...cloud.value, [k]: v.trim() || (k === 'url' ? DEFAULT_CLOUD_URL : '') }
+  saveCloud(cloud.value)
+}
+const cloudOk = computed(() => endpoint(cloud.value.url) != null)
+const cloudOpen = ref(false)
+const cloudItems = ref<CloudItem[] | null>(null)
+const cloudErr = ref('')
+const cloudLoading = ref(false)
+const cloudPick = ref<string[]>([])
+async function refreshCloud() {
+  if (!cloudOk.value) return
+  cloudLoading.value = true; cloudErr.value = ''
+  try {
+    cloudItems.value = processedItems(await fetchIndex(cloud.value))
+    // preselect what is not in this browser yet
+    cloudPick.value = cloudItems.value.filter((i) => importState(i, state.datasets) !== 'imported').map((i) => i.id)
+  } catch (e: any) {
+    cloudErr.value = e.message || String(e)
+  } finally {
+    cloudLoading.value = false
+  }
+}
+function toggleCloud() {
+  cloudOpen.value = !cloudOpen.value
+  if (cloudOpen.value) refreshCloud()
+}
+async function pullCloud() {
+  const items = (cloudItems.value || []).filter((i) => cloudPick.value.includes(i.id))
+  if (!items.length) return
+  busy.value = t('cloudDownloading', { n: items.length })
+  state.error = ''
+  const files: File[] = []
+  try {
+    for (const i of items) files.push(await downloadItem(cloud.value, i))
+  } catch (e: any) {
+    state.error = e.message || String(e)
+    busy.value = ''
+    return
+  }
+  busy.value = ''
+  await doImport(files)
+  if (!state.error) { cloudOpen.value = false; cloudPick.value = [] }
+}
+
 // sessions
 const sessions = computed(() => state.datasets.filter((d) =>
   (!fStage.value || stageOf(d).stage === fStage.value) &&
@@ -151,6 +205,62 @@ function nextPlace() {
 }
 function movePin(lat: number, lon: number) { reviewRef.value?.setPin(lat, lon) }
 
+// phone (<= 700 px in style.css): the open place or task is a full-screen panel; tablet (701-1099 px): the panel
+// takes the map's place. Both have back, previous / next and a horizontal swipe; "Map" shows the map above the panel
+// (to check or drag the pin). PANEL is the widest of the two queries.
+const PANEL = '(max-width: 1099px)'
+const panelMq = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(PANEL) : null
+const panel = ref(!!panelMq?.matches)
+const onPanelMq = (e: MediaQueryListEvent) => (panel.value = e.matches)
+onMounted(() => panelMq?.addEventListener?.('change', onPanelMq))
+onBeforeUnmount(() => panelMq?.removeEventListener?.('change', onPanelMq))
+const detailEl = ref<HTMLElement>()
+const mapRef = ref<InstanceType<typeof MapView>>()
+const mapPeek = ref(false)
+/** The places the panel steps through: the list as filtered, or every place when the open one is filtered out. */
+const placeIds = computed(() => {
+  const d = openDataset.value
+  if (!d) return []
+  const listed = places.value.map((x) => x.p.id)
+  return state.place && listed.includes(state.place) ? listed : d.places.map((p) => p.id)
+})
+const taskIds = computed(() => (openDataset.value ? openDataset.value.tasks.map((_t, i) => i) : []))
+const stepList = computed<(string | number)[]>(() => (openPlace.value ? placeIds.value : taskIds.value))
+const stepAt = computed<string | number | null>(() => (openPlace.value ? state.place : state.task))
+const stepPos = computed(() => (stepAt.value == null ? -1 : stepList.value.indexOf(stepAt.value)))
+const canStep = (s: Step) => stepAt.value != null && neighbour(stepList.value, stepAt.value, s) != null
+/** Previous / next in the panel: replaces the address, so the phone's back button still goes to the list. */
+function stepOpen(s: Step) {
+  const d = openDataset.value
+  if (!d || stepAt.value == null) return
+  const n = neighbour(stepList.value, stepAt.value, s)
+  if (n == null) return
+  router.replace(openPlace.value ? to.place(d.id, n as string) : to.task(d.id, n as number))
+}
+function closeDetail() {
+  const d = openDataset.value
+  if (d) router.push(openPlace.value ? to.session(d.id) : to.sessionTasks(d.id))
+}
+let touch: { x: number; y: number; t: number } | null = null
+function touchStart(e: TouchEvent) {
+  touch = null
+  if (!panel.value || e.touches.length !== 1 || !detailEl.value) return
+  if (blocksSwipe(e.target as Element, detailEl.value, (el) => getComputedStyle(el as Element).overflowX)) return
+  touch = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }
+}
+function touchEnd(e: TouchEvent) {
+  const s0 = touch
+  touch = null
+  if (!s0 || e.touches.length) return
+  const p = e.changedTouches[0]
+  const s = p && swipeStep(p.clientX - s0.x, p.clientY - s0.y, Date.now() - s0.t)
+  if (s) stepOpen(s)
+}
+// a new item starts at its top; leaving the panel hides the map again
+watch(() => [state.place, state.task], () => detailEl.value?.scrollTo?.({ top: 0 }))
+watch(() => !!(openPlace.value || openTask.value), (open) => { if (!open) mapPeek.value = false })
+watch(mapPeek, async (v) => { if (v) { await nextTick(); mapRef.value?.focusOpen() } })
+
 // tasks across sessions (shown on the map), grouped by session
 const taskGroups = computed(() => state.datasets.filter((d) => state.shown.has(d.id) && d.tasks.length)
   .map((d) => ({ d, items: d.tasks.map((t, i) => ({ t, i })) })))
@@ -172,17 +282,57 @@ function pub(kind: 'geojson' | 'csv' | 'osm') {
   if (kind === 'csv') download(`${base}.csv`, csv(confirmed.value, removed.value), 'text/csv')
   if (kind === 'osm') download(`${base}.osm`, osm(confirmed.value), 'application/xml')
 }
+/** The kept (and cropped) photos of the confirmed places, named as in the photos column, with places.geojson. */
+async function pubPhotos() {
+  const d = openDataset.value
+  if (!d) return
+  const files: Record<string, Uint8Array> = { 'places.geojson': strToU8(geojson(confirmed.value, removed.value)) }
+  for (const x of confirmed.value) {
+    const names = exportNames(x.place, x.review)
+    for (const [k, p] of keptPhotos(x.place, x.review).entries()) {
+      const b = await photoBlob(d.id, p.show)
+      if (b) files[names[k]] = new Uint8Array(await b.arrayBuffer())
+    }
+  }
+  download(`poi-published-${d.session.id}-${stamp()}-photos.zip`, zipSync(files, { level: 0 }), 'application/zip')
+}
+/** The reviewed session as one package for the VMAP step: project.json, tasks.jsonl, README.md and the photos
+ *  (project.ts; docs/pipeline.md). */
+async function pubProject() {
+  const d = openDataset.value
+  if (!d) return
+  const reviews = Object.fromEntries(d.places.map((p) => [p.id, reviewOf(d.id, p)]))
+  const removals = Object.fromEntries(d.tasks.map((_t, i) => [i, state.removals[`${d.id}|${i}`]]).filter(([, r]) => r))
+  const exportedAt = new Date().toISOString()
+  const input = { dataset: d, reviews, removals, reviewer: state.reviewer, exportedAt }
+  const blobs: Record<string, Uint8Array> = {}
+  const missing = new Set<string>()
+  for (const f of buildProject(input).files) {
+    const b = await photoBlob(d.id, f.from)
+    if (b) blobs[f.path] = new Uint8Array(await b.arrayBuffer())
+    else missing.add(f.from)
+  }
+  const pj = buildProject({ ...input, missing })
+  const files: Record<string, Uint8Array | [Uint8Array, { level: 0 | 6 }]> = {
+    'README.md': [strToU8(pj.readme), { level: 6 }], 'project.json': [strToU8(pj.json), { level: 6 }],
+    'tasks.jsonl': [strToU8(pj.tasksJsonl), { level: 6 }],
+  }
+  for (const f of pj.files) if (blobs[f.path]) files[f.path] = blobs[f.path]
+  download(projectName(d.session.id, exportedAt), zipSync(files, { level: 0 }), 'application/zip')
+}
 function exportTasks(ds?: Dataset) {
   const list = ds ? [ds] : state.datasets.filter((d) => state.shown.has(d.id))
-  download(`poi-tasks-${ds ? ds.session.id + '-' : ''}${stamp()}.geojson`, tasksGeojson(list), 'application/geo+json')
+  download(`poi-tasks-${ds ? ds.session.id + '-' : ''}${stamp()}.geojson`, tasksGeojson(list, state.reviews, state.removals, state.reviewer), 'application/geo+json')
 }
 
 const DECISION = { todo: 'decTodo', confirmed: 'decConfirmed', rejected: 'decRejected', visit: 'decVisit' } as const
-function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])?.file }
+function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p, reviewOf(d.id, p))[0]?.show : undefined }
 </script>
 
 <template>
-  <div class="app" @dragover.prevent="dragging = true" @dragleave.self="dragging = false" @drop.prevent="onDrop">
+  <!-- #/admin: the cloud server's admin page, on its own (reached by address only) -->
+  <AdminPanel v-if="String(route.name ?? '').startsWith('admin')" :url="cloud.url" />
+  <div v-else :class="['app', { sess: !!state.open, peek: mapPeek && !!(openPlace || openTask) }]" @dragover.prevent="dragging = true" @dragleave.self="dragging = false" @drop.prevent="onDrop">
     <aside class="side">
       <header class="sidehead">
         <div class="brand"><span class="logo">◉</span> {{ t('appName') }}</div>
@@ -196,6 +346,15 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
             <option v-for="l in LANGS" :key="l.key" :value="l.key">{{ l.label }}</option>
           </select></label>
         <p class="muted small">{{ t('reviewerHint') }}</p>
+        <div class="cloudset">
+          <b class="small">{{ t('cloudStorage') }}</b>
+          <label><span>{{ t('cloudUrl') }}</span>
+            <input :value="cloud.url" :placeholder="DEFAULT_CLOUD_URL" spellcheck="false" @change="setCloud('url', ($event.target as HTMLInputElement).value)" /></label>
+          <label><span>{{ t('cloudToken') }}</span>
+            <input type="password" autocomplete="off" :value="cloud.token" :placeholder="t('cloudTokenNone')" @change="setCloud('token', ($event.target as HTMLInputElement).value)" /></label>
+          <p v-if="cloud.url && !cloudOk" class="small err-text">{{ t('cloudBadUrl') }}</p>
+          <p class="muted small">{{ t('cloudHint') }}</p>
+        </div>
         <div class="wipe">
           <button class="danger small" :disabled="!state.datasets.length" @click="wipe">{{ t('clearAll') }}</button>
           <span class="muted small">{{ t('clearAllHint') }}</span>
@@ -239,7 +398,7 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
               <button class="secondary" @click="clearSessionFilters">{{ t('clearFilters') }}</button>
             </div>
             <article v-for="d in sessions" :key="d.id" class="ses">
-              <input type="checkbox" :checked="state.shown.has(d.id)" :title="t('showOnMap')" @change="toggleShown(d.id)" />
+              <input type="checkbox" :checked="state.shown.has(d.id)" :title="t('showOnMap')" :aria-label="t('showOnMap')" @change="toggleShown(d.id)" />
               <div class="body" @click="router.push(to.session(d.id))">
                 <b>{{ d.session.name || d.session.id }}</b>
                 <div class="muted">{{ (d.session.startedAt || '').slice(0, 10) || t('noDate') }} · {{ kindLabel(d) }}</div>
@@ -250,7 +409,7 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
                 </div>
                 <StageBar :ds="d" />
               </div>
-              <button class="ghost del" :title="t('removeSession')" @click="del(d)">🗑</button>
+              <button class="ghost del" :title="t('removeSession')" :aria-label="t('removeSession')" @click="del(d)">🗑</button>
             </article>
           </template>
         </section>
@@ -279,9 +438,35 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
           </template>
         </section>
 
+        <section v-if="view === 'sessions' && cloudOpen" class="cloud">
+          <div class="row">
+            <b>{{ t('cloudTitle') }}</b>
+            <span>
+              <button v-if="cloudOk" class="ghost small" :disabled="cloudLoading" @click="refreshCloud">{{ t('cloudRefresh') }}</button>
+              <button class="ghost small" :aria-label="t('close')" @click="cloudOpen = false">✕</button>
+            </span>
+          </div>
+          <p v-if="!cloudOk" class="muted small">{{ t('cloudNotSet') }} <button class="ghost small" @click="settingsOpen = true">⚙ {{ t('settings') }}</button></p>
+          <p v-else-if="cloudLoading" class="muted small">{{ t('cloudLoading') }}</p>
+          <p v-else-if="cloudErr" class="small err-text">{{ cloudErr }}</p>
+          <p v-else-if="cloudItems && !cloudItems.length" class="muted small">{{ t('cloudEmpty') }}</p>
+          <template v-else-if="cloudItems">
+            <label v-for="i in cloudItems" :key="i.id" class="citem">
+              <input type="checkbox" :value="i.id" v-model="cloudPick" />
+              <span class="body">
+                <b>{{ i.name || i.sessionId || i.filename }}</b>
+                <span class="muted small">{{ (i.createdAt || '').slice(0, 16).replace('T', ' ') }} · {{ humanSize(i.size) }}{{ i.kind ? ' · ' + (i.kind === 'poi' ? t('poi') : t('sweep')) : '' }}{{ i.by ? ' · ' + t('cloudBy', { name: i.by.name }) : '' }}</span>
+              </span>
+              <span v-if="importState(i, state.datasets) === 'imported'" class="chip ok">{{ t('cloudImported') }}</span>
+              <span v-else-if="importState(i, state.datasets) === 'updated'" class="chip todo">{{ t('cloudUpdated') }}</span>
+            </label>
+            <button class="primary small" :disabled="!cloudPick.length || !!busy" @click="pullCloud">{{ t('cloudImport', { n: cloudPick.length }) }}</button>
+          </template>
+        </section>
         <footer v-if="view === 'sessions'" class="importbar">
           <button class="primary" @click="dirInput?.click()">{{ t('importFolder') }}</button>
           <button class="secondary" @click="fileInput?.click()">{{ t('importZip') }}</button>
+          <button :class="['secondary', { on: cloudOpen }]" :title="t('fromServerTitle')" @click="toggleCloud">☁ {{ t('fromServer') }}</button>
           <span class="muted small">{{ t('orDrop') }}</span>
         </footer>
       </template>
@@ -336,6 +521,9 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
                 <div class="muted">{{ p.category }}<template v-if="p.fields.phone"> · {{ p.fields.phone.value }}</template></div>
                 <span :class="['chip', reviewOf(openDataset.id, p).decision]">{{ t(DECISION[reviewOf(openDataset.id, p).decision]) }}</span>
                 <span v-if="gstat(p) === 'new'" class="chip new">{{ t('notOnGoogleChip') }}</span>
+                <span v-if="missingStreet(p, reviewOf(openDataset.id, p))" class="chip new">{{ t('noStreet') }}</span>
+                <span v-else-if="reviewOf(openDataset.id, p).decision === 'confirmed' && pendingSuggestions(p, reviewOf(openDataset.id, p)).length" class="chip visit"
+                  :title="pendingSuggestions(p, reviewOf(openDataset.id, p)).map((k) => t('field.' + k)).join(', ')">{{ t('suggestionsOpen', { n: pendingSuggestions(p, reviewOf(openDataset.id, p)).length }) }}</span>
                 <span v-if="p.status !== 'open'" class="chip rm">{{ t('status_' + p.status) }}</span>
               </div>
             </button>
@@ -357,18 +545,25 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
     </aside>
 
     <main class="mapwrap">
-      <MapView @select="selectPlace" @move-pin="movePin" />
+      <MapView ref="mapRef" @select="selectPlace" @move-pin="movePin" />
       <div v-if="!state.loading && (!state.datasets.length || !shownCount)" class="mapnote">
         <template v-if="!state.datasets.length"><b>{{ t('mapEmptyTitle') }}</b><br />{{ t('mapEmptyText') }}</template>
         <template v-else><b>{{ t('mapHiddenTitle') }}</b><br />{{ t('mapHiddenText') }}</template>
       </div>
     </main>
 
-    <aside v-if="openPlace && openDataset" class="detail">
-      <PlaceReview ref="reviewRef" :ds="openDataset" :place="openPlace" @close="router.push(to.session(openDataset.id))" @next="nextPlace" />
-    </aside>
-    <aside v-else-if="openTask && openDataset && state.task != null" class="detail">
-      <TaskDetail :ds="openDataset" :task="openTask" :index="state.task" @close="router.push(to.sessionTasks(openDataset.id))" @open-place="(id: string) => selectPlace(openDataset!.id, id)" />
+    <aside v-if="openDataset && (openPlace || (openTask && state.task != null))" ref="detailEl" :class="['detail', { peek: mapPeek }]"
+      @touchstart.passive="touchStart" @touchend="touchEnd" @touchcancel="touch = null">
+      <!-- phone and tablet only (style.css): back, where we are, the map, previous / next -->
+      <nav class="dnav">
+        <button class="ghost back" @click="closeDetail">‹ {{ openPlace ? t('places') : t('tasks') }}</button>
+        <span class="dpos muted small">{{ stepPos + 1 }} / {{ stepList.length }}</span>
+        <button :class="['secondary', 'small', { on: mapPeek }]" :aria-pressed="mapPeek" @click="mapPeek = !mapPeek">{{ t(mapPeek ? 'hideMap' : 'showMap') }}</button>
+        <button class="secondary dstep" :disabled="!canStep(-1)" :title="t(openPlace ? 'prevPlace' : 'prevTask')" :aria-label="t(openPlace ? 'prevPlace' : 'prevTask')" @click="stepOpen(-1)">‹</button>
+        <button class="secondary dstep" :disabled="!canStep(1)" :title="t(openPlace ? 'nextPlace' : 'nextTask')" :aria-label="t(openPlace ? 'nextPlace' : 'nextTask')" @click="stepOpen(1)">›</button>
+      </nav>
+      <PlaceReview v-if="openPlace" ref="reviewRef" :ds="openDataset" :place="openPlace" @close="router.push(to.session(openDataset.id))" @next="nextPlace" />
+      <TaskDetail v-else-if="openTask && state.task != null" :ds="openDataset" :task="openTask" :index="state.task" @close="router.push(to.sessionTasks(openDataset.id))" @open-place="(id: string) => selectPlace(openDataset!.id, id)" />
     </aside>
 
     <div v-if="dragging" class="drop">{{ t('dropHere') }}</div>
@@ -387,7 +582,11 @@ function cover(p: Place) { return (p.photos.find((x) => x.cover) || p.photos[0])
             <button class="primary" @click="pub('geojson')">GeoJSON</button>
             <button class="primary" @click="pub('csv')">CSV</button>
             <button class="primary" :disabled="!confirmed.length" @click="pub('osm')">OpenStreetMap (.osm)</button>
+            <button class="primary" :disabled="!confirmed.length" @click="pubPhotos">{{ t('pubPhotos') }}</button>
+            <button class="primary" @click="pubProject">{{ t('pubProject') }}</button>
           </div>
+          <p class="muted small">{{ t('pubProjectNote') }}</p>
+          <p class="muted small">{{ t('pubPhotosNote') }}</p>
           <p class="muted small">{{ t('osmNote') }}</p>
         </template>
         <button class="ghost" @click="publishOpen = false">{{ t('close') }}</button>

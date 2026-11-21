@@ -74,7 +74,7 @@ import io.github.tewnut.poicapture.net.RoadSource
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class Step { LANGUAGE, WELCOME, EMAIL, PERMISSIONS, ROADS, READY }
+private enum class Step { LANGUAGE, WELCOME, EMAIL, PERMISSIONS, ROADS, READY, KEY }
 
 /**
  * First run, once per phone: language → what the app does → email (not verified) → permissions → offline road data for
@@ -106,7 +106,9 @@ fun OnboardingScreen(onDone: () -> Unit) {
             Step.EMAIL -> EmailStep(ctx) { step = Step.PERMISSIONS }
             Step.PERMISSIONS -> PermissionsStep(ctx) { step = Step.ROADS }
             Step.ROADS -> RoadsStep(ctx) { step = Step.READY }
-            Step.READY -> ReadyStep(ctx) { Prefs.setOnboarded(ctx, true); onDone() }
+            Step.READY -> ReadyStep(ctx) { step = Step.KEY }
+            // last: the access key (scan the admin's QR code), so the phone ends set up to send its rides
+            Step.KEY -> KeyStep { Prefs.setOnboarded(ctx, true); onDone() }
         }
     }
 }
@@ -397,7 +399,28 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------- 5. ready
+// ---------------------------------------------------------------- 7. access key (last)
+
+/**
+ * The access key from the admin (scan its QR code, or type it); the project's server is already filled in. Skip
+ * leaves it empty: sessions are then sent by hand, as before.
+ */
+@Composable
+private fun KeyStep(onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    var tick by remember { mutableIntStateOf(0) }
+    // the card saves as typed; the button says Continue once a usable address is in
+    val set = remember(tick) { io.github.tewnut.poicapture.capture.UploadServer.configured(ctx) }
+    StepFrame(stringResource(R.string.onboarding_key_title), stringResource(R.string.onboarding_key_lead),
+        stringResource(if (set) R.string.onboarding_ready_button else R.string.onboarding_key_skip), onNext = onDone) {
+        WhiteCard {
+            UploadServerCard(onChange = { tick++ }, keyFirst = true)
+        }
+        Hint(stringResource(R.string.onboarding_upload_later))
+    }
+}
+
+// ---------------------------------------------------------------- 6. ready (then the access key)
 
 @Composable
 private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
@@ -407,7 +430,7 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
     val packs = remember { RoadSource.packs(ctx).installed().map { it.name } }
     val plan = CapturePlan.of(settings.facadeDistanceM)
 
-    StepFrame(stringResource(R.string.onboarding_ready_title), null, stringResource(R.string.onboarding_ready_button),
+    StepFrame(stringResource(R.string.onboarding_ready_title), null, stringResource(R.string.onboarding_continue),
         onNext = { Prefs.saveSettings(ctx, settings); onDone() }) {
         WhiteCard {
             Text(stringResource(R.string.onboarding_mount_title), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.Ink)

@@ -10,6 +10,9 @@ your own vision on contact sheets, plus a Google Maps lookup for what the road c
 
 Scripts are in `scripts/` next to this file (`<skill>` below). They need Python 3 with Pillow (use `python`, not
 `python -I`: Pillow lives in the user site-packages). Keep the work folder out of the repo, e.g. in the scratchpad.
+From Git Bash on Windows, a path argument with `[...]` in it can reach Python unconverted (`/c/Users/...`): the
+scripts turn `/c/...` into `C:/...` and refuse any other `/...` path (it would land on the drive root). Tests:
+`python -m unittest discover -s <skill>/scripts/tests`.
 
 ## 1. Prepare
 
@@ -17,7 +20,9 @@ Scripts are in `scripts/` next to this file (`<skill>` below). They need Python 
 python <skill>/scripts/prepare.py <session.zip | folder> <work>
 ```
 
-Prints the session, the photo count and the roads. `kind` must be `sweep`; for `poi` (Place capture) the places are
+Prints the session, the photo count and the roads, and how far the photo positions moved: the app stamps each photo
+with the latest GPS fix (up to ~1 s old, ~6 m at 25 km/h), so prepare.py places it by time between the fixes in
+`track.jsonl` (the phone's elapsed-time clock, which both carry; `positionFrom` and `fixLat`/`fixLon` in photos.json). `kind` must be `sweep`; for `poi` (Place capture) the places are
 already grouped: say so and stop unless the user wants the enrichment only.
 
 ## 2. Read the contact sheets
@@ -78,14 +83,19 @@ python <skill>/scripts/build.py <work> <out> [--best N] [--keep-all]
 ```
 
 `<out>` (ask where if the user has not said; default `~/Documents/poi-sweep-places/<session name>`) is emptied and
-rebuilt (run step 4 again after a rebuild). One folder per place: only its best photos (`COVER_#NN_…`, `BEST2_#NN_…`;
+rebuilt; a rebuild keeps each place's Google Maps result and website block (with its `WEB_*` images), matched by
+folder and name, but not hand edits to place.json (put those in places.json). One folder per place: only its best photos (`COVER_#NN_…`, `BEST2_#NN_…`;
 `#NN` = position in the sweep; `--keep-all` also copies the others into `more/`), and `place.json` (name, category, position with
 method and uncertainty, `googleMaps` review links for the place and the cover camera, `review.status = "todo"`, each
 kept photo's camera position / bearing / speed / blur, `photoSelection` (how they were chosen, how many the place was
 seen on) and `otherPhotos` (ids of the photos not kept)), plus `index.html` (review page: cover, thumbnails, map links),
 `places.csv`, `places.geojson`, `README.txt`. It prints the camera-bearing correction first: sweeps whose bearing is
 `"assumed"` (90° to travel) are corrected by the median of the phone's compass over the photos (first ride: −32°,
-which took the median error against Google Maps from 40 to 27 m); `"bearingOffsetDeg"` in places.json overrides it.
+which took the median error against Google Maps from 40 to 27 m); `"bearingOffsetDeg"` in places.json overrides it
+and is then added to **every** photo's bearing, compass-measured ones too (for a ride whose compass read a few
+degrees off). Each place's `street` is the road it was photographed from (the phone's `roadName`, OSM road within
+30 m: the cover photo's, else the most common over its photos; `streetFrom` says which); the ride-level `"street"`
+of places.json is only a last fallback, never when it names several roads ("A / B").
 If it says the compass was too scattered, positions are as weak as before: say so. Check the printed positions look sane (all on the shop side of the road,
 in riding order); a triangulated point far from its neighbours usually means a wrong `x` or photo index.
 
@@ -106,7 +116,10 @@ python <skill>/scripts/enrich_browser.py <out> [--force] [--only 06_Starbucks,16
 For each place it opens Google Maps at the estimated position (zoom 18), searches the name read on the sign there,
 takes the nearby results, picks the one whose name contains most of the sign's words (`nameMatch` >= 0.5) and is
 within 300 m, opens it and reads the address, phone, website, plus code, opening hours, rating, open / closed and its
-exact position. The other results are kept as `candidates` for review. One search at a time, 2–4 s apart.
+exact position, then checks the 300 m limit again with that position (a list entry can point at another branch:
+rejected ones stay in `candidates`, marked). The other results are kept as `candidates` for review. One search at a
+time, 2–4 s apart, in its own agent-browser session (`AGENT_BROWSER_SESSION`, default `poi-<output folder>-<hash>`),
+so runs on two rides in parallel do not share a tab.
 
 Check the results before reporting them:
 - a match for a `low` confidence place (name partly read) is a guess, possibly a good one ("CAF… ANH" → "CAT ANH TEA
@@ -145,6 +158,21 @@ Open the folder (`explorer.exe <out>` on Windows) and tell the user: number of p
 why (umbrellas, trees, distance), how many were found on Google Maps and how many not (likely new places, the most
 valuable), positions triangulated vs single-photo, and the link to `index.html`.
 
+## Cloud server (when the session came from it)
+
+When the team uses the upload server (`server/README.md`), sessions arrive there instead of by adb. With
+`POI_CLOUD_URL` (the tus endpoint; the team's is `https://poi-capture-cloud.4hum-ai.workers.dev/files/`) and, if the server has one, `POI_CLOUD_TOKEN` set in
+the environment (never pass or print the token):
+
+```
+python <skill>/scripts/cloud.py list                         # raw sessions from phones (type raw-session)
+python <skill>/scripts/cloud.py pull <id> <work>             # the session zip, for step 1
+python <skill>/scripts/cloud.py push <out folder | zip>      # after step 5: the processed result (result.json + photos)
+```
+
+`push` zips a folder and sends it as `type=processed-result` with its session id and name from result.json; the
+reviewer's web app lists those under *From server*. An interrupted push resumes when run again.
+
 ## Google data: merged, marked, kept out of OpenStreetMap
 
 The project decided (2026-11-15) to use Google Maps data in its place records, knowing Google's terms do not allow
@@ -154,15 +182,39 @@ it. `result.py` merges a matched Google place (name match >= 0.5, within 100 m) 
 - the photos show a different value: the photo value is kept (newer), `"google": "differs"`, `"googleValue"`;
 - the photos lack it: Google's value, `"source": "google"` (opening hours from one day only: `"sure": "low"`);
 - the photos show it but unclearly (`"sure": "low"`, or "…" / "?" in it) and Google agrees with what was read (a
-  phone sharing a run of 3+ digits, a name or street mostly the same): Google's value clarifies it, `"source":
-  "google"`, `"clarified": true`, the reading kept in `"photoValue"` (e.g. "0901 457 …" read, Google "0981 457 801").
+  phone read in full with at most 2 digits different, or read in parts sharing a run of 3+ digits; a name or street
+  mostly the same): Google's value clarifies it, `"source": "google"`, `"clarified": true`, the reading kept in
+  `"photoValue"` (e.g. "0904521417" read unsure, Google "0904523417").
+
+Only that match (name >= 0.5, <= 100 m) counts: a farther or weaker Google result is not merged, does not lend its
+website to enrich_web.py, and the place counts as **not** on Google Maps (a visit task, "nearest: …"). Google's
+address is parsed for the first part that is "<number> <street>" or starts with Đường / Đ. / Phố, after building or
+unit names ("tòa nhà One Verandah, 2 Bát Nàn, …" → 2, Bát Nàn); streets are compared without Đường / Đ. / Số and
+the ward ("Đường Số 3, P. An Khánh" = "Đ. Số 3"). A street that neither the photos, the website nor Google give is
+filled with the road the photos were taken on: `"source": "ride"`, `"sure": "medium"`, a suggestion the reviewer
+accepts (a corner shop or a shop inside a building may be on another street); when another source names a different
+street than the ride road, the field gets `"ride": "differs"`, `"rideValue"`.
 
 **The place's own website comes first.** `python <skill>/scripts/enrich_web.py <out>` opens each place's website
-(from the photos or Google; robots.txt honoured; social and link-in-bio pages skipped) and reads its schema.org data
-(phone, address, opening hours), title, description, `tel:` links and up to 3 images (`WEB_1.jpg` …, shown with the
-place's photos). Its fields are merged like Google's (`"source": "website"`), before Google's, but only when the
+(from the photos or Google; robots.txt not consulted, a project decision of 2026-11-16, unless `--respect-robots`;
+Instagram / TikTok / link-in-bio / shop pages skipped) and reads its schema.org data
+(phone, address, opening hours), title, description, `tel:` links, the labelled text most small sites have instead
+("Địa chỉ:", "Điện thoại:", "Hotline:", "Giờ làm việc:", often in the footer; the "Liên hệ" page when phone or
+address is missing) and up to 8 images: og:image, then the page's own photos at full size (`WEB_1.jpg` …, shown with
+the place's photos). Its fields are merged like Google's (`"source": "website"`), before Google's, but only when the
 website's address is this place's street or house number: a chain's site gives its head office, not this branch.
 Run it after the Google lookup (it needs Google's website when the photos show none).
+
+**Then look at the website images** (a contact sheet of each place's `WEB_*`): keep the ones that show this place
+(front, sign, inside, its logo, its menu or price list); drop stock photos, news-article pictures, other branches,
+banners for promotions and theme leftovers by setting `"drop": "<why>"` on that entry of `website.images` in
+place.json (result.py leaves them out). A site that is another business's (Google sometimes lists the brand on the sign,
+or a neighbour's) gets `"notThisPlace": true` and the reason in `website.note`: neither its fields nor its images are used. When a page shows images only after JavaScript runs (a slider of `dummy.png` placeholders, an
+empty gallery), the script already falls back to **jawb** (the local browser: `jawb open` + `jawb read --js`; set
+`JAWB_DATA_DIR` to the running jawbd's data folder): sites that refuse scripts, fail, or give next to nothing are read
+in Chrome (`"via": "jawb"`). Facebook pages are read through jawb too, but Facebook shows a login wall to a
+logged-out browser: pass `--fb-profile <jawb profile logged in to Facebook>`; without it they are recorded as
+`facebook: login needed`.
 
 Google-sourced values are marked in the published GeoJSON / CSV (`fromGoogle`) and never written to the `.osm`
 file: OpenStreetMap does not accept data copied from Google (edits get reverted, accounts blocked). Pins never come

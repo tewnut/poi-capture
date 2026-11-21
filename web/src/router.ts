@@ -13,6 +13,11 @@ export const router = createRouter({
     { path: '/s/:ds/tasks', name: 'sessionTasks', component: Empty },
     { path: '/s/:ds/p/:place', name: 'place', component: Empty },
     { path: '/s/:ds/t/:task', name: 'task', component: Empty },
+    // the cloud server's admin page: by address only, not linked from the reviewer's settings. Two sections, each a
+    // list or a map (?view=map): access keys and capture sessions; App.vue shows it for every route named admin*
+    { path: '/admin', redirect: '/admin/keys' },
+    { path: '/admin/keys', name: 'adminKeys', component: Empty },
+    { path: '/admin/sessions', name: 'adminSessions', component: Empty },
     { path: '/:rest(.*)*', redirect: '/' },
   ],
 })

@@ -1,0 +1,22 @@
+// POI Capture cloud as a Cloudflare Worker (../README.md, "Cloudflare Worker").
+// Secret (not here): TOKEN, set with `npx wrangler secret put TOKEN`. Locally: a .dev.vars file (git-ignored).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "poi-capture-cloud",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true },
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "poi-capture-uploads" }],
+  "durable_objects": { "bindings": [{ "name": "UPLOADS", "class_name": "Uploads" }] },
+  // the free plan needs SQLite-backed Durable Objects
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Uploads"] }],
+  // daily: remove unfinished uploads untouched for EXPIRE_DAYS (and their R2 parts)
+  "triggers": { "crons": ["17 3 * * *"] },
+  "vars": {
+    // the reviewer web app: local dev servers and Cloudflare Pages (production + preview deployments)
+    "CORS_ORIGINS": "http://localhost:5173,http://localhost:5199,https://poi-capture-reviewer.pages.dev,https://*.poi-capture-reviewer.pages.dev",
+    "BASE_PATH": "/files",
+    "MAX_SIZE": "4294967296",
+    "EXPIRE_DAYS": "7"
+  }
+}

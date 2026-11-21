@@ -28,6 +28,65 @@ const en: Record<string, Msg> = {
   clearAll: 'Clear all data', clearAllHint: 'Sessions, photos and reviews in this browser, to import fresh ones',
   clearAllConfirm: (p) => `Remove all ${p.n} sessions, their photos and every review from this browser? This cannot be undone.`,
   settings: 'Settings', reviewer: 'Reviewer', reviewerHint: 'Your name, saved with each decision',
+  cloudStorage: 'Cloud storage', cloudUrl: 'Server', cloudToken: 'Token', cloudTokenNone: 'none',
+  cloudHint: 'The tus server the phone uploads to. Preset to the team server (empty the field to go back to it); the token comes from whoever runs the server. The address and token are kept only in this browser (localStorage): anyone using this browser profile can read them.',
+  cloudBadUrl: 'Not an http(s) address', fromServer: 'From server', fromServerTitle: 'Processed sessions on the cloud server',
+  cloudTitle: 'Processed sessions on the server', cloudNotSet: 'Set the server in Settings first.', cloudLoading: 'Asking the server…',
+  cloudEmpty: 'Nothing processed on the server yet. Sessions from the phone show here once the agent has processed them.',
+  cloudImported: 'imported', cloudUpdated: 'newer than imported', cloudRefresh: 'Refresh',
+  cloudImport: (p) => `Import ${p.n}`, cloudDownloading: (p) => `Downloading ${p.n} from the server…`,
+  cloudBy: (p) => `by ${p.name}`,
+  // admin (AdminPanel.vue)
+  adminBack: 'Reviewer',
+  adminTitle: 'Admin: cloud server', adminPassword: 'Admin password', adminSignIn: 'Sign in', adminChecking: 'Checking…',
+  adminSignOut: 'Sign out', adminSignedIn: (p) => `Signed in as ${p.name}`,
+  adminPasswordHint: 'The server’s ADMIN_TOKEN. Kept only in this browser tab (sessionStorage) and forgotten when the tab closes. The reviewer’s own access key (Settings, “Token”) is not changed.',
+  adminWrong: 'Wrong or revoked password: the server refused it (401).',
+  adminForbidden: 'This is not the admin password: the server refused the request (403).',
+  adminNotAdmin: (p) => `This is the access key “${p.name}” (${p.what}), not the admin password: it cannot manage access keys.`,
+  navKeys: 'Access keys', navSessions: 'Capture sessions', viewLabel: 'View', viewList: 'List', viewMap: 'Map',
+  keySearch: 'Search by name', statusAll: 'All', statusActive: 'Active', statusRevoked: 'Revoked',
+  shownOf: (p) => `${p.n} of ${p.total}`, keysCount: (p) => plural(p.n, 'access key', 'access keys'),
+  sessionsCount: (p) => plural(p.n, 'capture session', 'capture sessions'), noneMatch: 'Nothing matches these filters.',
+  tokName: 'Name', tokPerms: 'Permissions', tokPrefix: 'Starts with', tokCreated: 'Created', tokLastUsed: 'Last used', tokUploads: 'Uploads',
+  tokStatus: 'Status', tokActive: 'active', tokRevoked: (p) => `revoked ${p.date}`, tokNever: 'never',
+  tokRevoke: 'Revoke key', tokRevokeConfirm: 'Revoke this key? It stops working at once.', tokRevokeYes: 'Yes, revoke',
+  tokNone: 'No access keys yet. Issue one per person and device above.',
+  scope_upload: 'Send rides', scope_read: 'View & download', scope_process: 'Process rides', scope_delete: 'Delete uploads',
+  scopeHelp_upload: 'Upload ride sessions. For phones.',
+  scopeHelp_read: 'List and download every upload. For reviewers.',
+  scopeHelp_process: 'Download rides and upload processed results. For the agent pipeline.',
+  scopeHelp_delete: 'Delete any upload, finished ones too.',
+  scopesNone: 'no permissions', scopesPick: 'Tick at least one permission.', scopesTap: 'Tap a permission to see what it allows.',
+  preset: 'Preset', preset_phone: 'Phone', preset_reviewer: 'Reviewer', preset_agent: 'Agent',
+  tokEdit: 'Edit', tokEditTitle: (p) => `Permissions of ${p.name}`, tokSave: 'Save', tokSaving: 'Saving…',
+  tokEditHint: 'Takes effect on the key’s next request; the key itself stays the same.',
+  tokEditRevoked: 'This key has been revoked meanwhile: its permissions can no longer be changed (409).',
+  issueTitle: 'Issue an access key', issueNamePh: 'Name, e.g. Sơn – phone', issueBtn: 'Issue',
+  issueHint: 'One access key per person and device: each upload then shows who made it, and a lost phone is revoked alone.',
+  issuedTitle: (p) => `New access key for ${p.name}`,
+  issuedOnce: 'Copy or scan it now: it will not be shown again. If it is lost, revoke it and issue a new one.',
+  issuedQr: 'On the phone, scan this code in the POI Capture app: it sets the server address and the access key.',
+  issuedQrAlt: 'QR code with the server address and the access key', issuedDone: 'Done, hide it',
+  copy: 'Copy', copied: 'Copied', copyLink: 'Copy setup link', copyFailed: 'Could not copy: select the text and copy it by hand.',
+  upAllTypes: 'All types', upType: 'Type', upSize: 'Size', upBy: 'Uploaded by', typeProcessed: 'processed', typeRaw: 'raw session',
+  upUnfinished: (p) => `unfinished ${p.pct}%`, upNone: 'No capture sessions on the server.',
+  upDelete: 'Delete', upDeleteConfirm: 'Delete from the server? This cannot be undone.', upDeleteYes: 'Yes, delete',
+  // last seen and the map (AdminPanel.vue, AdminMap.vue)
+  tokLastSeen: 'Last seen', seenNever: 'not seen yet',
+  seenTwo: '⚠ two devices',
+  seenTwoTitle: (p) => `Used from two different clients within 7 days (a copied key, or a new phone):\n${p.client} (${p.at})\n${p.prev} (${p.prevAt})`,
+  seenAt: 'Last seen', seenPlace: 'Place', seenNetwork: 'Network', seenClient: 'Client', seenBrowser: 'User-Agent',
+  seenApprox: 'Places come from the IP address (Cloudflare): approximate, city level at best, and on mobile data often the carrier’s hub rather than the phone.',
+  seenApproxShort: 'approximate place, from the IP address',
+  builtinsTitle: 'Built-in identities', builtinsHint: 'The admin password and the old shared key: set as server secrets, not issued here; their permissions cannot be changed here.',
+  mapUploader: 'Uploader', mapAllUploaders: 'All uploaders', mapUnknown: 'unknown uploader',
+  mapPeriod: 'Period', mapPeriod7: 'Last 7 days', mapPeriod30: 'Last 30 days', mapPeriodAll: 'All time',
+  mapEmptyKeys: 'None of these access keys has been seen at a place yet: a key shows here once it reaches a server that records where it is seen.',
+  mapEmptySessions: 'None of these capture sessions has a track: a ride shows here once a phone uploads it with its track (processed results and older uploads have none).',
+  mapNoPlace: (p) => `${plural(p.n, 'key has', 'keys have')} no place yet.`,
+  mapNoTrack: (p) => `${plural(p.n, 'capture session', 'capture sessions')} without a track (not on the map).`,
+  tripSession: 'Session', tripStarted: 'Started', tripDuration: 'Duration', tripDistance: 'Distance', tripPhotos: 'Photos', tripBy: 'Uploaded by',
   yourName: 'your name', language: 'Language', close: 'Close',
   sessions: 'Sessions', allTasks: 'All tasks', places: 'Places', tasks: 'Tasks', back: 'Sessions',
   loading: 'Loading the sessions saved in this browser…',
@@ -77,7 +136,7 @@ const en: Record<string, Msg> = {
   noTasksShown: 'No tasks in the sessions shown',
   tasksHidden: (p) => `${plural(p.n, 'task is', 'tasks are')} in sessions hidden from the map. Tick them in Sessions to list their tasks.`,
   goSessions: 'Go to Sessions', allTasksHint: 'Tasks of the sessions shown on the map, for planning visits.',
-  export: 'Export', exportTitle: 'Download these tasks as GeoJSON',
+  export: 'Export', exportTitle: 'Download the work left on site (GeoJSON): import it in the phone app: Settings → Tasks from the reviewer',
   sessionTasksHint: 'Visits go to Place capture on the phone; removals are confirmed here or checked on site.',
   noTasksSession: 'No tasks in this session',
   noTasksSessionRaw: 'Tasks come from the processing step: process this session first.',
@@ -105,6 +164,12 @@ const en: Record<string, Msg> = {
   fromGoogle: 'from Google', matchesGoogle: 'matches Google', googleOneDay: 'one day only',
   fromWebsite: 'from the website', matchesWebsite: 'matches the website',
   clarifiedBy: (p) => `Clarified with ${p.src}: the photo read "${p.v}"`,
+  fromRide: 'the road the photos were taken on', rideDiffers: (p) => `The photos were taken on ${p.v}`,
+  noStreet: 'no street', streetMissing: 'no street: type it if you know it',
+  suggestLow: 'unsure reading: ✓ to keep it', suggestRide: 'road the photos were taken on: ✓ if the place is on it',
+  pendingBeforeConfirm: (p) => `Confirm accepts the clear readings and the Google / website values. Not accepted until you press ✓: ${p.f}.`,
+  pendingAfterConfirm: (p) => `Not published until you accept it (✓) or type it: ${p.f}.`,
+  suggestionsOpen: (p) => `${p.n} to check`,
   osmNote: 'The .osm file holds new nodes for JOSM, without the fields filled from Google (OpenStreetMap does not accept them): check them against what is already mapped and follow the OSM import guidelines before uploading. Removals are only in the GeoJSON and CSV.',
   nothingConfirmed: 'Nothing confirmed yet',
   // place review
@@ -113,6 +178,9 @@ const en: Record<string, Msg> = {
   namePartly: 'name partly read', gFound: 'on Google Maps', gNew: 'not on Google nearby', gTodo: 'Google not checked',
   noPhotoKept: 'No photo was kept for this place.', noPhoto: 'no photo', fullScreen: 'Full screen', newTab: 'Open the photo in a new tab',
   prev: 'Previous (←)', next: 'Next (→)', closeEsc: 'Close (Esc)',
+  prevPlace: 'Previous place', nextPlace: 'Next place', prevTask: 'Previous task', nextTask: 'Next task',
+  showMap: 'Map', hideMap: 'Hide map', marksT: 'Where this value comes from (tap for details)',
+  seenMore: 'Details', seenLess: 'Less',
   whatPhotosSay: 'What the photos say', notOnPhotos: 'not on the photos', correct: 'Correct', wrongLeaveOut: 'Wrong: leave out',
   'field.name': 'Name', 'field.phone': 'Phone', 'field.houseNumber': 'House number', 'field.street': 'Street / area',
   'field.openingHours': 'Opening hours', 'field.website': 'Website', 'field.signText': 'Sign text', 'field.other': 'Other text',
@@ -127,6 +195,16 @@ const en: Record<string, Msg> = {
   googleNotFound: 'Not found nearby: probably a place Google does not have.',
   comment: 'Comment (optional)', confirm: 'Confirm', confirmedBtn: '✓ Confirmed', visitQueued: 'Visit queued',
   reject: 'Reject', undo: 'Undo',
+  // photo edits
+  cropT: 'Crop this photo', cropHint: 'Drag on the photo to frame it; drag the frame to move it, a corner to resize.',
+  cropSave: 'Save crop', cropWhole: 'Whole photo', cancel: 'Cancel', cropping: 'Cropping…', adding: 'Adding…',
+  makeCover: 'Make this the cover', cover: 'cover', removePhoto: 'Remove this photo (you can restore it)',
+  deleteAdded: 'Delete this photo you added', addPhotos: 'Add', addedByYou: 'added by you', croppedTag: 'cropped',
+  addPhotosT: 'Add photos: pick files, drop them here, or paste an image (Ctrl+V)',
+  removedN: (p) => `Removed (${p.n}), click to restore:`, restore: 'Restore',
+  photoEditsNote: 'Photo changes are saved with your review; the imported photos stay as they were.',
+  pubPhotos: 'Photos (.zip)', pubPhotosNote: 'The photos you kept for each confirmed place (cropped where you cropped them), with places.geojson; the photos column lists them.',
+  pubProject: 'Project (.zip)', pubProjectNote: 'For the VMAP step, in one file: every place you decided (with your decision, fields, pin and kept photos), the removals, tasks.jsonl for the VMAP tools, and a README listing what to check (comments, added photos, places not reviewed).',
 }
 
 const vi: Record<string, Msg> = {
@@ -134,6 +212,64 @@ const vi: Record<string, Msg> = {
   clearAll: 'Xóa toàn bộ dữ liệu', clearAllHint: 'Các phiên, ảnh và kết quả duyệt trong trình duyệt này, để nạp phiên mới',
   clearAllConfirm: (p) => `Xóa cả ${p.n} phiên, ảnh và mọi kết quả duyệt khỏi trình duyệt này? Không thể hoàn tác.`,
   settings: 'Cài đặt', reviewer: 'Người duyệt', reviewerHint: 'Tên của bạn, lưu cùng mỗi quyết định',
+  cloudStorage: 'Lưu trữ đám mây', cloudUrl: 'Máy chủ', cloudToken: 'Mã truy cập', cloudTokenNone: 'không có',
+  cloudHint: 'Máy chủ tus mà điện thoại tải lên. Mặc định là máy chủ của nhóm (xoá trống ô để quay lại); mã truy cập do người quản lý máy chủ cung cấp. Địa chỉ và mã truy cập chỉ lưu trong trình duyệt này (localStorage): ai dùng hồ sơ trình duyệt này cũng đọc được.',
+  cloudBadUrl: 'Không phải địa chỉ http(s)', fromServer: 'Từ máy chủ', fromServerTitle: 'Các phiên đã xử lý trên máy chủ đám mây',
+  cloudTitle: 'Phiên đã xử lý trên máy chủ', cloudNotSet: 'Hãy đặt máy chủ trong Cài đặt trước.', cloudLoading: 'Đang hỏi máy chủ…',
+  cloudEmpty: 'Chưa có phiên nào được xử lý trên máy chủ. Phiên từ điện thoại hiện ở đây sau khi tác tử xử lý xong.',
+  cloudImported: 'đã nhập', cloudUpdated: 'mới hơn bản đã nhập', cloudRefresh: 'Làm mới',
+  cloudImport: (p) => `Nhập ${p.n}`, cloudDownloading: (p) => `Đang tải ${p.n} phiên từ máy chủ…`,
+  cloudBy: (p) => `bởi ${p.name}`,
+  // quản trị (AdminPanel.vue)
+  adminBack: 'Trang duyệt',
+  adminTitle: 'Quản trị: máy chủ đám mây', adminPassword: 'Mật khẩu quản trị', adminSignIn: 'Đăng nhập', adminChecking: 'Đang kiểm tra…',
+  adminSignOut: 'Đăng xuất', adminSignedIn: (p) => `Đã đăng nhập: ${p.name}`,
+  adminPasswordHint: 'ADMIN_TOKEN của máy chủ. Chỉ lưu trong tab trình duyệt này (sessionStorage) và bị xoá khi đóng tab. Mã truy cập người duyệt trong Cài đặt không thay đổi.',
+  adminWrong: 'Mật khẩu sai hoặc đã bị thu hồi: máy chủ từ chối (401).',
+  adminForbidden: 'Đây không phải mật khẩu quản trị: máy chủ từ chối yêu cầu (403).',
+  adminNotAdmin: (p) => `Đây là mã truy cập “${p.name}” (${p.what}), không phải mật khẩu quản trị: không thể quản lý mã truy cập.`,
+  navKeys: 'Mã truy cập', navSessions: 'Phiên ghi nhận', viewLabel: 'Kiểu xem', viewList: 'Danh sách', viewMap: 'Bản đồ',
+  keySearch: 'Tìm theo tên', statusAll: 'Tất cả', statusActive: 'Đang dùng', statusRevoked: 'Đã thu hồi',
+  shownOf: (p) => `${p.n} / ${p.total}`, keysCount: (p) => `${p.n} mã truy cập`,
+  sessionsCount: (p) => `${p.n} phiên ghi nhận`, noneMatch: 'Không có mục nào khớp với bộ lọc.',
+  tokName: 'Tên', tokPerms: 'Quyền', tokPrefix: 'Bắt đầu bằng', tokCreated: 'Tạo lúc', tokLastUsed: 'Dùng lần cuối', tokUploads: 'Lượt tải lên',
+  tokStatus: 'Trạng thái', tokActive: 'đang dùng', tokRevoked: (p) => `đã thu hồi ${p.date}`, tokNever: 'chưa dùng',
+  tokRevoke: 'Thu hồi mã', tokRevokeConfirm: 'Thu hồi mã này? Mã sẽ ngừng hoạt động ngay.', tokRevokeYes: 'Có, thu hồi',
+  tokNone: 'Chưa có mã truy cập nào. Hãy cấp cho mỗi người, mỗi thiết bị một mã ở trên.',
+  scope_upload: 'Gửi chuyến đi', scope_read: 'Xem và tải về', scope_process: 'Xử lý chuyến đi', scope_delete: 'Xoá dữ liệu',
+  scopeHelp_upload: 'Tải các phiên đi đường lên máy chủ. Dành cho điện thoại.',
+  scopeHelp_read: 'Xem danh sách và tải về mọi dữ liệu tải lên. Dành cho người duyệt.',
+  scopeHelp_process: 'Tải chuyến đi về và gửi lên kết quả đã xử lý. Dành cho quy trình xử lý tự động (tác tử).',
+  scopeHelp_delete: 'Xoá bất kỳ dữ liệu tải lên nào, kể cả dữ liệu đã tải xong.',
+  scopesNone: 'không có quyền nào', scopesPick: 'Hãy chọn ít nhất một quyền.', scopesTap: 'Chạm vào một quyền để xem quyền đó cho phép làm gì.',
+  preset: 'Chọn nhanh', preset_phone: 'Điện thoại', preset_reviewer: 'Người duyệt', preset_agent: 'Tác tử',
+  tokEdit: 'Sửa', tokEditTitle: (p) => `Quyền của ${p.name}`, tokSave: 'Lưu', tokSaving: 'Đang lưu…',
+  tokEditHint: 'Có hiệu lực từ yêu cầu tiếp theo của mã này; bản thân mã vẫn giữ nguyên.',
+  tokEditRevoked: 'Mã này vừa bị thu hồi: không thể thay đổi quyền của nó nữa (409).',
+  issueTitle: 'Cấp mã truy cập', issueNamePh: 'Tên, ví dụ: Sơn – điện thoại', issueBtn: 'Cấp mã',
+  issueHint: 'Mỗi người, mỗi thiết bị một mã truy cập: mỗi lượt tải lên sẽ ghi rõ ai làm, và mất điện thoại thì chỉ cần thu hồi mã đó.',
+  issuedTitle: (p) => `Mã truy cập mới cho ${p.name}`,
+  issuedOnce: 'Hãy sao chép hoặc quét ngay: mã này sẽ không hiện lại. Nếu bị mất, hãy thu hồi và cấp mã mới.',
+  issuedQr: 'Trên điện thoại, quét mã này trong ứng dụng POI Capture: ứng dụng sẽ tự đặt địa chỉ máy chủ và mã truy cập.',
+  issuedQrAlt: 'Mã QR chứa địa chỉ máy chủ và mã truy cập', issuedDone: 'Xong, ẩn mã',
+  copy: 'Sao chép', copied: 'Đã sao chép', copyLink: 'Sao chép liên kết cài đặt', copyFailed: 'Không sao chép được: hãy chọn văn bản và tự sao chép.',
+  upAllTypes: 'Mọi loại', upType: 'Loại', upSize: 'Dung lượng', upBy: 'Người tải lên', typeProcessed: 'đã xử lý', typeRaw: 'phiên gốc',
+  upUnfinished: (p) => `chưa xong ${p.pct}%`, upNone: 'Không có phiên ghi nhận nào trên máy chủ.',
+  upDelete: 'Xoá', upDeleteConfirm: 'Xoá khỏi máy chủ? Không thể hoàn tác.', upDeleteYes: 'Có, xoá',
+  tokLastSeen: 'Hoạt động gần nhất', seenNever: 'chưa hoạt động',
+  seenTwo: '⚠ hai thiết bị',
+  seenTwoTitle: (p) => `Được dùng từ hai ứng dụng hoặc thiết bị khác nhau trong vòng 7 ngày (mã bị sao chép, hoặc điện thoại mới):\n${p.client} (${p.at})\n${p.prev} (${p.prevAt})`,
+  seenAt: 'Hoạt động gần nhất', seenPlace: 'Vị trí', seenNetwork: 'Nhà mạng', seenClient: 'Ứng dụng', seenBrowser: 'User-Agent',
+  seenApprox: 'Vị trí lấy từ địa chỉ IP (Cloudflare): chỉ gần đúng, tốt nhất ở mức thành phố, và khi dùng dữ liệu di động thường là trạm trung tâm của nhà mạng chứ không phải chỗ điện thoại.',
+  seenApproxShort: 'vị trí gần đúng, theo địa chỉ IP',
+  builtinsTitle: 'Danh tính có sẵn', builtinsHint: 'Mật khẩu quản trị và mã truy cập dùng chung cũ: được đặt làm secret của máy chủ, không cấp ở đây; quyền của chúng không đổi được ở đây.',
+  mapUploader: 'Người tải lên', mapAllUploaders: 'Mọi người tải lên', mapUnknown: 'không rõ người tải lên',
+  mapPeriod: 'Khoảng thời gian', mapPeriod7: '7 ngày qua', mapPeriod30: '30 ngày qua', mapPeriodAll: 'Toàn bộ',
+  mapEmptyKeys: 'Chưa mã truy cập nào trong số này có vị trí: mã sẽ hiện ở đây khi kết nối tới máy chủ có ghi nhận nơi hoạt động.',
+  mapEmptySessions: 'Không phiên ghi nhận nào trong số này có lộ trình: chuyến đi sẽ hiện ở đây khi điện thoại tải lên kèm lộ trình (kết quả đã xử lý và dữ liệu tải lên cũ không có).',
+  mapNoPlace: (p) => `${p.n} mã chưa có vị trí.`,
+  mapNoTrack: (p) => `${p.n} phiên ghi nhận không có lộ trình (không hiện trên bản đồ).`,
+  tripSession: 'Phiên', tripStarted: 'Bắt đầu', tripDuration: 'Thời lượng', tripDistance: 'Quãng đường', tripPhotos: 'Ảnh', tripBy: 'Người tải lên',
   yourName: 'tên của bạn', language: 'Ngôn ngữ', close: 'Đóng',
   sessions: 'Phiên', allTasks: 'Tất cả việc', places: 'Địa điểm', tasks: 'Việc cần làm', back: 'Các phiên',
   loading: 'Đang tải các phiên đã lưu trong trình duyệt…',
@@ -180,7 +316,7 @@ const vi: Record<string, Msg> = {
   noTasksShown: 'Không có việc trong các phiên đang hiện',
   tasksHidden: (p) => `${p.n} việc nằm trong các phiên đang ẩn khỏi bản đồ. Tích chọn chúng ở mục Phiên để xem.`,
   goSessions: 'Đến mục Phiên', allTasksHint: 'Việc của các phiên đang hiện trên bản đồ, để lên kế hoạch đi kiểm tra.',
-  export: 'Xuất', exportTitle: 'Tải các việc này dạng GeoJSON',
+  export: 'Xuất', exportTitle: 'Tải các việc cần làm tại chỗ (GeoJSON): mở trong ứng dụng điện thoại: Cài đặt → Việc từ người duyệt',
   sessionTasksHint: 'Đi kiểm tra bằng Place capture trên điện thoại; gỡ bỏ được xác nhận ở đây hoặc kiểm tra tại chỗ.',
   noTasksSession: 'Phiên này không có việc',
   noTasksSessionRaw: 'Việc cần làm đến từ bước xử lý: hãy xử lý phiên này trước.',
@@ -206,6 +342,12 @@ const vi: Record<string, Msg> = {
   fromGoogle: 'từ Google', matchesGoogle: 'khớp Google', googleOneDay: 'chỉ một ngày',
   fromWebsite: 'từ website', matchesWebsite: 'khớp website',
   clarifiedBy: (p) => `Làm rõ bằng ${p.src}: ảnh đọc được "${p.v}"`,
+  fromRide: 'đường nơi chụp ảnh', rideDiffers: (p) => `Ảnh được chụp trên đường ${p.v}`,
+  noStreet: 'chưa có đường', streetMissing: 'chưa có đường: nhập nếu bạn biết',
+  suggestLow: 'đọc chưa chắc: ✓ để giữ', suggestRide: 'đường nơi chụp ảnh: ✓ nếu địa điểm nằm trên đường này',
+  pendingBeforeConfirm: (p) => `Xác nhận sẽ nhận các giá trị đọc rõ và giá trị từ Google / website. Chưa nhận cho tới khi bạn bấm ✓: ${p.f}.`,
+  pendingAfterConfirm: (p) => `Chưa được xuất cho tới khi bạn nhận (✓) hoặc nhập: ${p.f}.`,
+  suggestionsOpen: (p) => `${p.n} cần kiểm tra`,
   osmNote: 'File .osm chứa các điểm mới cho JOSM, không gồm các trường lấy từ Google (OpenStreetMap không chấp nhận): đối chiếu với dữ liệu đã có và làm theo hướng dẫn nhập dữ liệu của OSM trước khi tải lên. Gỡ bỏ chỉ có trong GeoJSON và CSV.',
   nothingConfirmed: 'Chưa xác nhận gì',
   category: 'loại', status_open: 'đang mở', status_closed: 'đã đóng cửa', status_for_rent: 'cho thuê',
@@ -213,6 +355,9 @@ const vi: Record<string, Msg> = {
   namePartly: 'tên đọc được một phần', gFound: 'có trên Google Maps', gNew: 'chưa có trên Google gần đó', gTodo: 'chưa kiểm tra Google',
   noPhotoKept: 'Không giữ ảnh nào cho địa điểm này.', noPhoto: 'không có ảnh', fullScreen: 'Toàn màn hình', newTab: 'Mở ảnh trong tab mới',
   prev: 'Trước (←)', next: 'Sau (→)', closeEsc: 'Đóng (Esc)',
+  prevPlace: 'Địa điểm trước', nextPlace: 'Địa điểm sau', prevTask: 'Việc trước', nextTask: 'Việc sau',
+  showMap: 'Bản đồ', hideMap: 'Ẩn bản đồ', marksT: 'Giá trị này lấy từ đâu (chạm để xem chi tiết)',
+  seenMore: 'Chi tiết', seenLess: 'Thu gọn',
   whatPhotosSay: 'Thông tin từ ảnh', notOnPhotos: 'không có trên ảnh', correct: 'Đúng', wrongLeaveOut: 'Sai: bỏ ra',
   'field.name': 'Tên', 'field.phone': 'Điện thoại', 'field.houseNumber': 'Số nhà', 'field.street': 'Đường / khu vực',
   'field.openingHours': 'Giờ mở cửa', 'field.website': 'Website', 'field.signText': 'Chữ trên biển', 'field.other': 'Chữ khác',
@@ -227,6 +372,16 @@ const vi: Record<string, Msg> = {
   googleNotFound: 'Không thấy gần đó: có thể là địa điểm Google chưa có.',
   comment: 'Ghi chú (không bắt buộc)', confirm: 'Xác nhận', confirmedBtn: '✓ Đã xác nhận', visitQueued: 'Đã đưa vào danh sách kiểm tra',
   reject: 'Loại', undo: 'Hoàn tác',
+  // photo edits
+  cropT: 'Cắt ảnh này', cropHint: 'Kéo trên ảnh để chọn khung; kéo khung để di chuyển, kéo góc để đổi kích thước.',
+  cropSave: 'Lưu ảnh cắt', cropWhole: 'Cả ảnh', cancel: 'Huỷ', cropping: 'Đang cắt…', adding: 'Đang thêm…',
+  makeCover: 'Đặt làm ảnh bìa', cover: 'ảnh bìa', removePhoto: 'Bỏ ảnh này (có thể khôi phục)',
+  deleteAdded: 'Xoá ảnh bạn đã thêm', addPhotos: 'Thêm', addedByYou: 'bạn thêm', croppedTag: 'đã cắt',
+  addPhotosT: 'Thêm ảnh: chọn file, thả vào đây, hoặc dán ảnh (Ctrl+V)',
+  removedN: (p) => `Đã bỏ (${p.n}), bấm để khôi phục:`, restore: 'Khôi phục',
+  photoEditsNote: 'Thay đổi ảnh được lưu cùng đánh giá của bạn; ảnh đã nhập vẫn giữ nguyên.',
+  pubPhotos: 'Ảnh (.zip)', pubPhotosNote: 'Các ảnh bạn giữ cho mỗi địa điểm đã xác nhận (đã cắt nếu bạn cắt), kèm places.geojson; cột photos liệt kê chúng.',
+  pubProject: 'Dự án (.zip)', pubProjectNote: 'Cho bước VMAP, trong một file: mọi địa điểm bạn đã quyết định (kèm quyết định, các trường, ghim và ảnh giữ lại), các yêu cầu xóa, tasks.jsonl cho công cụ VMAP, và README liệt kê những gì cần kiểm tra (ghi chú, ảnh thêm vào, địa điểm chưa duyệt).',
 }
 
 const M: Record<Lang, Record<string, Msg>> = { en, vi }
@@ -237,8 +392,28 @@ export function t(key: string, p: Record<string, any> = {}): string {
   return typeof m === 'function' ? m(p) : m
 }
 
+/** "3 hours ago" / "3 giờ trước", in the interface language; '' for no date. */
+export function relTime(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return ''
+  const ms = Date.parse(iso)
+  if (!Number.isFinite(ms)) return iso
+  const s = (ms - now) / 1000
+  const a = Math.abs(s)
+  const rtf = new Intl.RelativeTimeFormat(lang.value, { numeric: 'auto' })
+  if (a < 45) return rtf.format(0, 'second')
+  if (a < 3600) return rtf.format(Math.round(s / 60), 'minute')
+  if (a < 86400) return rtf.format(Math.round(s / 3600), 'hour')
+  if (a < 86400 * 45) return rtf.format(Math.round(s / 86400), 'day')
+  if (a < 86400 * 365) return rtf.format(Math.round(s / 86400 / 30), 'month')
+  return rtf.format(Math.round(s / 86400 / 365), 'year')
+}
+
 /** Task reasons are written by the processing step in English ("a; b"): translate the known parts. */
 export function tWhy(why: string): string {
   const known: Record<string, string> = { 'not on Google Maps nearby': 'why.notOnGoogle', 'name only partly read': 'why.partly' }
-  return why.split('; ').map((s) => (known[s] ? t(known[s]) : s)).join('; ')
+  // a known reason may carry details after it: "not on Google Maps nearby (nearest: …, 253 m, …)"
+  return why.split('; ').map((s) => {
+    const k = Object.keys(known).find((x) => s === x || s.startsWith(x + ' ('))
+    return k ? t(known[k]) + s.slice(k.length) : s
+  }).join('; ')
 }

@@ -44,7 +44,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 }
 
 kotlin {
@@ -76,6 +76,9 @@ dependencies {
     // downloaded at install (manifest meta-data): +0.3 MB instead of +41 MB of native libs for the bundled model. On a
     // phone without Play services the reading is skipped and the server reads the photos as before.
     implementation("com.google.android.gms:play-services-mlkit-text-recognition:19.0.1")
+    // "Scan setup QR" (upload server settings): Google's code scanner runs its own camera screen in Play services, so
+    // the app asks for no camera permission and ships no scanner UI or model (module downloaded at install, manifest).
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

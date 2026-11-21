@@ -1,8 +1,9 @@
 // Publish: the confirmed places as GeoJSON, CSV and an OpenStreetMap (.osm) file; the task list as GeoJSON.
 // Only what the photos showed or the reviewer confirmed is written: never the Google block or Google's pin
 // (Google's terms; docs/pipeline.md).
-import type { Dataset, Place, Review, FieldKey, RemovalReview } from './types'
+import type { Dataset, Place, Review, FieldKey, RemovalReview, Task } from './types'
 import { FIELD_KEYS } from './types'
+import { exportNames } from './photos'
 
 export type Published = {
   dataset: Dataset
@@ -37,6 +38,7 @@ export function record(x: Published) {
     session: dataset.session.id, sessionName: dataset.session.name || '', captured: dataset.session.startedAt || '',
     reviewer: review.reviewer || '', reviewedAt: review.at || '', comment: review.comment || '',
     fromGoogle: fromGoogle.join(' '),
+    photos: exportNames(place, review).join(' '),   // files in the photo export (cover first)
   }
 }
 
@@ -59,7 +61,7 @@ export function geojson(places: Published[], removed: Removed[]) {
 }
 
 const CSV_COLS = ['id', 'change', 'name', 'category', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
-  'fromGoogle', 'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment'] as const
+  'fromGoogle', 'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment', 'photos'] as const
 
 /** A CSV cell. Text starting with = + - @ (or a tab / return) is prefixed with ' so spreadsheets do not run it
  *  as a formula (names and fields come from photos and imports). Numbers are left as numbers. */
@@ -136,15 +138,33 @@ export function osm(places: Published[]) {
   return lines.join('\n') + '\n'
 }
 
-export function tasksGeojson(ds: Dataset[]) {
-  const feats = ds.flatMap((d) => d.tasks.map((t, i) => ({
-    type: 'Feature', geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
-    properties: { id: `${d.session.id}-task-${i}`, type: t.type, name: t.name, why: t.why, place: t.place, session: d.session.id },
-  })))
-  return JSON.stringify({ type: 'FeatureCollection', features: feats }, null, 1)
+/** The work left to do on site, as GeoJSON the phone app imports (schema poi-tasks/1, docs/pipeline.md):
+ *  the agent's visits, removal checks not yet settled here (removals the reviewer confirmed or dismissed are left
+ *  out; one sent to "check on site" goes in), and places the reviewer marked "visit". */
+export function tasksGeojson(ds: Dataset[], reviews: Record<string, Review> = {}, removals: Record<string, RemovalReview> = {},
+  createdBy = '') {
+  const feats: any[] = []
+  const add = (id: string, type: Task['type'], name: string, lat: number, lon: number, why: string, place: string | null, session: string) =>
+    feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] }, properties: { id, type, name, why, place, session } })
+  for (const d of ds) {
+    d.tasks.forEach((t, i) => {
+      const r = removals[`${d.id}|${i}`]?.decision || 'todo'
+      if (t.type !== 'visit' && (r === 'confirmed' || r === 'dismissed')) return
+      if (t.type === 'removal' && r !== 'verify') return     // the reviewer has not sent it on site
+      add(`${d.session.id}-task-${i}`, t.type === 'removal' ? 'verify_removal' : t.type, t.name, t.lat, t.lon, t.why, t.place, d.session.id)
+    })
+    for (const p of d.places) {
+      const r = reviews[`${d.id}|${p.id}`]
+      if (r?.decision !== 'visit' || feats.some((f) => f.properties.session === d.session.id && f.properties.place === p.id)) continue
+      const pin = r.pin || p.pins.agent || p.pins.contributor || p.pins.algorithm
+      if (!pin) continue
+      add(`${d.session.id}-visit-${p.id}`, 'visit', r.fields.name?.value || p.name, pin.lat, pin.lon, r.comment || 'Reviewer: check on site', p.id, d.session.id)
+    }
+  }
+  return JSON.stringify({ type: 'FeatureCollection', schema: 'poi-tasks/1', createdAt: new Date().toISOString(), createdBy, features: feats }, null, 1)
 }
 
-export function download(name: string, body: string, type: string) {
+export function download(name: string, body: BlobPart, type: string) {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(new Blob([body], { type }))
   a.download = name
