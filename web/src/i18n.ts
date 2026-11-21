@@ -35,6 +35,46 @@ const en: Record<string, Msg> = {
   cloudEmpty: 'Nothing processed on the server yet. Sessions from the phone show here once the agent has processed them.',
   cloudImported: 'imported', cloudUpdated: 'newer than imported', cloudRefresh: 'Refresh',
   cloudImport: (p) => `Import ${p.n}`, cloudDownloading: (p) => `Downloading ${p.n} from the server…`,
+  cloudBy: (p) => `by ${p.name}`,
+  // admin (AdminPanel.vue)
+  adminBack: 'Reviewer',
+  adminTitle: 'Admin: cloud server', adminPassword: 'Admin password', adminSignIn: 'Sign in', adminChecking: 'Checking…',
+  adminSignOut: 'Sign out', adminSignedIn: (p) => `Signed in as ${p.name}`,
+  adminPasswordHint: 'The server’s ADMIN_TOKEN. Kept only in this browser tab (sessionStorage) and forgotten when the tab closes. Your reviewer token in Settings is not changed.',
+  adminWrong: 'Wrong or revoked password: the server refused it (401).',
+  adminForbidden: 'This is not an admin token: the server refused the request (403).',
+  adminNotAdmin: (p) => `This token is “${p.name}” (${p.role}), not the admin password: it cannot manage tokens or delete uploads.`,
+  adminTokens: 'Tokens', adminUploads: 'Uploads',
+  tokName: 'Name', tokRole: 'Role', tokPrefix: 'Starts with', tokCreated: 'Created', tokLastUsed: 'Last used', tokUploads: 'Uploads',
+  tokStatus: 'Status', tokActive: 'active', tokRevoked: (p) => `revoked ${p.date}`, tokNever: 'never',
+  tokRevoke: 'Revoke', tokRevokeConfirm: 'Revoke? It stops working at once.', tokRevokeYes: 'Yes, revoke',
+  tokNone: 'No personal tokens yet. Issue one per person and device above.',
+  role_uploader: 'Uploader: phone', role_reviewer: 'Reviewer: web app, scripts',
+  roleShort_uploader: 'uploader', roleShort_reviewer: 'reviewer', roleShort_admin: 'admin',
+  issueTitle: 'Issue a token', issueNamePh: 'Name, e.g. Sơn – phone', issueBtn: 'Issue',
+  issueHint: 'One token per person and device: each upload then shows who made it, and a lost phone is revoked alone.',
+  issuedTitle: (p) => `New token for ${p.name}`,
+  issuedOnce: 'Copy or scan it now: it will not be shown again. If it is lost, revoke it and issue a new one.',
+  issuedQr: 'On the phone, scan this code in the POI Capture app: it sets the server address and the token.',
+  issuedQrAlt: 'QR code with the server address and the token', issuedDone: 'Done, hide it',
+  copy: 'Copy', copied: 'Copied', copyLink: 'Copy setup link', copyFailed: 'Could not copy: select the text and copy it by hand.',
+  upAllTypes: 'All types', upType: 'Type', upSize: 'Size', upBy: 'Uploaded by', typeProcessed: 'processed', typeRaw: 'raw session',
+  upUnfinished: (p) => `unfinished ${p.pct}%`, upNone: 'No uploads on the server.',
+  upDelete: 'Delete', upDeleteConfirm: 'Delete from the server? This cannot be undone.', upDeleteYes: 'Yes, delete',
+  // last seen and the map (AdminPanel.vue, AdminMap.vue)
+  adminMap: 'Map', tokLastSeen: 'Last seen', seenNever: 'not seen yet',
+  seenTwo: '⚠ two devices',
+  seenTwoTitle: (p) => `Used from two different clients within 7 days (a copied token, or a new phone):\n${p.client} (${p.at})\n${p.prev} (${p.prevAt})`,
+  seenAt: 'Last seen', seenPlace: 'Place', seenNetwork: 'Network', seenClient: 'Client', seenBrowser: 'User-Agent',
+  seenApprox: 'Places come from the IP address (Cloudflare): approximate, city level at best, and on mobile data often the carrier’s hub rather than the phone.',
+  seenApproxShort: 'approximate place, from the IP address',
+  builtinsTitle: 'Built-in identities', builtinsHint: 'The admin password and the old shared token: set as server secrets, not issued here.',
+  mapUploader: 'Uploader', mapAllUploaders: 'All uploaders', mapUnknown: 'unknown uploader',
+  mapPeriod: 'Period', mapPeriod7: 'Last 7 days', mapPeriod30: 'Last 30 days', mapPeriodAll: 'All time',
+  mapDevices: (p) => plural(p.n, 'device', 'devices'), mapTrips: (p) => plural(p.n, 'trip', 'trips'),
+  mapEmpty: 'Nothing has a location yet. A device shows here once it reaches a server that records where it is seen, and a trip once a phone uploads a ride with its track.',
+  mapNoneShown: 'Nothing for this uploader in this period.',
+  tripSession: 'Session', tripStarted: 'Started', tripDuration: 'Duration', tripDistance: 'Distance', tripPhotos: 'Photos', tripBy: 'Uploaded by',
   yourName: 'your name', language: 'Language', close: 'Close',
   sessions: 'Sessions', allTasks: 'All tasks', places: 'Places', tasks: 'Tasks', back: 'Sessions',
   loading: 'Loading the sessions saved in this browser…',
@@ -126,6 +166,9 @@ const en: Record<string, Msg> = {
   namePartly: 'name partly read', gFound: 'on Google Maps', gNew: 'not on Google nearby', gTodo: 'Google not checked',
   noPhotoKept: 'No photo was kept for this place.', noPhoto: 'no photo', fullScreen: 'Full screen', newTab: 'Open the photo in a new tab',
   prev: 'Previous (←)', next: 'Next (→)', closeEsc: 'Close (Esc)',
+  prevPlace: 'Previous place', nextPlace: 'Next place', prevTask: 'Previous task', nextTask: 'Next task',
+  showMap: 'Map', hideMap: 'Hide map', marksT: 'Where this value comes from (tap for details)',
+  seenMore: 'Details', seenLess: 'Less',
   whatPhotosSay: 'What the photos say', notOnPhotos: 'not on the photos', correct: 'Correct', wrongLeaveOut: 'Wrong: leave out',
   'field.name': 'Name', 'field.phone': 'Phone', 'field.houseNumber': 'House number', 'field.street': 'Street / area',
   'field.openingHours': 'Opening hours', 'field.website': 'Website', 'field.signText': 'Sign text', 'field.other': 'Other text',
@@ -164,6 +207,45 @@ const vi: Record<string, Msg> = {
   cloudEmpty: 'Chưa có phiên nào được xử lý trên máy chủ. Phiên từ điện thoại hiện ở đây sau khi tác tử xử lý xong.',
   cloudImported: 'đã nhập', cloudUpdated: 'mới hơn bản đã nhập', cloudRefresh: 'Làm mới',
   cloudImport: (p) => `Nhập ${p.n}`, cloudDownloading: (p) => `Đang tải ${p.n} phiên từ máy chủ…`,
+  cloudBy: (p) => `bởi ${p.name}`,
+  // quản trị (AdminPanel.vue)
+  adminBack: 'Trang duyệt',
+  adminTitle: 'Quản trị: máy chủ đám mây', adminPassword: 'Mật khẩu quản trị', adminSignIn: 'Đăng nhập', adminChecking: 'Đang kiểm tra…',
+  adminSignOut: 'Đăng xuất', adminSignedIn: (p) => `Đã đăng nhập: ${p.name}`,
+  adminPasswordHint: 'ADMIN_TOKEN của máy chủ. Chỉ lưu trong tab trình duyệt này (sessionStorage) và bị xoá khi đóng tab. Mã truy cập người duyệt trong Cài đặt không thay đổi.',
+  adminWrong: 'Mật khẩu sai hoặc đã bị thu hồi: máy chủ từ chối (401).',
+  adminForbidden: 'Đây không phải mã quản trị: máy chủ từ chối yêu cầu (403).',
+  adminNotAdmin: (p) => `Mã này là “${p.name}” (${p.role}), không phải mật khẩu quản trị: không thể quản lý mã truy cập hay xoá dữ liệu tải lên.`,
+  adminTokens: 'Mã truy cập', adminUploads: 'Dữ liệu tải lên',
+  tokName: 'Tên', tokRole: 'Vai trò', tokPrefix: 'Bắt đầu bằng', tokCreated: 'Tạo lúc', tokLastUsed: 'Dùng lần cuối', tokUploads: 'Lượt tải lên',
+  tokStatus: 'Trạng thái', tokActive: 'đang dùng', tokRevoked: (p) => `đã thu hồi ${p.date}`, tokNever: 'chưa dùng',
+  tokRevoke: 'Thu hồi', tokRevokeConfirm: 'Thu hồi? Mã sẽ ngừng hoạt động ngay.', tokRevokeYes: 'Có, thu hồi',
+  tokNone: 'Chưa có mã truy cập cá nhân nào. Hãy cấp cho mỗi người, mỗi thiết bị một mã ở trên.',
+  role_uploader: 'Tải lên: điện thoại', role_reviewer: 'Người duyệt: ứng dụng web, script',
+  roleShort_uploader: 'tải lên', roleShort_reviewer: 'người duyệt', roleShort_admin: 'quản trị',
+  issueTitle: 'Cấp mã truy cập', issueNamePh: 'Tên, ví dụ: Sơn – điện thoại', issueBtn: 'Cấp mã',
+  issueHint: 'Mỗi người, mỗi thiết bị một mã: mỗi lượt tải lên sẽ ghi rõ ai làm, và mất điện thoại thì chỉ cần thu hồi mã đó.',
+  issuedTitle: (p) => `Mã truy cập mới cho ${p.name}`,
+  issuedOnce: 'Hãy sao chép hoặc quét ngay: mã này sẽ không hiện lại. Nếu bị mất, hãy thu hồi và cấp mã mới.',
+  issuedQr: 'Trên điện thoại, quét mã này trong ứng dụng POI Capture: ứng dụng sẽ tự đặt địa chỉ máy chủ và mã truy cập.',
+  issuedQrAlt: 'Mã QR chứa địa chỉ máy chủ và mã truy cập', issuedDone: 'Xong, ẩn mã',
+  copy: 'Sao chép', copied: 'Đã sao chép', copyLink: 'Sao chép liên kết cài đặt', copyFailed: 'Không sao chép được: hãy chọn văn bản và tự sao chép.',
+  upAllTypes: 'Mọi loại', upType: 'Loại', upSize: 'Dung lượng', upBy: 'Người tải lên', typeProcessed: 'đã xử lý', typeRaw: 'phiên gốc',
+  upUnfinished: (p) => `chưa xong ${p.pct}%`, upNone: 'Không có dữ liệu tải lên nào trên máy chủ.',
+  upDelete: 'Xoá', upDeleteConfirm: 'Xoá khỏi máy chủ? Không thể hoàn tác.', upDeleteYes: 'Có, xoá',
+  adminMap: 'Bản đồ', tokLastSeen: 'Hoạt động gần nhất', seenNever: 'chưa hoạt động',
+  seenTwo: '⚠ hai thiết bị',
+  seenTwoTitle: (p) => `Được dùng từ hai ứng dụng hoặc thiết bị khác nhau trong vòng 7 ngày (mã bị sao chép, hoặc điện thoại mới):\n${p.client} (${p.at})\n${p.prev} (${p.prevAt})`,
+  seenAt: 'Hoạt động gần nhất', seenPlace: 'Vị trí', seenNetwork: 'Nhà mạng', seenClient: 'Ứng dụng', seenBrowser: 'User-Agent',
+  seenApprox: 'Vị trí lấy từ địa chỉ IP (Cloudflare): chỉ gần đúng, tốt nhất ở mức thành phố, và khi dùng dữ liệu di động thường là trạm trung tâm của nhà mạng chứ không phải chỗ điện thoại.',
+  seenApproxShort: 'vị trí gần đúng, theo địa chỉ IP',
+  builtinsTitle: 'Danh tính có sẵn', builtinsHint: 'Mật khẩu quản trị và mã dùng chung cũ: được đặt làm secret của máy chủ, không cấp ở đây.',
+  mapUploader: 'Người tải lên', mapAllUploaders: 'Mọi người tải lên', mapUnknown: 'không rõ người tải lên',
+  mapPeriod: 'Khoảng thời gian', mapPeriod7: '7 ngày qua', mapPeriod30: '30 ngày qua', mapPeriodAll: 'Toàn bộ',
+  mapDevices: (p) => `${p.n} thiết bị`, mapTrips: (p) => `${p.n} chuyến đi`,
+  mapEmpty: 'Chưa có gì có vị trí. Thiết bị sẽ hiện ở đây khi kết nối tới máy chủ có ghi nhận nơi hoạt động, còn chuyến đi sẽ hiện khi điện thoại tải lên một chuyến kèm lộ trình.',
+  mapNoneShown: 'Người tải lên này không có gì trong khoảng thời gian này.',
+  tripSession: 'Phiên', tripStarted: 'Bắt đầu', tripDuration: 'Thời lượng', tripDistance: 'Quãng đường', tripPhotos: 'Ảnh', tripBy: 'Người tải lên',
   yourName: 'tên của bạn', language: 'Ngôn ngữ', close: 'Đóng',
   sessions: 'Phiên', allTasks: 'Tất cả việc', places: 'Địa điểm', tasks: 'Việc cần làm', back: 'Các phiên',
   loading: 'Đang tải các phiên đã lưu trong trình duyệt…',
@@ -249,6 +331,9 @@ const vi: Record<string, Msg> = {
   namePartly: 'tên đọc được một phần', gFound: 'có trên Google Maps', gNew: 'chưa có trên Google gần đó', gTodo: 'chưa kiểm tra Google',
   noPhotoKept: 'Không giữ ảnh nào cho địa điểm này.', noPhoto: 'không có ảnh', fullScreen: 'Toàn màn hình', newTab: 'Mở ảnh trong tab mới',
   prev: 'Trước (←)', next: 'Sau (→)', closeEsc: 'Đóng (Esc)',
+  prevPlace: 'Địa điểm trước', nextPlace: 'Địa điểm sau', prevTask: 'Việc trước', nextTask: 'Việc sau',
+  showMap: 'Bản đồ', hideMap: 'Ẩn bản đồ', marksT: 'Giá trị này lấy từ đâu (chạm để xem chi tiết)',
+  seenMore: 'Chi tiết', seenLess: 'Thu gọn',
   whatPhotosSay: 'Thông tin từ ảnh', notOnPhotos: 'không có trên ảnh', correct: 'Đúng', wrongLeaveOut: 'Sai: bỏ ra',
   'field.name': 'Tên', 'field.phone': 'Điện thoại', 'field.houseNumber': 'Số nhà', 'field.street': 'Đường / khu vực',
   'field.openingHours': 'Giờ mở cửa', 'field.website': 'Website', 'field.signText': 'Chữ trên biển', 'field.other': 'Chữ khác',
@@ -281,6 +366,22 @@ export function t(key: string, p: Record<string, any> = {}): string {
   const m = M[lang.value][key] ?? en[key]
   if (m == null) return key
   return typeof m === 'function' ? m(p) : m
+}
+
+/** "3 hours ago" / "3 giờ trước", in the interface language; '' for no date. */
+export function relTime(iso: string | null | undefined, now = Date.now()): string {
+  if (!iso) return ''
+  const ms = Date.parse(iso)
+  if (!Number.isFinite(ms)) return iso
+  const s = (ms - now) / 1000
+  const a = Math.abs(s)
+  const rtf = new Intl.RelativeTimeFormat(lang.value, { numeric: 'auto' })
+  if (a < 45) return rtf.format(0, 'second')
+  if (a < 3600) return rtf.format(Math.round(s / 60), 'minute')
+  if (a < 86400) return rtf.format(Math.round(s / 3600), 'hour')
+  if (a < 86400 * 45) return rtf.format(Math.round(s / 86400), 'day')
+  if (a < 86400 * 365) return rtf.format(Math.round(s / 86400 / 30), 'month')
+  return rtf.format(Math.round(s / 86400 / 365), 'year')
 }
 
 /** Task reasons are written by the processing step in English ("a; b"): translate the known parts. */

@@ -13,6 +13,8 @@ export const router = createRouter({
     { path: '/s/:ds/tasks', name: 'sessionTasks', component: Empty },
     { path: '/s/:ds/p/:place', name: 'place', component: Empty },
     { path: '/s/:ds/t/:task', name: 'task', component: Empty },
+    // the cloud server's admin page (tokens, uploads): by address only, not linked from the reviewer's settings
+    { path: '/admin', name: 'admin', component: Empty },
     { path: '/:rest(.*)*', redirect: '/' },
   ],
 })

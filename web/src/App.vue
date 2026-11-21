@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Left panel: the sessions (or all tasks across them); open a session to review its places and tasks. The map
 // is in the middle, the selected place or task on the right. The address (#/...) decides what is open.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MapView from './components/MapView.vue'
 import PlaceReview from './components/PlaceReview.vue'
@@ -9,6 +9,7 @@ import TaskDetail from './components/TaskDetail.vue'
 import TaskRow from './components/TaskRow.vue'
 import StageBar from './components/StageBar.vue'
 import Photo from './components/Photo.vue'
+import AdminPanel from './components/AdminPanel.vue'
 import { state, load, add, remove, clearAll, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, setReviewer, stageOf, STAGES } from './store'
 import { to } from './router'
 import { t, lang, setLang, LANGS, type Lang } from './i18n'
@@ -19,6 +20,7 @@ import { geojson, csv, osm, tasksGeojson, download, type Published, type Removed
 import { buildProject, projectName } from './project'
 import { missingStreet, pendingSuggestions } from './fields'
 import { loadCloud, saveCloud, DEFAULT_CLOUD_URL, fetchIndex, downloadItem, processedItems, importState, humanSize, endpoint, type CloudItem } from './cloud'
+import { swipeStep, neighbour, blocksSwipe, type Step } from './swipe'
 import type { Dataset, Place } from './types'
 
 type View = 'sessions' | 'allTasks' | 'places' | 'tasks'
@@ -203,6 +205,61 @@ function nextPlace() {
 }
 function movePin(lat: number, lon: number) { reviewRef.value?.setPin(lat, lon) }
 
+// phone (<= 700 px, the PHONE query in style.css): the open place or task is a full-screen panel with back,
+// previous / next and a horizontal swipe; "Map" shows the map above it (to check or drag the pin)
+const PHONE = '(max-width: 700px)'
+const phoneMq = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(PHONE) : null
+const phone = ref(!!phoneMq?.matches)
+const onPhoneMq = (e: MediaQueryListEvent) => (phone.value = e.matches)
+onMounted(() => phoneMq?.addEventListener?.('change', onPhoneMq))
+onBeforeUnmount(() => phoneMq?.removeEventListener?.('change', onPhoneMq))
+const detailEl = ref<HTMLElement>()
+const mapRef = ref<InstanceType<typeof MapView>>()
+const mapPeek = ref(false)
+/** The places the panel steps through: the list as filtered, or every place when the open one is filtered out. */
+const placeIds = computed(() => {
+  const d = openDataset.value
+  if (!d) return []
+  const listed = places.value.map((x) => x.p.id)
+  return state.place && listed.includes(state.place) ? listed : d.places.map((p) => p.id)
+})
+const taskIds = computed(() => (openDataset.value ? openDataset.value.tasks.map((_t, i) => i) : []))
+const stepList = computed<(string | number)[]>(() => (openPlace.value ? placeIds.value : taskIds.value))
+const stepAt = computed<string | number | null>(() => (openPlace.value ? state.place : state.task))
+const stepPos = computed(() => (stepAt.value == null ? -1 : stepList.value.indexOf(stepAt.value)))
+const canStep = (s: Step) => stepAt.value != null && neighbour(stepList.value, stepAt.value, s) != null
+/** Previous / next in the panel: replaces the address, so the phone's back button still goes to the list. */
+function stepOpen(s: Step) {
+  const d = openDataset.value
+  if (!d || stepAt.value == null) return
+  const n = neighbour(stepList.value, stepAt.value, s)
+  if (n == null) return
+  router.replace(openPlace.value ? to.place(d.id, n as string) : to.task(d.id, n as number))
+}
+function closeDetail() {
+  const d = openDataset.value
+  if (d) router.push(openPlace.value ? to.session(d.id) : to.sessionTasks(d.id))
+}
+let touch: { x: number; y: number; t: number } | null = null
+function touchStart(e: TouchEvent) {
+  touch = null
+  if (!phone.value || e.touches.length !== 1 || !detailEl.value) return
+  if (blocksSwipe(e.target as Element, detailEl.value, (el) => getComputedStyle(el as Element).overflowX)) return
+  touch = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }
+}
+function touchEnd(e: TouchEvent) {
+  const s0 = touch
+  touch = null
+  if (!s0 || e.touches.length) return
+  const p = e.changedTouches[0]
+  const s = p && swipeStep(p.clientX - s0.x, p.clientY - s0.y, Date.now() - s0.t)
+  if (s) stepOpen(s)
+}
+// a new item starts at its top; leaving the panel hides the map again
+watch(() => [state.place, state.task], () => detailEl.value?.scrollTo?.({ top: 0 }))
+watch(() => !!(openPlace.value || openTask.value), (open) => { if (!open) mapPeek.value = false })
+watch(mapPeek, async (v) => { if (v) { await nextTick(); mapRef.value?.focusOpen() } })
+
 // tasks across sessions (shown on the map), grouped by session
 const taskGroups = computed(() => state.datasets.filter((d) => state.shown.has(d.id) && d.tasks.length)
   .map((d) => ({ d, items: d.tasks.map((t, i) => ({ t, i })) })))
@@ -272,7 +329,9 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
 </script>
 
 <template>
-  <div class="app" @dragover.prevent="dragging = true" @dragleave.self="dragging = false" @drop.prevent="onDrop">
+  <!-- #/admin: the cloud server's admin page, on its own (reached by address only) -->
+  <AdminPanel v-if="route.name === 'admin'" :url="cloud.url" />
+  <div v-else :class="['app', { sess: !!state.open, peek: mapPeek && !!(openPlace || openTask) }]" @dragover.prevent="dragging = true" @dragleave.self="dragging = false" @drop.prevent="onDrop">
     <aside class="side">
       <header class="sidehead">
         <div class="brand"><span class="logo">◉</span> {{ t('appName') }}</div>
@@ -338,7 +397,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
               <button class="secondary" @click="clearSessionFilters">{{ t('clearFilters') }}</button>
             </div>
             <article v-for="d in sessions" :key="d.id" class="ses">
-              <input type="checkbox" :checked="state.shown.has(d.id)" :title="t('showOnMap')" @change="toggleShown(d.id)" />
+              <input type="checkbox" :checked="state.shown.has(d.id)" :title="t('showOnMap')" :aria-label="t('showOnMap')" @change="toggleShown(d.id)" />
               <div class="body" @click="router.push(to.session(d.id))">
                 <b>{{ d.session.name || d.session.id }}</b>
                 <div class="muted">{{ (d.session.startedAt || '').slice(0, 10) || t('noDate') }} · {{ kindLabel(d) }}</div>
@@ -349,7 +408,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
                 </div>
                 <StageBar :ds="d" />
               </div>
-              <button class="ghost del" :title="t('removeSession')" @click="del(d)">🗑</button>
+              <button class="ghost del" :title="t('removeSession')" :aria-label="t('removeSession')" @click="del(d)">🗑</button>
             </article>
           </template>
         </section>
@@ -395,7 +454,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
               <input type="checkbox" :value="i.id" v-model="cloudPick" />
               <span class="body">
                 <b>{{ i.name || i.sessionId || i.filename }}</b>
-                <span class="muted small">{{ (i.createdAt || '').slice(0, 16).replace('T', ' ') }} · {{ humanSize(i.size) }}{{ i.kind ? ' · ' + (i.kind === 'poi' ? t('poi') : t('sweep')) : '' }}</span>
+                <span class="muted small">{{ (i.createdAt || '').slice(0, 16).replace('T', ' ') }} · {{ humanSize(i.size) }}{{ i.kind ? ' · ' + (i.kind === 'poi' ? t('poi') : t('sweep')) : '' }}{{ i.by ? ' · ' + t('cloudBy', { name: i.by.name }) : '' }}</span>
               </span>
               <span v-if="importState(i, state.datasets) === 'imported'" class="chip ok">{{ t('cloudImported') }}</span>
               <span v-else-if="importState(i, state.datasets) === 'updated'" class="chip todo">{{ t('cloudUpdated') }}</span>
@@ -485,18 +544,25 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
     </aside>
 
     <main class="mapwrap">
-      <MapView @select="selectPlace" @move-pin="movePin" />
+      <MapView ref="mapRef" @select="selectPlace" @move-pin="movePin" />
       <div v-if="!state.loading && (!state.datasets.length || !shownCount)" class="mapnote">
         <template v-if="!state.datasets.length"><b>{{ t('mapEmptyTitle') }}</b><br />{{ t('mapEmptyText') }}</template>
         <template v-else><b>{{ t('mapHiddenTitle') }}</b><br />{{ t('mapHiddenText') }}</template>
       </div>
     </main>
 
-    <aside v-if="openPlace && openDataset" class="detail">
-      <PlaceReview ref="reviewRef" :ds="openDataset" :place="openPlace" @close="router.push(to.session(openDataset.id))" @next="nextPlace" />
-    </aside>
-    <aside v-else-if="openTask && openDataset && state.task != null" class="detail">
-      <TaskDetail :ds="openDataset" :task="openTask" :index="state.task" @close="router.push(to.sessionTasks(openDataset.id))" @open-place="(id: string) => selectPlace(openDataset!.id, id)" />
+    <aside v-if="openDataset && (openPlace || (openTask && state.task != null))" ref="detailEl" :class="['detail', { peek: mapPeek }]"
+      @touchstart.passive="touchStart" @touchend="touchEnd" @touchcancel="touch = null">
+      <!-- phone only (style.css): back, where we are, the map, previous / next -->
+      <nav class="dnav">
+        <button class="ghost back" @click="closeDetail">‹ {{ openPlace ? t('places') : t('tasks') }}</button>
+        <span class="dpos muted small">{{ stepPos + 1 }} / {{ stepList.length }}</span>
+        <button :class="['secondary', 'small', { on: mapPeek }]" :aria-pressed="mapPeek" @click="mapPeek = !mapPeek">{{ t(mapPeek ? 'hideMap' : 'showMap') }}</button>
+        <button class="secondary dstep" :disabled="!canStep(-1)" :title="t(openPlace ? 'prevPlace' : 'prevTask')" :aria-label="t(openPlace ? 'prevPlace' : 'prevTask')" @click="stepOpen(-1)">‹</button>
+        <button class="secondary dstep" :disabled="!canStep(1)" :title="t(openPlace ? 'nextPlace' : 'nextTask')" :aria-label="t(openPlace ? 'nextPlace' : 'nextTask')" @click="stepOpen(1)">›</button>
+      </nav>
+      <PlaceReview v-if="openPlace" ref="reviewRef" :ds="openDataset" :place="openPlace" @close="router.push(to.session(openDataset.id))" @next="nextPlace" />
+      <TaskDetail v-else-if="openTask && state.task != null" :ds="openDataset" :task="openTask" :index="state.task" @close="router.push(to.sessionTasks(openDataset.id))" @open-place="(id: string) => selectPlace(openDataset!.id, id)" />
     </aside>
 
     <div v-if="dragging" class="drop">{{ t('dropHere') }}</div>

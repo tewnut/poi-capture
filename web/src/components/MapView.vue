@@ -130,7 +130,14 @@ onMounted(() => {
   sel = L.layerGroup().addTo(map)
   drawAll()
 })
-onBeforeUnmount(() => map?.remove())
+// the map's box changes size without a window resize (the phone layout, the map shown above an open place)
+let ro: ResizeObserver | null = null
+onMounted(() => {
+  if (typeof ResizeObserver === 'undefined') return
+  ro = new ResizeObserver(() => map?.invalidateSize())
+  ro.observe(el.value!)
+})
+onBeforeUnmount(() => { ro?.disconnect(); map?.remove() })
 
 watch(() => [state.datasets.length, state.shown.size, state.open, state.reviews, lang.value], drawAll, { deep: true })
 watch(() => state.place, () => { drawAll(); focusPlace() })
@@ -151,7 +158,15 @@ function fitAll() {
   }
   if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] })
 }
-defineExpose({ fitOpen })
+/** The open place, or else the open task, or else the open session. */
+function focusOpen() {
+  map.invalidateSize()
+  const tk = openTask.value
+  if (openPlace.value) focusPlace()
+  else if (tk) map.setView([tk.lat, tk.lon], Math.max(map.getZoom(), 19))
+  else fitOpen()
+}
+defineExpose({ fitOpen, focusOpen })
 </script>
 
 <template>
@@ -165,7 +180,7 @@ defineExpose({ fitOpen })
 .pin.low { border-style: dashed; border-color: #222; }
 .pin.removal { border-color: #d6336c; border-width: 3px; }
 .pin.sel { transform: scale(1.3); box-shadow: 0 0 0 4px rgba(31,122,82,.35); }
-.rm { width: 18px; height: 18px; border-radius: 4px; background: #d6336c; color: #fff; font: 700 11px/18px system-ui; text-align: center; }
+.leaflet-marker-icon > .rm { width: 18px; height: 18px; border-radius: 4px; background: #d6336c; color: #fff; font: 700 11px/18px system-ui; text-align: center; }
 .final-pin { width: 30px; height: 40px; background: no-repeat center/contain
   url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 40'%3E%3Cpath d='M15 39C15 39 2 22 2 14a13 13 0 0 1 26 0c0 8-13 25-13 25z' fill='%23f59f00' stroke='white' stroke-width='2'/%3E%3Ccircle cx='15' cy='14' r='5' fill='white'/%3E%3C/svg%3E"); }
 </style>

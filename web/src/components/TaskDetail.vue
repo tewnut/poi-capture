@@ -23,7 +23,7 @@ const osmUrl = computed(() => `https://www.openstreetmap.org/?mlat=${props.task.
         <h2>{{ task.name }}</h2>
         <div class="muted">{{ ds.session.name }} · {{ task.lat.toFixed(6) }}, {{ task.lon.toFixed(6) }}</div>
       </div>
-      <button class="ghost" :title="t('close')" @click="emit('close')">✕</button>
+      <button class="ghost closex" :title="t('close')" :aria-label="t('close')" @click="emit('close')">✕</button>
     </header>
     <Photo v-if="photo" class="big" :ds="ds.id" :path="photo" :alt="task.name" />
     <p><b>{{ t('why') }}:</b> {{ tWhy(task.why) }}</p>
@@ -48,4 +48,10 @@ h2 { margin: 6px 0 0; font-size: 19px; }
 .big { width: 100%; max-height: 300px; object-fit: contain; background: #111; border-radius: 10px; }
 p { margin: 0; }
 .acts, .links { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+@media (pointer: coarse) { .links a { display: inline-flex; align-items: center; min-height: 44px; } }
+@media (max-width: 700px) {
+  .closex { display: none; }
+  .big { max-height: 50vh; }
+  .acts button { flex: 1 1 auto; }
+}
 </style>

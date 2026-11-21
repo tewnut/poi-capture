@@ -119,3 +119,162 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .cloud .citem { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .cloud .citem .body { display: grid; flex: 1; min-width: 0; }
 .cloud .citem .body b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* admin (AdminPanel.vue): tokens and uploads, in a wide dialog */
+.adminpage { min-height: 100vh; display: grid; justify-items: center; align-content: start; padding: 24px 12px; background: #f4f5f7; }
+.dialog.admin { width: min(980px, 100%); display: grid; gap: 10px; }
+.dialog.admin h2 { margin: 0; }
+.dialog.admin p { margin: 0; }
+.dialog.admin .seg { margin: 0; }
+.adminauth { display: grid; gap: 8px; max-width: 460px; }
+.adminauth label { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 8px; font-size: 13px; }
+.adminauth button { justify-self: start; }
+.dialog.admin input, .dialog.admin select { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 13px; background: #fff; }
+.adminpane { display: grid; gap: 8px; }
+.issue { display: grid; gap: 6px; padding: 10px; background: var(--canvas); border-radius: 10px; }
+.issuerow { display: flex; gap: 6px; flex-wrap: wrap; }
+.issuerow input { flex: 1; min-width: 180px; }
+.issued { display: grid; gap: 8px; padding: 12px; border: 2px solid var(--accent); border-radius: 12px; background: #f1faf5; }
+.issued .warn { color: #8a5a00; font-weight: 600; }
+.issued .secret { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.issued .secret code { font-size: 13px; padding: 4px 8px; background: #fff; border: 1px solid var(--line); word-break: break-all; user-select: all; }
+.issued .qrrow { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.issued .qrrow .small { display: grid; gap: 6px; flex: 1; min-width: 180px; justify-items: start; }
+.issued .qr { width: 200px; height: 200px; background: #fff; border-radius: 8px; flex: none; }
+.issued .qr svg { width: 100%; height: 100%; display: block; }
+.issued > button { justify-self: start; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+.atable { width: 100%; border-collapse: collapse; font-size: 13px; }
+.atable th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; background: var(--canvas); padding: 6px 8px; white-space: nowrap; }
+.atable td { padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+.atable .num { text-align: right; }
+.atable .act { text-align: right; white-space: nowrap; }
+.atable .confirm { display: inline-flex; gap: 6px; align-items: center; }
+.atable tr.revoked td { color: var(--muted); }
+.atable tr.revoked b { text-decoration: line-through; }
+.atable .chip { white-space: nowrap; }
+.settings .cloudset .row button { white-space: nowrap; flex: none; }
+.settings .cloudset .row { justify-content: flex-start; }
+/* admin: last seen and the map (AdminPanel.vue, AdminMap.vue) */
+.atable td.seen { min-width: 160px; }
+.atable td.seen .chip { margin-left: 4px; cursor: help; }
+.builtins { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.builtins li { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.adminmap { display: grid; gap: 8px; }
+.mapfilters { justify-content: flex-start; flex-wrap: wrap; }
+.mapfilters label { display: inline-flex; gap: 6px; align-items: center; }
+.mapfilters > :last-child { margin-left: auto; }
+.amap { height: min(62vh, 560px); min-height: 320px; border: 1px solid var(--line); border-radius: 10px; }
+.maplegend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.maplegend span { display: inline-flex; align-items: center; gap: 6px; }
+.maplegend i { width: 18px; height: 4px; border-radius: 2px; display: inline-block; }
+.devlabel { font: 600 12px/1.3 system-ui, sans-serif; padding: 2px 6px; }
+.mpop { font-size: 12px; line-height: 1.45; }
+.mpop + .mpop { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.mpop .k { color: var(--muted); }
+.mpop b { font-size: 13px; }
+
+/* ---- touch and phone ------------------------------------------------------------------------------------------
+   Two queries: (pointer: coarse) = a finger, so 44 px targets and tap instead of hover, at any width;
+   (max-width: 700px) = a phone (360-430 px portrait, and most phones in landscape), where the open place or task
+   becomes a full-screen panel. 701-900 px (small tablets, narrow windows) keeps the stacked layout above. */
+.dnav { display: none; }
+.atable .more, .builtins .more { display: none; }
+.seenfull { white-space: pre-line; margin-top: 4px; padding: 6px 8px; background: var(--canvas); border-radius: 8px; color: var(--ink);
+  overflow-wrap: anywhere; font-size: 12px; }
+
+@media (hover: none) {
+  .atable .more, .builtins .more { display: inline-flex; color: var(--accent); }
+}
+@media (hover: hover) { .atable .seenfull, .builtins .seenfull { display: none; } }   /* the tooltips say it */
+
+@media (pointer: coarse) {
+  .primary, .secondary, .danger, .ghost, button.small { min-height: 44px; }
+  .ghost { min-width: 44px; }
+  .seg button { min-height: 44px; }
+  .ses input[type=checkbox], .cloud .citem input[type=checkbox] { width: 22px; height: 22px; margin: 2px; flex: none; }
+  .cloud .citem { min-height: 48px; }
+  .prow { min-height: 64px; align-items: center; }
+  .ghead { min-height: 44px; align-items: center; }
+  .filters select, .filters input, .settings input, .settings select, .dialog.admin input, .dialog.admin select { min-height: 44px; font-size: 16px; }
+  .mapfilters select { min-height: 44px; }
+  .dialog.admin > .row a { display: inline-flex; align-items: center; min-height: 44px; }
+  .leaflet-touch .leaflet-bar a { width: 40px; height: 40px; line-height: 40px; }
+}
+
+@media (max-width: 700px) {
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
+  .mapwrap { grid-row: 1; height: 42vh; height: 42dvh; }
+  .app.sess .mapwrap { height: 28vh; height: 28dvh; min-height: 170px; }   /* an open session: room for its list */
+  .side { grid-row: 2; min-width: 0; }
+  .pane { overflow: visible; padding: 10px 12px; }
+  .sidehead { padding-top: calc(10px + env(safe-area-inset-top)); }
+  .importbar { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .importbar button { flex: 1 1 auto; }
+  .settings label { grid-template-columns: 80px minmax(0, 1fr); }
+  .settings .wipe { flex-wrap: wrap; }
+  .sesshead h1 { overflow-wrap: anywhere; }
+  .sesshead .row { flex-wrap: wrap; }
+  .filters select, .filters input { min-width: 0; flex: 1 1 140px; }
+  .mapnote { max-width: calc(100vw - 32px); }
+
+  /* the open place or task: full screen over map and list, scrolling on its own */
+  .detail { position: fixed; inset: 0; z-index: 1500; width: auto; border: 0; overflow-y: auto; overflow-x: hidden;
+    overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+    padding: 0 calc(14px + env(safe-area-inset-right)) 0 calc(14px + env(safe-area-inset-left)); }
+  .dnav { display: flex; align-items: center; gap: 6px; position: sticky; top: 0; z-index: 20; background: var(--card);
+    margin: 0 calc(-14px - env(safe-area-inset-right)) 10px calc(-14px - env(safe-area-inset-left));
+    padding: calc(6px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) 6px calc(10px + env(safe-area-inset-left));
+    border-bottom: 1px solid var(--line); }
+  .dnav .back { margin-right: auto; padding-left: 4px; min-height: 44px; }
+  .dnav .dpos { white-space: nowrap; }
+  .dnav button { min-height: 44px; }
+  .dnav .dstep { min-width: 44px; font-size: 22px; line-height: 1; padding: 0 12px; }
+  /* "Map": the map on the top half, the panel below it */
+  .app.peek .mapwrap { position: fixed; top: 0; left: 0; right: 0; height: 45vh; height: 45dvh; z-index: 1500; min-height: 0; }
+  .detail.peek { top: 45vh; top: 45dvh; box-shadow: 0 -4px 14px rgba(0,0,0,.18); }
+  .detail.peek .dnav { padding-top: 6px; }
+
+  /* dialogs: a full-width sheet from the bottom */
+  .modal { place-items: end stretch; }
+  .modal .dialog { width: 100%; max-height: 92vh; max-height: 92dvh; overflow-y: auto; border-radius: 16px 16px 0 0;
+    padding: 18px calc(16px + env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
+  .modal .dialog h2 { font-size: 19px; overflow-wrap: anywhere; }
+  .pubs button { flex: 1 1 calc(50% - 8px); }
+  .modal .dialog > .ghost { width: 100%; }
+
+  /* admin: the page edge to edge, tables become cards */
+  .adminpage { padding: 0; background: var(--card); }
+  .dialog.admin { border-radius: 0; padding: calc(14px + env(safe-area-inset-top)) 12px calc(16px + env(safe-area-inset-bottom)); min-width: 0; }
+  .dialog.admin > .row { flex-wrap: wrap; }
+  .dialog.admin .seg button { padding: 6px 2px; }
+  .adminauth label { grid-template-columns: 1fr; gap: 4px; }
+  .adminauth button { justify-self: stretch; }
+  .issuerow { flex-direction: column; }
+  .issuerow input { min-width: 0; }
+  .issued .qr { width: min(240px, 100%); height: auto; aspect-ratio: 1; }
+  .issued .qrrow .small { min-width: 0; }
+  .tablewrap { overflow: visible; border: 0; }
+  .atable.cards, .atable.cards tbody { display: block; }
+  .atable.cards thead { display: none; }
+  .atable.cards tr { display: block; padding: 8px 12px 10px; border: 1px solid var(--line); border-radius: 12px; background: #fff; margin-bottom: 8px; }
+  .atable.cards td { display: block; position: relative; border: 0; padding: 3px 0 3px 104px; min-height: 24px; overflow-wrap: anywhere; }
+  .atable.cards td::before { content: attr(data-label); position: absolute; left: 0; top: 4px; width: 96px; color: var(--muted); font-size: 12px; }
+  .atable.cards td.name, .atable.cards td.act { padding-left: 0; }
+  .atable.cards td.name::before, .atable.cards td.act::before { content: none; }
+  .atable.cards td.name b { font-size: 15px; }
+  .atable.cards td.act { text-align: left; white-space: normal; padding-top: 8px; }
+  .atable.cards td.act:empty { display: none; }
+  .atable.cards td.num { text-align: left; }
+  .atable.cards td.seen { min-width: 0; }
+  .atable.cards .act .confirm { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .atable.cards .act .confirm > .small { flex-basis: 100%; white-space: normal; }
+  .atable.cards .act button { flex: 1 1 auto; }
+  .atable.cards .act > button { width: 100%; }
+  .builtins li { overflow-wrap: anywhere; }
+  .amap { height: 60vh; height: 60dvh; min-height: 300px; }
+  .mapfilters > :last-child { margin-left: 0; }
+  .mapfilters label { flex: 1 1 140px; min-width: 0; max-width: 100%; }
+  .dialog.admin > *, .adminpane > *, .adminmap > * { min-width: 0; }
+  .mapfilters select { flex: 1; min-width: 0; }
+}
