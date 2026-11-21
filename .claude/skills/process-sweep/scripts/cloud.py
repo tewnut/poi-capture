@@ -3,6 +3,7 @@
     python cloud.py list [--type raw-session|processed-result|all]
     python cloud.py pull <id> <dir> [--extract]       download one upload into <dir> (and unzip it next to it)
     python cloud.py push <zip-or-folder> [--type processed-result] [--session-id ID] [--name NAME]
+    python cloud.py delete <id> [<id> ...]           remove uploads, finished ones too (needs the admin token)
 
 The server is the tus endpoint the phone uploads to, e.g. https://host/files/ : --url, or the POI_CLOUD_URL environment
 variable. The token (optional, sent as "Authorization: Bearer ...") comes only from POI_CLOUD_TOKEN or --token-file,
@@ -84,7 +85,7 @@ class Cloud:
 
     def _req(self, method: str, url: str, headers: dict | None = None, data: bytes | None = None):
         # own User-Agent: Cloudflare's edge (the Worker on workers.dev) refuses Python's default one (error 1010)
-        h = {'Tus-Resumable': TUS, 'User-Agent': 'poi-capture-cloud.py/1', **(headers or {})}
+        h = {'Tus-Resumable': TUS, 'User-Agent': 'poi-capture-cloud.py/1', 'X-Client': 'cloud.py/1', **(headers or {})}
         if self._token:
             h['Authorization'] = 'Bearer ' + self._token
         req = urllib.request.Request(url, data=data, method=method, headers=h)
@@ -93,6 +94,20 @@ class Cloud:
         except urllib.error.HTTPError as e:
             if e.code == 401:
                 raise SystemExit(f'{method} {url}: 401 unauthorized (set POI_CLOUD_TOKEN or --token-file)')
+            if e.code == 403:
+                raise SystemExit(f'{method} {url}: 403 forbidden (not allowed for this token\'s role)')
+            raise
+
+    def delete(self, upload_id: str) -> bool:
+        """DELETE an upload; True when removed, False when not on the server. Finished uploads: admin token only."""
+        try:
+            with self._req('DELETE', self.base + urllib.parse.quote(upload_id)):
+                return True
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
+            if e.code == 400:
+                raise SystemExit(f'{upload_id}: finished uploads can only be deleted with the admin token')
             raise
 
     def index(self, type_: str | None = None) -> list[dict]:
@@ -225,6 +240,8 @@ def main(argv=None) -> int:
     p.add_argument('--type', default='processed-result')
     p.add_argument('--session-id')
     p.add_argument('--name')
+    p = sub.add_parser('delete')
+    p.add_argument('ids', nargs='+')
     a = ap.parse_args(argv)
     for k in ('dir', 'path', 'token_file'):   # Git Bash on Windows may pass "/c/..." unconverted
         if getattr(a, k, None):
@@ -243,7 +260,8 @@ def main(argv=None) -> int:
             m = u.get('metadata') or {}
             state = 'complete' if u.get('complete') else f"partial {human(u.get('offset'))}"
             print(f"{u['id']}  {m.get('type', '?'):16} {(u.get('createdAt') or '')[:16]:16}  {human(u.get('size')):>9}  "
-                  f"{state:9}  {m.get('sessionId') or '-'}  {m.get('name') or m.get('filename') or ''}")
+                  f"{state:9}  {m.get('sessionId') or '-'}  {m.get('name') or m.get('filename') or ''}"
+                  + (f"  [by {u['by']['name']}]" if u.get('by') else ''))
         if not ups:
             print('nothing stored' + ('' if a.type == 'all' else f' of type {a.type}'))
     elif a.cmd == 'pull':
@@ -268,6 +286,9 @@ def main(argv=None) -> int:
                         raise SystemExit(f'unsafe path in zip: {m}')
                 z.extractall(dest)
             print(dest)
+    elif a.cmd == 'delete':
+        for i in a.ids:
+            print(f"{i}  {'deleted' if cloud.delete(i) else 'not on the server'}")
     elif a.cmd == 'push':
         url = push(cloud, a.path, a.type, a.session_id, a.name)
         print(url)

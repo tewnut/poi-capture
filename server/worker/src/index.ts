@@ -4,6 +4,10 @@
 //   OPTIONS/POST/HEAD/PATCH/DELETE <BASE>/...   tus core + creation + creation-with-upload + termination + expiration
 //   GET <BASE>/<id>                             download a finished upload
 //   GET <BASE>/index.json[?type=...]            {schema: "poi-cloud-index/1", uploads: [...]}, newest first
+//   GET /me, GET|POST /admin/tokens, DELETE /admin/tokens/<id>   who am I; personal tokens (admin)
+//
+// Tokens and roles (../README.md, "Tokens and roles"): ADMIN_TOKEN = admin, TOKEN = the old shared token (reviewer),
+// personal tokens issued by an admin (uploader | reviewer), kept as SHA-256 hashes in the Durable Object.
 //
 // Chunks: R2 multipart parts must all be the same size (>= 5 MiB) except the last, while tus PATCHes come in any size
 // (the phone sends 2 MB, cloud.py 8 MiB). Each PATCH is streamed into PART_SIZE buffers; every full buffer becomes a
@@ -19,6 +23,7 @@ export interface Env {
   BUCKET: R2Bucket
   UPLOADS: DurableObjectNamespace<Uploads>
   TOKEN?: string
+  ADMIN_TOKEN?: string
   CORS_ORIGINS?: string
   MAX_SIZE?: string
   BASE_PATH?: string
@@ -27,10 +32,12 @@ export interface Env {
 
 const LEASE_MS = 5 * 60 * 1000                  // a PATCH that has not finished in 5 min loses its lease
 const MAX_METADATA = 8 * 1024                   // Upload-Metadata header, bytes
+const TOUCH_MS = 10 * 60 * 1000                 // a token's lastUsedAt is written at most this often
+const SEEN_MS = 60 * 1000                       // the last-seen record: at most once a minute unless client/city change
 
 const TUS_HEADERS = ['Authorization', 'Content-Type', 'Location', 'Tus-Extension', 'Tus-Max-Size', 'Tus-Resumable',
   'Tus-Version', 'Upload-Concat', 'Upload-Defer-Length', 'Upload-Expires', 'Upload-Length', 'Upload-Metadata',
-  'Upload-Offset', 'X-HTTP-Method-Override', 'X-Requested-With']
+  'Upload-Offset', 'X-Client', 'X-HTTP-Method-Override', 'X-Requested-With']
 
 // ------------------------------------------------------------------------------------------------ state (DO)
 
@@ -47,7 +54,17 @@ export type UploadState = {
   carryKey: string | null   // R2 key of the bytes after the last full part
   carryLen: number
   complete: boolean
+  by?: By | null             // the token that created it
 }
+export type By = { id: string; name: string }
+export type Role = 'uploader' | 'reviewer' | 'admin'
+export type Principal = { id: string; name: string; role: Role }
+export type Token = { id: string; name: string; role: Role; prefix: string; createdAt: string; lastUsedAt: string | null; revokedAt: string | null; uploads: number; seen: Seen | null }
+/** The latest request of a token (README "Last seen"): Cloudflare's approximate IP location, no IP, no history. */
+export type Seen = { at: string; country: string | null; region: string | null; city: string | null; network: string | null;
+  lat: number | null; lon: number | null; client: string | null; userAgent: string | null; prevClient: string | null; prevAt: string | null }
+export type SeenInput = Omit<Seen, 'at' | 'prevClient' | 'prevAt'>
+export const ROLE_RANK: Record<Role, number> = { uploader: 1, reviewer: 2, admin: 3 }
 export type Begin = { ok: true; state: UploadState; lease: string } | { ok: false; status: 404 | 409 | 423 | 400; state?: UploadState }
 export type Commit = Pick<UploadState, 'offset' | 'mpId' | 'parts' | 'carryKey' | 'carryLen' | 'complete'>
 
@@ -59,6 +76,19 @@ function fromRow(r: Row): UploadState {
     createdAt: String(r.created_at), updatedAt: Number(r.updated_at), mpId: (r.mp_id as string | null) ?? null,
     parts: JSON.parse(String(r.parts)), carryKey: (r.carry_key as string | null) ?? null, carryLen: Number(r.carry_len),
     complete: Number(r.complete) === 1,
+    by: r.by_id ? { id: String(r.by_id), name: String(r.by_name ?? '') } : null,
+  }
+}
+
+const iso = (ms: unknown) => (ms ? new Date(Number(ms)).toISOString() : null)
+const strOrNull = (v: unknown) => (v == null ? null : String(v))
+const numOrNull = (v: unknown) => (v == null ? null : Number(v))
+
+function seenRow(r: Row): Seen {
+  return {
+    at: iso(r.at)!, country: strOrNull(r.country), region: strOrNull(r.region), city: strOrNull(r.city),
+    network: strOrNull(r.network), lat: numOrNull(r.lat), lon: numOrNull(r.lon), client: strOrNull(r.client),
+    userAgent: strOrNull(r.user_agent), prevClient: strOrNull(r.prev_client), prevAt: iso(r.prev_at),
   }
 }
 
@@ -74,6 +104,70 @@ export class Uploads extends DurableObject<Env> {
       created_at TEXT NOT NULL, updated_at INTEGER NOT NULL, mp_id TEXT, parts TEXT NOT NULL DEFAULT '[]',
       carry_key TEXT, carry_len INTEGER NOT NULL DEFAULT 0, complete INTEGER NOT NULL DEFAULT 0,
       lease TEXT, lease_until INTEGER NOT NULL DEFAULT 0)`)
+    const cols = this.sql.exec('PRAGMA table_info(uploads)').toArray().map((c) => String(c.name))
+    if (!cols.includes('by_id')) this.sql.exec('ALTER TABLE uploads ADD COLUMN by_id TEXT')
+    if (!cols.includes('by_name')) this.sql.exec('ALTER TABLE uploads ADD COLUMN by_name TEXT')
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS tokens (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, prefix TEXT NOT NULL,
+      created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER)`)
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS seen (
+      id TEXT PRIMARY KEY, at INTEGER NOT NULL, country TEXT, region TEXT, city TEXT, network TEXT, lat REAL, lon REAL,
+      client TEXT, user_agent TEXT, prev_client TEXT, prev_at INTEGER)`)
+  }
+
+  // ---- last seen (one row per token id, overwritten)
+
+  touchSeen(id: string, v: SeenInput): void {
+    const r = this.sql.exec('SELECT * FROM seen WHERE id = ?', id).toArray()[0]
+    const now = Date.now()
+    if (r && now - Number(r.at) < SEEN_MS && (r.client ?? null) === v.client && (r.city ?? null) === v.city) return
+    let prevClient = (r?.prev_client as string | null) ?? null
+    let prevAt = r?.prev_at != null ? Number(r.prev_at) : null
+    if (r && r.client && r.client !== v.client) { prevClient = String(r.client); prevAt = Number(r.at) }
+    this.sql.exec(`INSERT OR REPLACE INTO seen (id, at, country, region, city, network, lat, lon, client, user_agent, prev_client, prev_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, id, now, v.country, v.region, v.city, v.network, v.lat, v.lon, v.client,
+      v.userAgent, prevClient, prevAt)
+  }
+
+  seenOf(id: string): Seen | null {
+    const r = this.sql.exec('SELECT * FROM seen WHERE id = ?', id).toArray()[0]
+    return r ? seenRow(r) : null
+  }
+
+  // ---- personal tokens
+
+  /** The active token with this SHA-256 hash; its lastUsedAt is refreshed at most every TOUCH_MS. */
+  findToken(hash: string): Principal | null {
+    const r = this.sql.exec('SELECT * FROM tokens WHERE hash = ? AND revoked_at IS NULL', hash).toArray()[0]
+    if (!r) return null
+    const now = Date.now()
+    if (!r.last_used_at || now - Number(r.last_used_at) > TOUCH_MS) this.sql.exec('UPDATE tokens SET last_used_at = ? WHERE id = ?', now, r.id)
+    return { id: String(r.id), name: String(r.name), role: String(r.role) as Role }
+  }
+
+  hasTokens(): boolean {
+    return this.sql.exec('SELECT 1 FROM tokens LIMIT 1').toArray().length > 0
+  }
+
+  issueToken(id: string, name: string, role: Role, hash: string, prefix: string): Token {
+    this.sql.exec('INSERT INTO tokens (id, name, role, hash, prefix, created_at) VALUES (?, ?, ?, ?, ?, ?)', id, name, role, hash, prefix, Date.now())
+    return this.listTokens().find((t) => t.id === id)!
+  }
+
+  listTokens(): Token[] {
+    return this.sql.exec(`SELECT t.*, (SELECT COUNT(*) FROM uploads u WHERE u.by_id = t.id) AS n FROM tokens t
+      ORDER BY created_at DESC`).toArray().map((r) => ({
+      id: String(r.id), name: String(r.name), role: String(r.role) as Role, prefix: String(r.prefix),
+      createdAt: iso(r.created_at)!, lastUsedAt: iso(r.last_used_at), revokedAt: iso(r.revoked_at), uploads: Number(r.n),
+      seen: this.seenOf(String(r.id)),
+    }))
+  }
+
+  /** false: no such token. Revoking twice keeps the first date. */
+  revokeToken(id: string): boolean {
+    if (!this.sql.exec('SELECT 1 FROM tokens WHERE id = ?', id).toArray().length) return false
+    this.sql.exec('UPDATE tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?', Date.now(), id)
+    return true
   }
 
   private row(id: string): Row | null {
@@ -81,9 +175,9 @@ export class Uploads extends DurableObject<Env> {
   }
 
   create(s: UploadState): void {
-    this.sql.exec(`INSERT INTO uploads (id, size, offset, metadata, created_at, updated_at, parts, complete)
-      VALUES (?, ?, ?, ?, ?, ?, '[]', ?)`, s.id, s.size, s.offset, JSON.stringify(s.metadata), s.createdAt,
-      s.updatedAt, s.complete ? 1 : 0)
+    this.sql.exec(`INSERT INTO uploads (id, size, offset, metadata, created_at, updated_at, parts, complete, by_id, by_name)
+      VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?)`, s.id, s.size, s.offset, JSON.stringify(s.metadata), s.createdAt,
+      s.updatedAt, s.complete ? 1 : 0, s.by?.id ?? null, s.by?.name ?? null)
   }
 
   get(id: string): UploadState | null {
@@ -119,11 +213,19 @@ export class Uploads extends DurableObject<Env> {
     this.sql.exec('UPDATE uploads SET lease = NULL, lease_until = 0 WHERE id = ? AND lease = ?', id, lease)
   }
 
-  /** Termination: forget an unfinished upload no PATCH is writing; the caller frees its R2 objects. */
-  terminate(id: string): { status: 204 | 404 | 400 | 423; state?: UploadState } {
+  /**
+   * Termination: forget an unfinished upload no PATCH is writing; the caller frees its R2 objects. [by]: only an
+   * upload this token created (403 otherwise); null: an admin, who may also remove finished uploads and leased ones.
+   */
+  terminate(id: string, by: string | null): { status: 204 | 404 | 400 | 403 | 423; state?: UploadState } {
     const r = this.row(id)
     if (!r) return { status: 404 }
     const s = fromRow(r)
+    if (by === null) {
+      this.sql.exec('DELETE FROM uploads WHERE id = ?', id)
+      return { status: 204, state: s }
+    }
+    if (s.by?.id !== by) return { status: 403 }
     if (s.complete) return { status: 400 }
     if (r.lease && Number(r.lease_until) > Date.now()) return { status: 423 }
     this.sql.exec('DELETE FROM uploads WHERE id = ?', id)
@@ -146,13 +248,83 @@ export class Uploads extends DurableObject<Env> {
 
 // ------------------------------------------------------------------------------------------------ helpers
 
-async function authorized(env: Env, req: Request): Promise<boolean> {
-  if (!env.TOKEN) return true
-  const given = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '')
-  const enc = new TextEncoder()
-  // digests first: equal lengths for timingSafeEqual, and no early exit on the length of the token
-  const [a, b] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(given)), crypto.subtle.digest('SHA-256', enc.encode(env.TOKEN))])
+const enc = new TextEncoder()
+
+async function sha256hex(t: string): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(t)))
+  return [...d].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Constant-time comparison (digests first: equal lengths, no early exit on the token's length). */
+async function same(given: string, secret: string): Promise<boolean> {
+  const [a, b] = await Promise.all([crypto.subtle.digest('SHA-256', enc.encode(given)), crypto.subtle.digest('SHA-256', enc.encode(secret))])
   return crypto.subtle.timingSafeEqual(a, b)
+}
+
+/** Who sent the request, or null (401). Open (admin) only while no secret is set and no token was issued. */
+async function principal(env: Env, req: Request): Promise<Principal | null> {
+  const given = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+  if (given) {
+    if (env.ADMIN_TOKEN && (await same(given, env.ADMIN_TOKEN))) return { id: 'admin', name: 'Admin', role: 'admin' }
+    if (env.TOKEN && (await same(given, env.TOKEN))) return { id: 'shared', name: 'Shared token', role: 'reviewer' }
+    if (given.startsWith('pct_')) {
+      const p = await stub(env).findToken(await sha256hex(given))
+      if (p) return p
+    }
+  }
+  if (!env.ADMIN_TOKEN && !env.TOKEN && !(await stub(env).hasTokens())) return { id: 'open', name: 'Open server', role: 'admin' }
+  return null
+}
+
+/** README "Last seen": Cloudflare's IP lookup (approximate) and the client's own name; never the IP address. */
+function seenInput(req: Request): SeenInput {
+  const cf = (req as Request & { cf?: Record<string, unknown> }).cf || {}
+  const s = (v: unknown, max = 80) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null)
+  const n = (v: unknown) => { const x = Number(v); return v != null && v !== '' && Number.isFinite(x) ? x : null }
+  return {
+    country: s(cf.country, 8), region: s(cf.region), city: s(cf.city), network: s(cf.asOrganization),
+    lat: n(cf.latitude), lon: n(cf.longitude),
+    client: s(req.headers.get('X-Client'), 120), userAgent: s(req.headers.get('User-Agent'), 200),
+  }
+}
+
+const can = (p: Principal, role: Role) => ROLE_RANK[p.role] >= ROLE_RANK[role]
+
+function json(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+}
+
+function newSecret(): string {
+  const b = crypto.getRandomValues(new Uint8Array(32))
+  return 'pct_' + btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+async function admin(env: Env, req: Request, rest: string): Promise<Response> {
+  const tokens = stub(env)
+  if (rest === 'tokens' && req.method === 'GET') {
+    const builtins = []
+    if (env.ADMIN_TOKEN) builtins.push({ id: 'admin', name: 'Admin', role: 'admin', seen: await tokens.seenOf('admin') })
+    if (env.TOKEN) builtins.push({ id: 'shared', name: 'Shared token', role: 'reviewer', seen: await tokens.seenOf('shared') })
+    return json(200, { schema: 'poi-cloud-tokens/1', tokens: await tokens.listTokens(), builtins })
+  }
+  if (rest === 'tokens' && req.method === 'POST') {
+    let body: { name?: unknown; role?: unknown }
+    try { body = await req.json() } catch { return text(400, 'JSON body required\n') }
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    if (!name || name.length > 80) return text(400, 'name: 1 to 80 characters\n')
+    if (body.role !== 'uploader' && body.role !== 'reviewer') return text(400, 'role: uploader or reviewer\n')
+    const secret = newSecret()
+    const token = await tokens.issueToken(crypto.randomUUID().replace(/-/g, '').slice(0, 16), name, body.role, await sha256hex(secret), secret.slice(0, 12))
+    console.log(`token issued: ${token.id} ${token.role}`)
+    return json(201, { token, secret })
+  }
+  const m = /^tokens\/([A-Za-z0-9_-]{1,64})$/.exec(rest)
+  if (m && req.method === 'DELETE') {
+    if (!(await tokens.revokeToken(m[1]))) return text(404, 'Not found\n')
+    console.log(`token revoked: ${m[1]}`)
+    return new Response(null, { status: 204 })
+  }
+  return text(404, 'Not found\n')
 }
 
 const dataKey = (id: string) => `files/${id}`
@@ -288,7 +460,7 @@ async function append(env: Env, ctx: ExecutionContext, id: string, offset: numbe
 
 // ------------------------------------------------------------------------------------------------ requests
 
-async function create(env: Env, ctx: ExecutionContext, req: Request, base: string): Promise<Response> {
+async function create(env: Env, ctx: ExecutionContext, req: Request, base: string, by: Principal): Promise<Response> {
   if (req.headers.get('Upload-Defer-Length') || req.headers.get('Upload-Concat')) return text(501, 'Not supported\n')
   const lenH = req.headers.get('Upload-Length')
   if (!lenH || !/^\d+$/.test(lenH)) return text(400, 'Upload-Length required\n')
@@ -301,7 +473,7 @@ async function create(env: Env, ctx: ExecutionContext, req: Request, base: strin
   const id = crypto.randomUUID().replace(/-/g, '')
   const now = Date.now()
   const s: UploadState = { id, size, offset: 0, metadata, createdAt: new Date(now).toISOString(), updatedAt: now,
-    mpId: null, parts: [], carryKey: null, carryLen: 0, complete: size === 0 }
+    mpId: null, parts: [], carryKey: null, carryLen: 0, complete: size === 0, by: { id: by.id, name: by.name } }
   if (size === 0) {
     await env.BUCKET.put(dataKey(id), new Uint8Array(0), { customMetadata: { id, filename: metadata.filename || id } })
   }
@@ -344,11 +516,17 @@ async function head(env: Env, id: string): Promise<Response> {
   return new Response(null, { status: 200, headers: tusHeaders(env, s) })
 }
 
-async function terminate(env: Env, id: string): Promise<Response> {
-  const r = await stub(env).terminate(id)
-  if (r.status !== 204) return text(r.status, r.status === 400 ? 'A finished upload cannot be deleted\n' : 'Not found\n', { 'Tus-Resumable': TUS_VERSION })
+async function terminate(env: Env, id: string, p: Principal): Promise<Response> {
+  const r = await stub(env).terminate(id, can(p, 'admin') ? null : p.id)
+  const h = { 'Tus-Resumable': TUS_VERSION }
+  if (r.status === 400) return text(400, 'A finished upload can only be deleted by an admin\n', h)
+  if (r.status === 403) return text(403, 'Not your upload\n', h)
+  if (r.status === 423) return text(423, 'Another PATCH is writing this upload\n', h)
+  if (r.status !== 204) return text(404, 'Not found\n', h)
   await freeR2(env, r.state!)
-  return new Response(null, { status: 204, headers: { 'Tus-Resumable': TUS_VERSION } })
+  if (r.state!.complete) await env.BUCKET.delete(dataKey(id))
+  console.log(`deleted ${id}${r.state!.complete ? ' (finished)' : ''} by ${p.id}`)
+  return new Response(null, { status: 204, headers: h })
 }
 
 async function freeR2(env: Env, s: UploadState) {
@@ -358,7 +536,7 @@ async function freeR2(env: Env, s: UploadState) {
 
 async function index(env: Env, type: string): Promise<Response> {
   const list = await stub(env).list(type)
-  const uploads = list.map((s) => ({ id: s.id, size: s.size, offset: s.offset, complete: s.complete, createdAt: s.createdAt, metadata: s.metadata }))
+  const uploads = list.map((s) => ({ id: s.id, size: s.size, offset: s.offset, complete: s.complete, createdAt: s.createdAt, metadata: s.metadata, by: s.by ?? null }))
   return new Response(JSON.stringify({ schema: 'poi-cloud-index/1', uploads }), {
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   })
@@ -398,8 +576,15 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     })
   }
   if (url.pathname === '/' || url.pathname === '/health') return text(200, `POI Capture cloud: tus at ${base}/\n`)
-  if (url.pathname !== base && !url.pathname.startsWith(base + '/')) return text(404, 'Not found\n')
-  if (!(await authorized(env, req))) return text(401, 'Unauthorized\n', { 'WWW-Authenticate': 'Bearer' })
+  const isMe = url.pathname === '/me'
+  const isAdmin = url.pathname.startsWith('/admin/')
+  if (!isMe && !isAdmin && url.pathname !== base && !url.pathname.startsWith(base + '/')) return text(404, 'Not found\n')
+  const p = await principal(env, req)
+  if (!p) return text(401, 'Unauthorized\n', { 'WWW-Authenticate': 'Bearer' })
+  if (p.id !== 'open') ctx.waitUntil(stub(env).touchSeen(p.id, seenInput(req)).catch(() => {}))
+  const forbidden = () => text(403, 'Forbidden\n')
+  if (isMe) return req.method === 'GET' ? json(200, { schema: 'poi-cloud-me/1', ...p }) : text(405, 'Method not allowed\n')
+  if (isAdmin) return can(p, 'admin') ? admin(env, req, url.pathname.slice('/admin/'.length)) : forbidden()
 
   const rest = url.pathname.slice(base.length).replace(/^\/+/, '')
   let method = req.method
@@ -407,8 +592,10 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const override = (req.headers.get('X-HTTP-Method-Override') || '').toUpperCase()
   if (method === 'POST' && ['PATCH', 'HEAD', 'DELETE'].includes(override)) method = override
 
-  if (method === 'GET' && rest === 'index.json') return index(env, url.searchParams.get('type') || '')
-  if (method === 'GET' && rest) return download(env, rest)
+  if (method === 'GET' && rest) {
+    if (!can(p, 'reviewer')) return forbidden()
+    return rest === 'index.json' ? index(env, url.searchParams.get('type') || '') : download(env, rest)
+  }
   if (method === 'OPTIONS') {
     return new Response(null, {
       status: 204,
@@ -417,11 +604,11 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   }
   const tr = req.headers.get('Tus-Resumable')
   if (tr !== TUS_VERSION) return text(412, 'Tus-Resumable 1.0.0 required\n', { 'Tus-Version': TUS_VERSION })
-  if (method === 'POST' && !rest) return create(env, ctx, req, base)
+  if (method === 'POST' && !rest) return create(env, ctx, req, base, p)
   if (!rest || !isId(rest)) return text(404, 'Not found\n')
   if (method === 'HEAD') return head(env, rest)
   if (method === 'PATCH') return patch(env, ctx, req, rest)
-  if (method === 'DELETE') return terminate(env, rest)
+  if (method === 'DELETE') return terminate(env, rest, p)
   return text(405, 'Method not allowed\n')
 }
 

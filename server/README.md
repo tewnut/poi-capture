@@ -126,6 +126,75 @@ daily cron, with their R2 parts).
 Why not the alternatives: storing every PATCH as its own object and concatenating on download makes many small
 objects and slow downloads; per-upload state in R2 object metadata cannot serialise two PATCHes to the same upload.
 
+### Tokens and roles
+
+Every request carries `Authorization: Bearer <token>` (CORS preflights excepted). The Worker resolves the token to a
+role; roles nest (each can do everything the one before can):
+
+| Role | Who | Can |
+|---|---|---|
+| `uploader` | a phone | `OPTIONS`, create (`POST`), `HEAD`, `PATCH`; `DELETE` (termination) of its **own unfinished** uploads; `GET /me` |
+| `reviewer` | the web app, `cloud.py` | + `GET <BASE>/index.json`, `GET <BASE>/<id>` (download); pushes processed results like an uploader |
+| `admin` | whoever runs the server | + the `/admin/...` requests below; `DELETE <BASE>/<id>` of **any** upload, finished ones included (R2 object and row) |
+
+Where the token comes from:
+- `ADMIN_TOKEN` (secret, `npx wrangler secret put ADMIN_TOKEN`): role `admin`, id `admin`, name `Admin`. Never on a phone.
+- `TOKEN` (secret, optional): the old shared token, role `reviewer`, id `shared`, name `Shared token`. Kept so phones set
+  up before personal tokens keep working; delete it (`npx wrangler secret delete TOKEN`) once everyone has their own.
+- Personal tokens issued by an admin (below), stored in the Durable Object as a SHA-256 hash only: the secret is shown
+  once, when issued. A revoked token gets 401 at once.
+- With neither secret set and no personal token issued, the server is open (local tests only).
+
+A wrong or revoked token gets `401`; a valid token without the role gets `403 Forbidden`.
+
+**Attribution.** Each upload records the token that created it; `index.json` entries get
+`"by": {"id": "<token id>", "name": "<token name>"}` (`null` for uploads made before this).
+
+**Last seen.** For every token (personal, `admin`, `shared`) the Worker keeps **one** record of its latest request,
+overwritten each time (at most once a minute, or at once when the client or the city changes). No IP address and no
+history is kept:
+
+`Seen = {"at": ISO, "country": "VN", "region": "Ho Chi Minh", "city": "Thu Duc", "network": "Viettel Group",
+"lat": 10.85, "lon": 106.77, "client": "POI Capture/0.16.0 (Android 14; samsung SM-A546E)", "userAgent": "...",
+"prevClient": "..." | null, "prevAt": ISO | null}`
+
+- `country` … `lon` come from Cloudflare's IP lookup (`request.cf`): approximate, city level at best, often the
+  carrier's hub on mobile data. `network` is the ISP / carrier (`asOrganization`).
+- `client` is the `X-Client` request header (each client names itself; at most 120 characters), else null;
+  `userAgent` the `User-Agent` (at most 200). Clients send `X-Client`:
+  phone `POI Capture/<versionName> (Android <release>; <manufacturer> <model>)`, web
+  `POI Capture Reviewer/<version> (<browser summary>)`, cloud.py `cloud.py/1`.
+- `prevClient` / `prevAt`: the previous different client and when it was last seen. The admin page flags a token used
+  from two different clients within 7 days (a copied token, or a new phone).
+
+`GET /admin/tokens` adds `"seen": Seen | null` to each Token, and a list of the built-in identities:
+`"builtins": [{"id": "admin" | "shared", "name", "role", "seen": Seen | null}]`.
+
+**Trip metadata.** A phone's `raw-session` upload carries, besides `filename`, `type`, `sessionId`, `name`, …:
+`track` (the ride as a Google encoded polyline, precision 5, simplified so it stays under 2,000 characters),
+`startedAt`, `endedAt` (ISO), `distanceM`, `photos` (count). All optional: older uploads have none. `index.json`
+returns them in `metadata`, so the admin map draws trips without downloading the zips.
+
+**`GET /me`** (any valid token): `{"schema": "poi-cloud-me/1", "id": "...", "name": "...", "role": "uploader|reviewer|admin"}`.
+Used by the web app (show the Admin tab) and the phone (connection test).
+
+**Admin requests** (role `admin`, JSON bodies, `Content-Type: application/json`):
+
+- `GET /admin/tokens` → `{"schema": "poi-cloud-tokens/1", "tokens": [Token...]}`, newest first, revoked ones included.
+  `Token = {"id", "name", "role", "prefix", "createdAt", "lastUsedAt": ISO | null, "revokedAt": ISO | null, "uploads": n}`.
+  `prefix`: the first 12 characters of the secret (`pct_` + 8), to tell tokens apart; `lastUsedAt` is updated at most
+  every 10 minutes.
+- `POST /admin/tokens` with `{"name": "Sơn – phone", "role": "uploader" | "reviewer"}` (name 1–80 characters; admin
+  tokens cannot be issued) → `201 {"token": Token, "secret": "pct_<43 base64url chars>"}`. The only time the secret is
+  returned.
+- `DELETE /admin/tokens/<id>` → `204` (revoked: kept in the list with `revokedAt`, for attribution), `404` unknown.
+- `DELETE <BASE>/<upload id>` with `Tus-Resumable: 1.0.0` → `204`: removes any upload, finished or not.
+
+**Setup QR / link.** A token is handed to a phone as one string, shown as a QR code by the web app:
+`<tus endpoint>#token=<secret>&name=<url-encoded token name>`, e.g.
+`https://poi-capture-cloud.4hum-ai.workers.dev/files/#token=pct_…&name=S%C6%A1n%20%E2%80%93%20phone`. The fragment is
+never sent to a server. The phone splits it: the part before `#` is the server address, `token` the access token.
+
 ### Deploy
 
 From `server/worker/` (wrangler is a devDependency; log in once with `npx wrangler login`):
@@ -134,13 +203,15 @@ From `server/worker/` (wrangler is a devDependency; log in once with `npx wrangl
 npm install
 npx wrangler r2 bucket create poi-capture-uploads
 npx wrangler deploy
-npx wrangler secret put TOKEN          # paste a long random string; every request then needs "Authorization: Bearer <it>"
+npx wrangler secret put ADMIN_TOKEN    # paste a long random string: the admin password (Admin tab, deletes)
+npx wrangler secret put TOKEN          # optional: the old shared token (role reviewer) until everyone has their own
 ```
 
-Without `TOKEN` the server is open to anyone who knows the URL: always set it. (A first deploy can also take it
-from a file: `npx wrangler deploy --secrets-file secrets.json`, with the file kept outside the repo.) The team's
-token is not in the repository; whoever runs the server hands it out, and it is typed into the phone, the web app
-and `POI_CLOUD_TOKEN` for the agent. Rotate it with `secret put TOKEN` again.
+Without `ADMIN_TOKEN`, `TOKEN` or any issued token the server is open to anyone who knows the URL: always set
+`ADMIN_TOKEN`. (A first deploy can also take secrets from a file: `npx wrangler deploy --secrets-file secrets.json`,
+kept outside the repo.) No secret is in the repository. The admin password stays with whoever runs the server (a
+password manager); everyone else gets a personal token from the reviewer's Admin tab (phones scan its QR code), and a
+lost phone is cut off by revoking its token. Rotate the admin password with `secret put ADMIN_TOKEN` again.
 
 `vars` in `wrangler.jsonc`:
 
@@ -163,6 +234,5 @@ across part boundaries, creation-with-upload, offsets, leases, termination, expi
 - Free plan: Workers 100,000 requests a day; R2 10 GB stored, 1 M writes and 10 M reads a month, no egress fees;
   SQLite Durable Objects are included. A 100 MB session from the phone is about 50 PATCH requests, ~13 R2 parts and
   ~50 small carry writes. Beyond the free tier R2 is about $0.015 per GB-month.
-- Finished uploads cannot be deleted through tus. To clean up, delete in the Cloudflare dashboard (R2 →
-  `poi-capture-uploads`, `files/<id>`); the index still lists the id until its row is removed (it then downloads
-  as 404).
+- Finished uploads are deleted by an admin: `DELETE <BASE>/<id>` with the admin token (the web app's Admin tab,
+  or `cloud.py delete <id>`).

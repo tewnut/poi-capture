@@ -183,3 +183,131 @@ describe('uploads', () => {
     expect(gone.map((g) => g.id)).not.toContain(done.split('/').pop())
   })
 })
+
+describe('tokens and roles', () => {
+  const ADMIN = { Authorization: 'Bearer admin-token' }
+  const ROOT = 'https://cloud.test'
+  const bearer = (t: string) => ({ Authorization: `Bearer ${t}` })
+
+  async function issue(name: string, role: string) {
+    const r = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { ...ADMIN, 'Content-Type': 'application/json' }, body: JSON.stringify({ name, role }) })
+    expect(r.status).toBe(201)
+    const j = await r.json<{ token: { id: string; prefix: string; role: string }; secret: string }>()
+    expect(j.secret).toMatch(/^pct_[A-Za-z0-9_-]{43}$/)
+    expect(j.token.prefix).toBe(j.secret.slice(0, 12))
+    return j
+  }
+
+  it('says who you are', async () => {
+    const me = async (h: Record<string, string>) => (await SELF.fetch(ROOT + '/me', { headers: h })).json<{ id: string; role: string }>()
+    expect(await me(ADMIN)).toMatchObject({ id: 'admin', role: 'admin' })
+    expect(await me(bearer('test-token'))).toMatchObject({ id: 'shared', role: 'reviewer' })
+    expect((await SELF.fetch(ROOT + '/me')).status).toBe(401)
+  })
+
+  it('issues, lists, uses and revokes personal tokens', async () => {
+    const phone = await issue('Sơn – phone', 'uploader')
+    const web = await issue('Reviewer laptop', 'reviewer')
+    const P = { ...bearer(phone.secret), 'Tus-Resumable': '1.0.0' }
+
+    // uploader: create + patch, but no listing, download, or admin
+    let r = await SELF.fetch(BASE, { method: 'POST', headers: { ...P, 'Upload-Length': '5', 'Upload-Metadata': encodeMetadata({ filename: 'p.zip', type: 'raw-session' }) } })
+    expect(r.status).toBe(201)
+    const url = r.headers.get('Location')!
+    r = await SELF.fetch(url, { method: 'PATCH', headers: { ...P, 'Upload-Offset': '0', 'Content-Type': 'application/offset+octet-stream' }, body: bytes(5) })
+    expect(r.status).toBe(204)
+    expect((await SELF.fetch(BASE + 'index.json', { headers: P })).status).toBe(403)
+    expect((await SELF.fetch(url, { headers: P })).status).toBe(403)
+    expect((await SELF.fetch(ROOT + '/admin/tokens', { headers: P })).status).toBe(403)
+    expect((await SELF.fetch(url, { method: 'DELETE', headers: P })).status).toBe(400)   // finished: admin only
+
+    // reviewer sees who uploaded it
+    const idx = await (await SELF.fetch(BASE + 'index.json', { headers: bearer(web.secret) })).json<{ uploads: { id: string; by: { id: string; name: string } | null }[] }>()
+    const id = url.split('/').pop()!
+    expect(idx.uploads.find((u) => u.id === id)!.by).toEqual({ id: phone.token.id, name: 'Sơn – phone' })
+    expect((await SELF.fetch(ROOT + '/admin/tokens', { headers: bearer(web.secret) })).status).toBe(403)
+
+    // another uploader cannot terminate someone else's unfinished upload
+    const other = await issue('Other phone', 'uploader')
+    r = await SELF.fetch(BASE, { method: 'POST', headers: { ...P, 'Upload-Length': '50' } })
+    const mine = r.headers.get('Location')!
+    expect((await SELF.fetch(mine, { method: 'DELETE', headers: { ...bearer(other.secret), 'Tus-Resumable': '1.0.0' } })).status).toBe(403)
+    expect((await SELF.fetch(mine, { method: 'DELETE', headers: P })).status).toBe(204)
+
+    // the list: newest first, upload counts, no secrets
+    const list = await (await SELF.fetch(ROOT + '/admin/tokens', { headers: ADMIN })).json<{ tokens: Record<string, unknown>[] }>()
+    const row = list.tokens.find((t) => t.id === phone.token.id)!
+    expect(row).toMatchObject({ name: 'Sơn – phone', role: 'uploader', uploads: 1, revokedAt: null })
+    expect(row.lastUsedAt).not.toBeNull()
+    expect(JSON.stringify(list)).not.toContain(phone.secret)
+
+    // revoke: 401 at once, kept in the list
+    expect((await SELF.fetch(ROOT + '/admin/tokens/' + phone.token.id, { method: 'DELETE', headers: ADMIN })).status).toBe(204)
+    expect((await SELF.fetch(ROOT + '/me', { headers: P })).status).toBe(401)
+    const after = await (await SELF.fetch(ROOT + '/admin/tokens', { headers: ADMIN })).json<{ tokens: { id: string; revokedAt: string | null }[] }>()
+    expect(after.tokens.find((t) => t.id === phone.token.id)!.revokedAt).not.toBeNull()
+    expect((await SELF.fetch(ROOT + '/admin/tokens/nope', { method: 'DELETE', headers: ADMIN })).status).toBe(404)
+  })
+
+  it('refuses bad token requests', async () => {
+    const post = (body: unknown) => SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { ...ADMIN, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    expect((await post({ name: 'x', role: 'admin' })).status).toBe(400)
+    expect((await post({ name: '', role: 'uploader' })).status).toBe(400)
+    expect((await post({ name: 'x'.repeat(81), role: 'uploader' })).status).toBe(400)
+    expect((await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: ADMIN, body: 'nope' })).status).toBe(400)
+    expect((await SELF.fetch(ROOT + '/me', { headers: bearer('pct_' + 'A'.repeat(43)) })).status).toBe(401)
+  })
+
+  it('admin deletes finished uploads with their R2 object', async () => {
+    const done = await upload(bytes(PART_SIZE + 10), PART_SIZE)
+    const id = done.split('/').pop()!
+    expect(await env.BUCKET.head(`files/${id}`)).not.toBeNull()
+    expect((await SELF.fetch(done, { method: 'DELETE', headers: { ...ADMIN, 'Tus-Resumable': '1.0.0' } })).status).toBe(204)
+    expect(await env.BUCKET.head(`files/${id}`)).toBeNull()
+    expect((await SELF.fetch(done, { method: 'HEAD', headers: AUTH })).status).toBe(404)
+    expect((await SELF.fetch(done, { method: 'DELETE', headers: { ...ADMIN, 'Tus-Resumable': '1.0.0' } })).status).toBe(404)
+  })
+})
+
+describe('last seen', () => {
+  const ROOT = 'https://cloud.test'
+  const ADMIN = { Authorization: 'Bearer admin-token' }
+  type Seen = { at: string; client: string | null; prevClient: string | null; prevAt: string | null; userAgent: string | null }
+  type List = { tokens: { id: string; seen: Seen | null }[]; builtins: { id: string; seen: Seen | null }[] }
+
+  async function seenOf(id: string, want: (s: Seen | null) => boolean): Promise<Seen | null> {
+    for (let i = 0; i < 50; i++) {   // the record is written after the response (waitUntil)
+      const l = await (await SELF.fetch(ROOT + '/admin/tokens', { headers: ADMIN })).json<List>()
+      const s = [...l.tokens, ...l.builtins].find((t) => t.id === id)?.seen ?? null
+      if (want(s)) return s
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    throw new Error(`seen for ${id} never matched`)
+  }
+
+  it('keeps the latest client, flags a second one, lists built-ins, never the IP', async () => {
+    const r = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { ...ADMIN, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Seen phone', role: 'uploader' }) })
+    const { token, secret } = await r.json<{ token: { id: string; seen: unknown }; secret: string }>()
+    expect(token.seen).toBeNull()
+    const phoneA = 'POI Capture/0.16.0 (Android 14; samsung SM-A546E)'
+    await SELF.fetch(ROOT + '/me', { headers: { Authorization: `Bearer ${secret}`, 'X-Client': phoneA, 'User-Agent': 'Dalvik/2.1.0', 'CF-Connecting-IP': '203.0.113.7' } })
+    const a = await seenOf(token.id, (s) => s?.client === phoneA)
+    expect(a).toMatchObject({ client: phoneA, userAgent: 'Dalvik/2.1.0', prevClient: null })
+    expect(JSON.stringify(a)).not.toContain('203.0.113.7')
+
+    const phoneB = 'POI Capture/0.16.0 (Android 15; Google Pixel 8)'
+    await SELF.fetch(ROOT + '/me', { headers: { Authorization: `Bearer ${secret}`, 'X-Client': phoneB } })
+    const b = await seenOf(token.id, (s) => s?.client === phoneB)
+    expect(b).toMatchObject({ client: phoneB, prevClient: phoneA })
+    expect(b!.prevAt).not.toBeNull()
+
+    await SELF.fetch(ROOT + '/me', { headers: { Authorization: 'Bearer test-token', 'X-Client': 'cloud.py/1' } })
+    expect(await seenOf('shared', (s) => s?.client === 'cloud.py/1')).not.toBeNull()
+    expect(await seenOf('admin', (s) => s != null)).not.toBeNull()
+  })
+
+  it('lets browsers send X-Client', async () => {
+    const r = await SELF.fetch(BASE, { method: 'OPTIONS', headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'x-client' } })
+    expect(r.headers.get('Access-Control-Allow-Headers')).toContain('X-Client')
+  })
+})

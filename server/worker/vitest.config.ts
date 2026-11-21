@@ -5,6 +5,6 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   plugins: [cloudflareTest({
     wrangler: { configPath: './wrangler.jsonc' },
-    miniflare: { bindings: { TOKEN: 'test-token', CORS_ORIGINS: 'http://localhost:5173,https://*.poi-capture-reviewer.pages.dev' } },
+    miniflare: { bindings: { TOKEN: 'test-token', ADMIN_TOKEN: 'admin-token', CORS_ORIGINS: 'http://localhost:5173,https://*.poi-capture-reviewer.pages.dev' } },
   })],
 })
