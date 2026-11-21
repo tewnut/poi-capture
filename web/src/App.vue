@@ -331,7 +331,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
 
 <template>
   <!-- #/admin: the cloud server's admin page, on its own (reached by address only) -->
-  <AdminPanel v-if="route.name === 'admin'" :url="cloud.url" />
+  <AdminPanel v-if="String(route.name ?? '').startsWith('admin')" :url="cloud.url" />
   <div v-else :class="['app', { sess: !!state.open, peek: mapPeek && !!(openPlace || openTask) }]" @dragover.prevent="dragging = true" @dragleave.self="dragging = false" @drop.prevent="onDrop">
     <aside class="side">
       <header class="sidehead">

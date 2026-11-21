@@ -3,8 +3,9 @@
 // The reviewer pulls PROCESSED packages only (metadata type=processed-result); raw sessions are for the agent.
 // The server address and token are kept in this browser's localStorage, nowhere else. Without a saved address the
 // team's server is used (DEFAULT_CLOUD_URL, the Cloudflare Worker in server/worker/); the token is always typed in.
-// Tokens and roles (server/README.md): GET /me says who a token is; an admin token (the admin password) also reaches
-// /admin/tokens (issue, list, revoke personal tokens) and may DELETE any upload. /me and /admin/... sit at the server
+// Tokens and permissions (server/README.md, "Tokens and permissions"): a token has independent scopes (upload, read,
+// process, delete). GET /me says who a token is; the admin password also reaches /admin/tokens (issue, list, change
+// scopes, revoke personal tokens) and may DELETE any upload. /me and /admin/... sit at the server
 // root (the origin of the tus endpoint). The admin password is kept in sessionStorage only: gone when the tab closes.
 import type { Dataset } from './types'
 import { version } from '../package.json'
@@ -57,14 +58,24 @@ export type Seen = {
   prevAt: string | null
 }
 
-/** A built-in identity: the admin password (`admin`) or the old shared token (`shared`). */
-export type Builtin = { id: string; name: string; role: Role; seen: Seen | null }
+/** A token's permissions (server/README.md): independent, ticked by the admin. */
+export type Scope = 'upload' | 'read' | 'process' | 'delete'
+/** Every scope, in display order. */
+export const SCOPES: readonly Scope[] = ['upload', 'read', 'process', 'delete']
+/** The presets of the issue form: Phone, Reviewer, Agent. */
+export const PRESETS: Record<'phone' | 'reviewer' | 'agent', Scope[]> = { phone: ['upload'], reviewer: ['read'], agent: ['process'] }
 
-export type Role = 'uploader' | 'reviewer' | 'admin'
-export type Me = { id: string; name: string; role: Role }
+/** The server's one-word summary of the scopes, for older clients (`custom` when none fits). */
+export type Role = 'uploader' | 'reviewer' | 'agent' | 'custom' | 'admin'
+
+/** A built-in identity: the admin password (`admin`) or the old shared token (`shared`); scopes set as server secrets. */
+export type Builtin = { id: string; name: string; scopes: Scope[]; role: Role; seen: Seen | null }
+
+export type Me = { id: string; name: string; scopes: Scope[]; admin: boolean; role: Role }
 export type Token = {
   id: string
   name: string
+  scopes: Scope[]
   role: Role
   /** The first 12 characters of the secret (pct_ + 8), to tell tokens apart. */
   prefix: string
@@ -76,7 +87,8 @@ export type Token = {
   seen: Seen | null
 }
 
-/** A refused or failed request; status is the HTTP status (401: wrong or revoked token, 403: role too low). */
+/** A refused or failed request; status is the HTTP status (401: wrong or revoked token, 403: no permission
+ *  for this, 409: the token was revoked). */
 export class CloudError extends Error {
   constructor(message: string, readonly status: number) { super(message) }
 }
@@ -232,7 +244,8 @@ function headers(cfg: CloudConfig): Record<string, string> {
 async function check(r: Response, what: string) {
   if (r.ok) return
   if (r.status === 401) throw new CloudError(`${what}: the server refused the token (HTTP 401)`, 401)
-  if (r.status === 403) throw new CloudError(`${what}: the server refused the token, its role is too low (HTTP 403)`, 403)
+  if (r.status === 403) throw new CloudError(`${what}: the server refused the token, it lacks the permission (HTTP 403)`, 403)
+  if (r.status === 409) throw new CloudError(`${what}: the token has been revoked (HTTP 409)`, 409)
   throw new CloudError(`${what}: HTTP ${r.status}`, r.status)
 }
 
@@ -264,22 +277,53 @@ export async function downloadItem(cfg: CloudConfig, item: CloudItem, f: typeof 
   return new File([await r.blob()], name, { type: 'application/zip' })
 }
 
-const ROLES: Role[] = ['uploader', 'reviewer', 'admin']
+const ROLES: Role[] = ['uploader', 'reviewer', 'agent', 'custom', 'admin']
 const isRole = (v: unknown): v is Role => ROLES.includes(v as Role)
+export const isScope = (v: unknown): v is Scope => SCOPES.includes(v as Scope)
+
+/** Known scopes, deduplicated, in display order. */
+export function sortScopes(list: readonly unknown[]): Scope[] {
+  return SCOPES.filter((s) => list.includes(s))
+}
+
+/** The scopes an answer carries; an older server sends only a role: uploader → upload; reviewer → upload, read,
+ *  process; admin → every scope. Null when there is neither a scopes list nor a known role. */
+export function parseScopes(scopes: unknown, role: unknown): Scope[] | null {
+  if (Array.isArray(scopes)) return sortScopes(scopes)
+  if (role === 'uploader') return ['upload']
+  if (role === 'reviewer') return ['upload', 'read', 'process']
+  if (role === 'agent') return ['process']
+  if (role === 'admin') return [...SCOPES]
+  return null
+}
+
+/** The summary role of a set of scopes, as the server makes it: exactly upload → uploader, has read → reviewer, has
+ *  process → agent, else custom. */
+export function roleOf(scopes: readonly Scope[], admin = false): Role {
+  if (admin) return 'admin'
+  if (scopes.length === 1 && scopes[0] === 'upload') return 'uploader'
+  if (scopes.includes('read')) return 'reviewer'
+  if (scopes.includes('process')) return 'agent'
+  return 'custom'
+}
 
 /** Who the token is: GET /me (any valid token). */
 export async function me(cfg: CloudConfig, f: typeof fetch = fetch): Promise<Me> {
   const r = await f(`${root(cfg)}/me`, { headers: headers(cfg), cache: 'no-store' })
   await check(r, 'me')
   const j = (await r.json()) as any
-  if (!j || (j.schema && j.schema !== ME_SCHEMA) || typeof j.id !== 'string' || !isRole(j.role)) throw new Error('not a /me answer from the server')
-  return { id: j.id, name: str(j.name) || j.id, role: j.role }
+  const scopes = j && typeof j === 'object' ? parseScopes(j.scopes, j.role) : null
+  if (!j || (j.schema && j.schema !== ME_SCHEMA) || typeof j.id !== 'string' || !scopes) throw new Error('not a /me answer from the server')
+  const admin = j.admin === true || j.role === 'admin'
+  return { id: j.id, name: str(j.name) || j.id, scopes, admin, role: isRole(j.role) ? j.role : roleOf(scopes, admin) }
 }
 
 function parseToken(t: any): Token | null {
-  if (!t || typeof t !== 'object' || typeof t.id !== 'string' || !isRole(t.role)) return null
+  if (!t || typeof t !== 'object' || typeof t.id !== 'string') return null
+  const scopes = parseScopes(t.scopes, t.role)
+  if (!scopes) return null
   return {
-    id: t.id, name: str(t.name) || t.id, role: t.role, prefix: str(t.prefix) || '',
+    id: t.id, name: str(t.name) || t.id, scopes, role: isRole(t.role) ? t.role : roleOf(scopes), prefix: str(t.prefix) || '',
     createdAt: str(t.createdAt), lastUsedAt: str(t.lastUsedAt), revokedAt: str(t.revokedAt),
     uploads: typeof t.uploads === 'number' ? t.uploads : 0,
     seen: parseSeen(t.seen),
@@ -288,7 +332,10 @@ function parseToken(t: any): Token | null {
 
 function parseBuiltin(b: any): Builtin | null {
   if (!b || typeof b !== 'object' || typeof b.id !== 'string' || !b.id) return null
-  return { id: b.id, name: str(b.name) || b.id, role: isRole(b.role) ? b.role : 'admin', seen: parseSeen(b.seen) }
+  // neither scopes nor a known role (a server from before roles were listed): only the admin password gets every scope
+  const scopes = parseScopes(b.scopes, b.role) ?? (b.id === 'admin' ? [...SCOPES] : [])
+  const role = isRole(b.role) ? b.role : b.id === 'admin' ? 'admin' : roleOf(scopes)
+  return { id: b.id, name: str(b.name) || b.id, scopes, role, seen: parseSeen(b.seen) }
 }
 
 /** Every personal token, newest first, revoked ones included, and the built-in identities (none from an older
@@ -309,19 +356,47 @@ export async function listTokens(cfg: CloudConfig, f: typeof fetch = fetch): Pro
   return (await adminTokens(cfg, f)).tokens
 }
 
-/** A new personal token (admin). The secret comes back this once only. */
-export async function issueToken(cfg: CloudConfig, name: string, role: 'uploader' | 'reviewer', f: typeof fetch = fetch): Promise<{ token: Token; secret: string }> {
+function checkName(name: string): string {
   const n = name.trim()
   if (!n || [...n].length > 80) throw new Error('the name must be 1 to 80 characters')
-  if (role !== 'uploader' && role !== 'reviewer') throw new Error('only uploader and reviewer tokens can be issued')
+  return n
+}
+
+function checkScopes(scopes: readonly unknown[]): Scope[] {
+  const unknown = scopes.filter((s) => !isScope(s))
+  if (unknown.length) throw new Error(`unknown permission: ${unknown.join(', ')}`)
+  const s = sortScopes(scopes)
+  if (!s.length) throw new Error('tick at least one permission')
+  return s
+}
+
+/** A new personal token with these scopes (admin). The secret comes back this once only. */
+export async function issueToken(cfg: CloudConfig, name: string, scopes: readonly Scope[], f: typeof fetch = fetch): Promise<{ token: Token; secret: string }> {
+  const body = { name: checkName(name), scopes: checkScopes(scopes) }
   const r = await f(`${root(cfg)}/admin/tokens`, {
-    method: 'POST', headers: { ...headers(cfg), 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n, role }),
+    method: 'POST', headers: { ...headers(cfg), 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })
   await check(r, 'issue')
   const j = (await r.json()) as any
   const token = parseToken(j?.token)
   if (!token || typeof j.secret !== 'string' || !j.secret) throw new Error('the server sent no token')
   return { token, secret: j.secret }
+}
+
+/** Changes a personal token's scopes and/or name (admin); takes effect on its next request. 409: it was revoked. */
+export async function updateToken(cfg: CloudConfig, id: string, change: { scopes?: readonly Scope[]; name?: string },
+  f: typeof fetch = fetch): Promise<Token> {
+  const body: { scopes?: Scope[]; name?: string } = {}
+  if (change.scopes !== undefined) body.scopes = checkScopes(change.scopes)
+  if (change.name !== undefined) body.name = checkName(change.name)
+  if (!Object.keys(body).length) throw new Error('nothing to change')
+  const r = await f(`${root(cfg)}/admin/tokens/${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: { ...headers(cfg), 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  await check(r, 'update')
+  const token = parseToken(((await r.json()) as any)?.token)
+  if (!token) throw new Error('the server sent no token')
+  return token
 }
 
 /** Revokes a personal token at once (admin); it stays in the list with revokedAt, for attribution. */

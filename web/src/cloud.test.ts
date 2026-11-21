@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_CLOUD_URL, loadCloud, saveCloud, downloadItem, endpoint, fetchIndex, importState, parseIndex, processedItems, INDEX_SCHEMA, type CloudItem,
   serverRoot, setupLink, me, listTokens, issueToken, revokeToken, deleteUpload, CloudError, loadAdminToken, saveAdminToken,
-  adminTokens, decodePolyline, parseSeen, twoClients, browserSummary, clientName } from './cloud'
+  adminTokens, updateToken, parseScopes, roleOf, SCOPES, PRESETS, decodePolyline, parseSeen, twoClients, browserSummary, clientName } from './cloud'
 
 const index = {
   schema: INDEX_SCHEMA,
@@ -125,7 +125,7 @@ describe('cloud settings', () => {
   })
 })
 
-describe('tokens and roles', () => {
+describe('tokens and permissions', () => {
   function fake(handler: (url: string, init?: RequestInit) => Response) {
     const calls: { url: string; init?: RequestInit }[] = []
     const f = (async (url: string, init?: RequestInit) => { calls.push({ url, init }); return handler(url, init) }) as unknown as typeof fetch
@@ -158,10 +158,34 @@ describe('tokens and roles', () => {
   })
 
   it('asks /me at the server root', async () => {
-    const { f, calls } = fake(() => json({ schema: 'poi-cloud-me/1', id: 'admin', name: 'Admin', role: 'admin' }))
-    expect(await me(cfg, f)).toEqual({ id: 'admin', name: 'Admin', role: 'admin' })
+    const { f, calls } = fake(() => json({ schema: 'poi-cloud-me/1', id: 'admin', name: 'Admin', scopes: ['delete', 'upload', 'process', 'read'], admin: true, role: 'admin' }))
+    expect(await me(cfg, f)).toEqual({ id: 'admin', name: 'Admin', scopes: ['upload', 'read', 'process', 'delete'], admin: true, role: 'admin' })
     expect(calls[0].url).toBe('https://h.example/me')
     expect((calls[0].init!.headers as Record<string, string>).Authorization).toBe('Bearer adm1n')
+  })
+
+  it('reads /me with scopes, and from an older server that sends only a role', async () => {
+    const ans = async (v: unknown) => me(cfg, fake(() => json(v)).f)
+    expect(await ans({ id: 't1', name: 'Sơn', scopes: ['upload', 'bogus', 'upload'], admin: false, role: 'uploader' }))
+      .toEqual({ id: 't1', name: 'Sơn', scopes: ['upload'], admin: false, role: 'uploader' })
+    // a role the client does not know yet: summarised from the scopes
+    expect((await ans({ id: 't2', scopes: ['read', 'delete'], role: 'auditor' })).role).toBe('reviewer')
+    expect(await ans({ id: 't3', name: 'Old', role: 'reviewer' }))
+      .toEqual({ id: 't3', name: 'Old', scopes: ['upload', 'read', 'process'], admin: false, role: 'reviewer' })
+    expect(await ans({ id: 'admin', role: 'admin' })).toMatchObject({ scopes: SCOPES, admin: true, role: 'admin' })
+  })
+
+  it('maps scopes and roles both ways', () => {
+    expect(parseScopes(['process', 'read', 'x'], 'reviewer')).toEqual(['read', 'process'])   // scopes win over the role
+    expect(parseScopes(undefined, 'uploader')).toEqual(['upload'])
+    expect(parseScopes(undefined, 'reviewer')).toEqual(['upload', 'read', 'process'])
+    expect(parseScopes(undefined, 'root')).toBeNull()
+    expect(roleOf(['upload'])).toBe('uploader')
+    expect(roleOf(['upload', 'read'])).toBe('reviewer')
+    expect(roleOf(['process'])).toBe('agent')
+    expect(roleOf(['upload', 'delete'])).toBe('custom')
+    expect(roleOf(['upload'], true)).toBe('admin')
+    expect(PRESETS).toEqual({ phone: ['upload'], reviewer: ['read'], agent: ['process'] })
   })
 
   it('tells a wrong token (401) from a role too low (403)', async () => {
@@ -174,26 +198,62 @@ describe('tokens and roles', () => {
   })
 
   it('lists tokens, dropping malformed ones', async () => {
-    const { f, calls } = fake(() => json({ schema: 'poi-cloud-tokens/1', tokens: [tok, { id: 'bad' }, { ...tok, id: 't0', revokedAt: '2026-11-19T12:00:00Z' }] }))
+    const { f, calls } = fake(() => json({ schema: 'poi-cloud-tokens/1', tokens: [tok, { id: 'bad' }, { ...tok, id: 't0', revokedAt: '2026-11-19T12:00:00Z' },
+      { ...tok, id: 't2', scopes: ['read', 'delete'], role: 'reviewer' }, { ...tok, id: 't3', role: 'reviewer' }, { ...tok, id: 't4', scopes: [], role: undefined }] }))
     const list = await listTokens(cfg, f)
     expect(calls[0].url).toBe('https://h.example/admin/tokens')
-    expect(list.map((t) => t.id)).toEqual(['t1', 't0'])
-    expect(list[0]).toEqual({ ...tok, seen: null })
+    expect(list.map((t) => t.id)).toEqual(['t1', 't0', 't2', 't3', 't4'])
+    // an older server: the role only
+    expect(list[0]).toEqual({ ...tok, scopes: ['upload'], seen: null })
     expect(list[1].revokedAt).toBe('2026-11-19T12:00:00Z')
+    expect(list[2].scopes).toEqual(['read', 'delete'])
+    expect(list[3].scopes).toEqual(['upload', 'read', 'process'])
+    expect(list[4]).toMatchObject({ scopes: [], role: 'custom' })
   })
 
   it('issues a token: POST JSON, returns the secret once', async () => {
     const { f, calls } = fake(() => json({ token: tok, secret: 'pct_s3cr3t' }, 201))
-    const r = await issueToken(cfg, '  Sơn – phone ', 'uploader', f)
+    const r = await issueToken(cfg, '  Sơn – phone ', ['upload'], f)
     expect(r.secret).toBe('pct_s3cr3t')
     expect(r.token.name).toBe('Sơn – phone')
     expect(calls[0].url).toBe('https://h.example/admin/tokens')
     expect(calls[0].init!.method).toBe('POST')
     expect((calls[0].init!.headers as Record<string, string>)['Content-Type']).toBe('application/json')
-    expect(JSON.parse(calls[0].init!.body as string)).toEqual({ name: 'Sơn – phone', role: 'uploader' })
-    await expect(issueToken(cfg, '  ', 'reviewer', f)).rejects.toThrow(/name/)
-    await expect(issueToken(cfg, 'x'.repeat(81), 'reviewer', f)).rejects.toThrow(/name/)
-    expect(calls.length).toBe(1)
+    expect(JSON.parse(calls[0].init!.body as string)).toEqual({ name: 'Sơn – phone', scopes: ['upload'] })
+    expect(r.token.scopes).toEqual(['upload'])
+    // scopes go in display order, once each
+    await issueToken(cfg, 'Agent', ['delete', 'process', 'delete'], f)
+    expect(JSON.parse(calls[1].init!.body as string)).toEqual({ name: 'Agent', scopes: ['process', 'delete'] })
+    await expect(issueToken(cfg, '  ', ['read'], f)).rejects.toThrow(/name/)
+    await expect(issueToken(cfg, 'x'.repeat(81), ['read'], f)).rejects.toThrow(/name/)
+    await expect(issueToken(cfg, 'Sơn', [], f)).rejects.toThrow(/at least one/)
+    await expect(issueToken(cfg, 'Sơn', ['admin' as any], f)).rejects.toThrow(/unknown permission/)
+    expect(calls.length).toBe(2)
+  })
+
+  it('changes a token: PATCH JSON with only what changes', async () => {
+    const changed = { ...tok, scopes: ['upload', 'delete'], role: 'custom' }
+    const { f, calls } = fake(() => json({ token: changed }))
+    const t = await updateToken(cfg, 't 1', { scopes: ['delete', 'upload'] }, f)
+    expect(t.scopes).toEqual(['upload', 'delete'])
+    expect(t.role).toBe('custom')
+    expect(calls[0].url).toBe('https://h.example/admin/tokens/t%201')
+    expect(calls[0].init!.method).toBe('PATCH')
+    expect((calls[0].init!.headers as Record<string, string>)['Content-Type']).toBe('application/json')
+    expect(JSON.parse(calls[0].init!.body as string)).toEqual({ scopes: ['upload', 'delete'] })
+    await updateToken(cfg, 't1', { name: ' Sơn – new phone ' }, f)
+    expect(JSON.parse(calls[1].init!.body as string)).toEqual({ name: 'Sơn – new phone' })
+    await updateToken(cfg, 't1', { name: 'A', scopes: ['read'] }, f)
+    expect(JSON.parse(calls[2].init!.body as string)).toEqual({ name: 'A', scopes: ['read'] })
+    await expect(updateToken(cfg, 't1', { scopes: [] }, f)).rejects.toThrow(/at least one/)
+    await expect(updateToken(cfg, 't1', { name: '' }, f)).rejects.toThrow(/name/)
+    await expect(updateToken(cfg, 't1', {}, f)).rejects.toThrow(/nothing/)
+    expect(calls.length).toBe(3)
+    // a revoked token: 409
+    const e = await updateToken(cfg, 't1', { scopes: ['read'] }, fake(() => new Response('', { status: 409 })).f).catch((x) => x)
+    expect(e).toBeInstanceOf(CloudError)
+    expect(e.status).toBe(409)
+    await expect(updateToken(cfg, 't1', { scopes: ['read'] }, fake(() => json({})).f)).rejects.toThrow(/no token/)
   })
 
   it('revokes a token and deletes an upload', async () => {
@@ -250,7 +310,7 @@ describe('last seen and trips', () => {
   })
 
   it('reads seen and the built-in identities; an older server sends neither', async () => {
-    const f = (async () => json({ tokens: [{ ...tok, seen }, tok], builtins: [{ id: 'admin', name: 'Admin', role: 'admin', seen: null },
+    const f = (async () => json({ tokens: [{ ...tok, seen }, tok], builtins: [{ id: 'admin', name: 'Admin', scopes: ['upload', 'read', 'process', 'delete'], role: 'admin', seen: null },
       { id: 'shared', name: 'Shared token', role: 'reviewer', seen: { ...seen, lat: 'x' } }, { name: 'no id' }] })) as unknown as typeof fetch
     const r = await adminTokens({ url: 'https://h/files/', token: 'a' }, f)
     expect(r.tokens[0].seen).toEqual(seen)
@@ -258,6 +318,8 @@ describe('last seen and trips', () => {
     expect(r.builtins.map((b) => b.id)).toEqual(['admin', 'shared'])
     expect(r.builtins[1].seen!.lat).toBeNull()
     expect(r.builtins[1].seen!.city).toBe('Thu Duc')
+    expect(r.builtins[0].scopes).toEqual(['upload', 'read', 'process', 'delete'])
+    expect(r.builtins[1].scopes).toEqual(['upload', 'read', 'process'])   // role only: mapped
     const old = (async () => json({ tokens: [tok] })) as unknown as typeof fetch
     expect((await adminTokens({ url: 'https://h/files/', token: 'a' }, old)).builtins).toEqual([])
     expect(parseSeen({ city: 'x' })).toBeNull()

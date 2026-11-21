@@ -182,12 +182,59 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .atable .seenfull.incell { display: none; }
 .atable td.seen .chip { margin-left: 4px; cursor: help; }
 .builtins { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+/* permissions: chips (ScopeChips.vue), the checkboxes (ScopePicker.vue) and the editor of a token's permissions */
+.scopechips { display: inline-flex; flex-wrap: wrap; gap: 3px; align-items: center; vertical-align: middle; }
+.chip.scope { border: 0; font: inherit; font-size: 11px; font-weight: 600; cursor: help; line-height: 1.5; }
+.chip.scope.s-upload { background: #e6f0fb; color: #1d4f8a; }
+.chip.scope.s-read { background: #e7f6ec; color: #1b5e3c; }
+.chip.scope.s-process { background: #f1eafb; color: #5b2f8f; }
+.chip.scope.s-delete { background: #fde8ef; color: #9b1c47; }
+.chip.scope[aria-expanded="true"] { outline: 2px solid currentColor; outline-offset: 0; }
+.scopetip { flex-basis: 100%; color: var(--ink); font-weight: 400; white-space: normal; }
+.atable tr.revoked .chip.scope { opacity: .6; }
+.scopepick { display: grid; gap: 6px; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.scopeboxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 6px; }
+.scopebox { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
+  background: #fff; cursor: pointer; font-size: 13px; }
+.scopebox.on { border-color: var(--accent); background: #f1faf5; }
+.scopebox input { margin: 2px 0 0; flex: none; width: 16px; height: 16px; accent-color: var(--accent); }
+.scopebox > span { display: grid; gap: 1px; min-width: 0; }
+.scopebox .muted { font-size: 12px; line-height: 1.35; }
+.scopeedit { display: grid; gap: 6px; padding: 8px; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+.scopeedit .editbtns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.scopeedit p { margin: 0; }
+.atable .scopeedit.incell { display: none; }
+.atable td.perms { min-width: 120px; }
+.atable .act .btns { display: inline-flex; gap: 6px; }
+.builtins .scopechips { margin: 0 4px; }
 .builtins li { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-.adminmap { display: grid; gap: 8px; }
-.mapfilters { justify-content: flex-start; flex-wrap: wrap; }
-.mapfilters label { display: inline-flex; gap: 6px; align-items: center; }
-.mapfilters select { max-width: 280px; text-overflow: ellipsis; }
-.mapfilters > :last-child { margin-left: auto; }
+.adminfilters { justify-content: flex-start; flex-wrap: wrap; }
+.adminfilters label { display: inline-flex; gap: 6px; align-items: center; }
+.adminfilters select { max-width: 280px; text-overflow: ellipsis; }
+.adminfilters > :last-child { margin-left: auto; }
+.adminfilters input[type=search] { flex: 0 1 220px; min-width: 140px; }
+/* the admin page's two sections: a sidebar menu when wide, a segmented menu on top when narrower (below) */
+.adminlayout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 16px; align-items: start; }
+.adminnav { display: grid; gap: 4px; position: sticky; top: 12px; }
+.adminnav a { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 9px 12px; border-radius: 10px;
+  color: var(--ink); text-decoration: none; font-weight: 600; font-size: 14px; }
+.adminnav a:hover { background: var(--canvas); }
+.adminnav a.on { background: #f1faf5; color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.adminnav .n { font-size: 11px; background: rgba(0,0,0,.06); border-radius: 8px; padding: 0 6px; color: var(--muted); }
+.adminmain { display: grid; gap: 8px; min-width: 0; }
+.adminhead h3 { margin: 0; font-size: 17px; }
+.dialog.admin .viewseg { flex: none; }
+.dialog.admin .viewseg button { padding: 4px 16px; min-width: 64px; white-space: nowrap; }
+.layermap { display: grid; gap: 8px; }
+.maplegend i.dot { width: 10px; height: 10px; border-radius: 50%; }
+/* below ~1200 px the sidebar would squeeze the tables: the menu goes on top */
+@media (max-width: 1199px) {
+  .adminlayout { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .adminnav { display: flex; position: static; padding: 3px; background: var(--canvas); border-radius: 10px; gap: 4px; }
+  .adminnav a { flex: 1; justify-content: center; padding: 6px 4px; color: var(--muted); }
+  .adminnav a.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+}
 /* the map fills the window below the page's header and filters */
 .amap { height: calc(100vh - 350px); height: calc(100dvh - 350px); min-height: 360px; border: 1px solid var(--line); border-radius: 10px; }
 .maplegend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
@@ -218,7 +265,7 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .prow { min-height: 64px; align-items: center; }
   .ghead { min-height: 44px; align-items: center; }
   .filters select, .filters input, .settings input, .settings select, .dialog.admin input, .dialog.admin select { min-height: 44px; font-size: 16px; }
-  .mapfilters select { min-height: 44px; }
+  .adminfilters select { min-height: 44px; }
   .dialog.admin > .row a { display: inline-flex; align-items: center; min-height: 44px; }
   .leaflet-touch .leaflet-bar a { width: 40px; height: 40px; line-height: 40px; }
 }
@@ -276,11 +323,15 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .issued .qr { width: min(240px, 100%); height: auto; aspect-ratio: 1; }
   .issued .qrrow .small { min-width: 0; }
   .builtins li { overflow-wrap: anywhere; }
+  .scopebox input { width: 20px; height: 20px; margin-top: 0; }
+  .chip.scope { padding: 3px 9px; font-size: 12px; }
   .amap { height: 60vh; height: 60dvh; min-height: 300px; }
-  .mapfilters > :last-child { margin-left: 0; }
-  .mapfilters label { flex: 1 1 140px; min-width: 0; max-width: 100%; }
-  .dialog.admin > *, .adminmap > * { min-width: 0; }
-  .mapfilters select { flex: 1; min-width: 0; max-width: none; }
+  .adminfilters > :last-child { margin-left: 0; }
+  .adminnav a { min-height: 44px; }
+  .adminfilters input[type=search] { flex: 1 1 100%; min-width: 0; }
+  .adminfilters label { flex: 1 1 140px; min-width: 0; max-width: 100%; }
+  .dialog.admin > *, .layermap > *, .adminmain > * { min-width: 0; }
+  .adminfilters select { flex: 1; min-width: 0; max-width: none; }
 }
 
 /* admin tables by the room they have (.adminpane): every column from ~980 px; below that the tokens' prefix and
@@ -311,6 +362,9 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .atable.cards td.wide { display: block; }
   .atable.cards td.name .sub, .atable.cards .seenrow { display: none; }
   .atable.cards .seenfull.incell { display: block; }
+  /* the editor takes the card's whole width, under the label column */
+  .atable.cards .scopeedit.incell { display: grid; margin: 6px 0 0 -104px; }
+  .atable.cards .act .btns { display: flex; width: 100%; }
   .atable.cards tr.open td { background: none; }
   .atable.cards .nw { white-space: normal; }
   .atable.cards .act .confirm { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
