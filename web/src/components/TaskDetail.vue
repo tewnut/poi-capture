@@ -49,8 +49,9 @@ h2 { margin: 6px 0 0; font-size: 19px; }
 p { margin: 0; }
 .acts, .links { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 @media (pointer: coarse) { .links a { display: inline-flex; align-items: center; min-height: 44px; } }
+@media (max-width: 1099px) { .closex { display: none; } }   /* the panel bar has back (style.css) */
+@media (min-width: 1600px) and (min-height: 900px) { .big { max-height: 380px; } }
 @media (max-width: 700px) {
-  .closex { display: none; }
   .big { max-height: 50vh; }
   .acts button { flex: 1 1 auto; }
 }

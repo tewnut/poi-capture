@@ -4,7 +4,7 @@
 // A new token's secret is shown once, with a QR code of the phone setup link drawn here (never by a web service).
 import { computed, onMounted, ref } from 'vue'
 import QRCode from 'qrcode'
-import { t, relTime } from '../i18n'
+import { t, lang, relTime } from '../i18n'
 import {
   me, adminTokens, issueToken, revokeToken, deleteUpload, fetchIndex, setupLink, endpoint, humanSize,
   loadAdminToken, saveAdminToken, CloudError, PROCESSED, seenPlace, shortClient, twoClients,
@@ -58,7 +58,26 @@ function failed(e: any, into: { value: string }) {
   if (e instanceof CloudError && (e.status === 401 || e.status === 403)) { who.value = null; authErr.value = message(e) }
   else into.value = message(e)
 }
-const when = (s: string | null) => (s ? s.slice(0, 16).replace('T', ' ') : '')
+/** A server time (ISO, UTC) in this browser's time zone: "2026-11-21 06:45"; a date-only value as it is. */
+function when(s: string | null): string {
+  if (!s) return ''
+  const d = new Date(s)
+  if (s.length < 16 || Number.isNaN(d.getTime())) return s.slice(0, 16).replace('T', ' ')
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+/** The same moment as `when`, compact for a table cell: "8 Nov, 13:38" (the year only when not this year). */
+function short(s: string | null): string {
+  if (!s) return ''
+  const timed = s.length >= 16
+  const d = new Date(timed ? s : `${s.slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return when(s)
+  return d.toLocaleString(lang.value, {
+    day: 'numeric', month: 'short',
+    ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}),
+    ...(timed ? { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' } : {}),
+  } as Intl.DateTimeFormatOptions)
+}
 
 // tokens
 const tokens = ref<Token[] | null>(null)
@@ -212,45 +231,57 @@ const pct = (u: CloudItem) => (u.size ? Math.floor((u.offset / u.size) * 100) : 
           <p v-if="tokErr" class="small err-text">{{ tokErr }}</p>
           <p v-if="tokens && !tokens.length" class="muted small">{{ t('tokNone') }}</p>
           <div v-else-if="tokens" class="tablewrap">
-            <table class="atable cards">
+            <!-- the "wide" columns give way below ~980 px of room (their values move under the name, "sub");
+                 below ~720 px the table becomes cards (style.css, container queries on .adminpane) -->
+            <table class="atable cards tokens">
               <thead><tr>
-                <th>{{ t('tokName') }}</th><th>{{ t('tokRole') }}</th><th>{{ t('tokPrefix') }}</th><th>{{ t('tokCreated') }}</th>
+                <th>{{ t('tokName') }}</th><th>{{ t('tokRole') }}</th><th class="wide">{{ t('tokPrefix') }}</th><th class="wide">{{ t('tokCreated') }}</th>
                 <th>{{ t('tokLastSeen') }}</th><th class="num">{{ t('tokUploads') }}</th><th>{{ t('tokStatus') }}</th><th></th>
               </tr></thead>
               <tbody>
-                <tr v-for="k in tokens" :key="k.id" :class="{ revoked: k.revokedAt }">
-                  <td class="name"><b>{{ k.name }}</b></td>
-                  <td :data-label="t('tokRole')">{{ t('roleShort_' + k.role) }}</td>
-                  <td :data-label="t('tokPrefix')"><code>{{ k.prefix }}…</code></td>
-                  <td :data-label="t('tokCreated')">{{ when(k.createdAt) }}</td>
-                  <td class="seen" :data-label="t('tokLastSeen')">
-                    <template v-if="k.seen">
-                      <span :title="seenTitle(k.seen)">{{ relTime(k.seen.at) }}</span>
-                      <span v-if="twoClients(k.seen)" class="chip visit" :title="twoTitle(k.seen)">{{ t('seenTwo') }}</span>
-                      <button type="button" class="ghost small more" :aria-expanded="seenOpen === k.id" @click="toggleSeen(k.id)">{{ seenOpen === k.id ? t('seenLess') : t('seenMore') }}</button>
-                      <div class="muted small" :title="seenTitle(k.seen)">{{ seenLine(k.seen) }}</div>
-                      <div v-if="seenOpen === k.id" class="seenfull small">{{ seenTitle(k.seen) }}</div>
-                      <div v-if="seenOpen === k.id && twoClients(k.seen)" class="seenfull small">{{ twoTitle(k.seen) }}</div>
-                    </template>
-                    <span v-else-if="k.lastUsedAt" :title="t('tokLastUsed')">{{ when(k.lastUsedAt) }}</span>
-                    <span v-else class="muted">{{ t('tokNever') }}</span>
-                  </td>
-                  <td class="num" :data-label="t('tokUploads')">{{ k.uploads }}</td>
-                  <td class="status" :data-label="t('tokStatus')">
-                    <span v-if="k.revokedAt" class="chip rm">{{ t('tokRevoked', { date: when(k.revokedAt) }) }}</span>
-                    <span v-else class="chip ok">{{ t('tokActive') }}</span>
-                  </td>
-                  <td class="act">
-                    <template v-if="!k.revokedAt">
-                      <span v-if="revoking === k.id" class="confirm">
-                        <span class="small">{{ t('tokRevokeConfirm') }}</span>
-                        <button class="danger small" @click="revoke(k.id)">{{ t('tokRevokeYes') }}</button>
-                        <button class="ghost small" @click="revoking = null">{{ t('cancel') }}</button>
-                      </span>
-                      <button v-else class="danger small" @click="revoking = k.id">{{ t('tokRevoke') }}</button>
-                    </template>
-                  </td>
-                </tr>
+                <template v-for="k in tokens" :key="k.id">
+                  <tr :class="{ revoked: k.revokedAt, open: seenOpen === k.id && k.seen }">
+                    <td class="name"><b>{{ k.name }}</b>
+                      <div class="sub muted small"><code>{{ k.prefix }}…</code> · <span :title="when(k.createdAt)">{{ short(k.createdAt) }}</span></div></td>
+                    <td class="nw" :data-label="t('tokRole')">{{ t('roleShort_' + k.role) }}</td>
+                    <td class="wide nw" :data-label="t('tokPrefix')"><code>{{ k.prefix }}…</code></td>
+                    <td class="wide nw" :data-label="t('tokCreated')" :title="when(k.createdAt)">{{ short(k.createdAt) }}</td>
+                    <td class="seen" :data-label="t('tokLastSeen')">
+                      <template v-if="k.seen">
+                        <span class="nw" :title="seenTitle(k.seen)">{{ relTime(k.seen.at) }}</span>
+                        <span v-if="twoClients(k.seen)" class="chip visit" :title="twoTitle(k.seen)">{{ t('seenTwo') }}</span>
+                        <button type="button" class="ghost small more" :aria-expanded="seenOpen === k.id" @click="toggleSeen(k.id)">{{ seenOpen === k.id ? t('seenLess') : t('seenMore') }}</button>
+                        <div class="muted small" :title="seenTitle(k.seen)">{{ seenLine(k.seen) }}</div>
+                        <!-- cards: the details inside the card; a table: in a full-width row below (seenrow) -->
+                        <div v-if="seenOpen === k.id" class="seenfull incell small">{{ seenTitle(k.seen) }}</div>
+                        <div v-if="seenOpen === k.id && twoClients(k.seen)" class="seenfull incell small">{{ twoTitle(k.seen) }}</div>
+                      </template>
+                      <span v-else-if="k.lastUsedAt" class="nw" :title="t('tokLastUsed') + ': ' + when(k.lastUsedAt)">{{ short(k.lastUsedAt) }}</span>
+                      <span v-else class="muted">{{ t('tokNever') }}</span>
+                    </td>
+                    <td class="num" :data-label="t('tokUploads')">{{ k.uploads }}</td>
+                    <td class="status" :data-label="t('tokStatus')">
+                      <span v-if="k.revokedAt" class="chip rm" :title="when(k.revokedAt)">{{ t('tokRevoked', { date: short(k.revokedAt) }) }}</span>
+                      <span v-else class="chip ok">{{ t('tokActive') }}</span>
+                    </td>
+                    <td class="act">
+                      <template v-if="!k.revokedAt">
+                        <span v-if="revoking === k.id" class="confirm">
+                          <span class="small">{{ t('tokRevokeConfirm') }}</span>
+                          <button class="danger small" @click="revoke(k.id)">{{ t('tokRevokeYes') }}</button>
+                          <button class="ghost small" @click="revoking = null">{{ t('cancel') }}</button>
+                        </span>
+                        <button v-else class="danger small" @click="revoking = k.id">{{ t('tokRevoke') }}</button>
+                      </template>
+                    </td>
+                  </tr>
+                  <tr v-if="seenOpen === k.id && k.seen" class="seenrow">
+                    <td colspan="8"><div class="seenwrap">
+                      <div class="seenfull small">{{ seenTitle(k.seen) }}</div>
+                      <div v-if="twoClients(k.seen)" class="seenfull small">{{ twoTitle(k.seen) }}</div>
+                    </div></td>
+                  </tr>
+                </template>
               </tbody>
             </table>
           </div>
@@ -294,18 +325,19 @@ const pct = (u: CloudItem) => (u.size ? Math.floor((u.offset / u.size) * 100) : 
           <p v-if="upErr" class="small err-text">{{ upErr }}</p>
           <p v-if="uploads && !shownUploads.length" class="muted small">{{ t('upNone') }}</p>
           <div v-else-if="uploads" class="tablewrap">
-            <table class="atable cards">
+            <table class="atable cards ups">
               <thead><tr>
-                <th>{{ t('tokName') }}</th><th>{{ t('upType') }}</th><th class="num">{{ t('upSize') }}</th><th>{{ t('tokCreated') }}</th>
-                <th>{{ t('upBy') }}</th><th></th>
+                <th>{{ t('tokName') }}</th><th>{{ t('upType') }}</th><th class="num">{{ t('upSize') }}</th><th class="wide">{{ t('tokCreated') }}</th>
+                <th class="wide">{{ t('upBy') }}</th><th></th>
               </tr></thead>
               <tbody>
                 <tr v-for="u in shownUploads" :key="u.id">
-                  <td class="name"><b>{{ u.name || u.sessionId || u.filename }}</b><div v-if="u.name || u.sessionId" class="muted small">{{ u.filename }}</div></td>
+                  <td class="name"><b>{{ u.name || u.sessionId || u.filename }}</b><div v-if="u.name || u.sessionId" class="muted small">{{ u.filename }}</div>
+                    <div class="sub muted small"><span :title="when(u.createdAt)">{{ short(u.createdAt) }}</span> · {{ u.by?.name || '–' }}</div></td>
                   <td :data-label="t('upType')">{{ typeLabel(u.type) }} <span v-if="!u.complete" class="chip visit">{{ t('upUnfinished', { pct: pct(u) }) }}</span></td>
-                  <td class="num" :data-label="t('upSize')">{{ humanSize(u.size) }}</td>
-                  <td :data-label="t('tokCreated')">{{ when(u.createdAt) }}</td>
-                  <td :data-label="t('upBy')">{{ u.by?.name || '–' }}</td>
+                  <td class="num nw" :data-label="t('upSize')">{{ humanSize(u.size) }}</td>
+                  <td class="wide nw" :data-label="t('tokCreated')" :title="when(u.createdAt)">{{ short(u.createdAt) }}</td>
+                  <td class="wide" :data-label="t('upBy')">{{ u.by?.name || '–' }}</td>
                   <td class="act">
                     <span v-if="deleting === u.id" class="confirm">
                       <span class="small">{{ t('upDeleteConfirm') }}</span>

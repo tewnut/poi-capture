@@ -458,6 +458,10 @@ footer { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; bottom: 0; 
   .closex { min-width: 44px; min-height: 44px; }
   .fields input, textarea, .cat { font-size: 16px; }   /* no zoom-in on focus (iOS) */
 }
+/* tablet (701-1099 px, style.css): the panel bar has back, so no close button */
+@media (max-width: 1099px) { .closex { display: none; } }
+/* big screens: a taller photo */
+@media (min-width: 1600px) and (min-height: 900px) { .photos .big { max-height: 380px; } }
 /* phone (<= 700 px, style.css): field name above its value; the photo strip scrolls sideways */
 @media (max-width: 700px) {
   .fields, .fields tbody { display: block; }
@@ -469,7 +473,6 @@ footer { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; bottom: 0; 
   .thumbs > * { flex: none; }
   .photos .big { max-height: 46vh; }
   .cat { width: 120px; }
-  .closex { display: none; }
   footer { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
   footer button { flex: 1 1 auto; }
   .vbar { flex-wrap: wrap; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }

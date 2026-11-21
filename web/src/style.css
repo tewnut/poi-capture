@@ -19,7 +19,8 @@ button:disabled { cursor: default; opacity: .5; }
 .ghost.on { color: var(--accent); font-weight: 600; }
 select, input { font: inherit; }
 
-.app { display: grid; grid-template-columns: 352px 1fr auto; height: 100vh; }
+/* desktop (>= 1100 px): list | map | open place or task; list and panel grow a little on big screens */
+.app { display: grid; grid-template-columns: clamp(300px, 26vw, 400px) minmax(0, 1fr) auto; height: 100vh; }
 .brand { font-weight: 800; font-size: 16px; letter-spacing: -.3px; }
 .logo { color: var(--accent); }
 button.small { padding: 4px 10px; font-size: 13px; }
@@ -94,7 +95,7 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .tact { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 
 .mapwrap { position: relative; min-width: 0; }
-.detail { width: 420px; overflow: auto; background: var(--card); border-left: 1px solid var(--line); padding: 14px 16px; }
+.detail { width: clamp(380px, 30vw, 520px); overflow: auto; background: var(--card); border-left: 1px solid var(--line); padding: 14px 16px; }
 
 .drop { position: fixed; inset: 0; background: rgba(31,122,82,.12); border: 3px dashed var(--accent); display: grid; place-items: center;
   font-size: 20px; font-weight: 700; color: var(--accent); z-index: 2000; pointer-events: none; }
@@ -103,11 +104,21 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .dialog h2 { margin: 0 0 6px; }
 .pubs { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
 
-@media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; grid-template-rows: 45vh auto auto; height: auto; }
-  .mapwrap { grid-row: 1; height: 45vh; }
-  .side { grid-row: 2; border-right: 0; }
-  .detail { grid-row: 3; width: auto; border-left: 0; border-top: 1px solid var(--line); }
+/* tablets and small laptops (701-1099 px): three columns leave the map or the panel too narrow, so the list stays
+   on the left and the open place or task takes the map's place (with the phone's bar: back, previous / next, swipe);
+   "Map" splits the right side, the map above the panel (to check or drag the pin). */
+@media (min-width: 701px) and (max-width: 1099px) {
+  .app { grid-template-columns: clamp(300px, 36vw, 360px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .side { grid-row: 1 / -1; grid-column: 1; min-width: 0; }
+  .mapwrap { grid-row: 1; grid-column: 2; }
+  .detail { grid-row: 1; grid-column: 2; width: auto; min-width: 0; position: relative; z-index: 1100; padding-top: 0; }
+  .app.peek { grid-template-rows: 45% minmax(0, 1fr); }
+  .app.peek .detail { grid-row: 2; box-shadow: 0 -4px 14px rgba(0,0,0,.18); border-top: 1px solid var(--line); }
+  .detail .dnav { display: flex; align-items: center; gap: 6px; position: sticky; top: 0; z-index: 20; background: var(--card);
+    margin: 0 -16px 10px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  .dnav .back { margin-right: auto; padding-left: 4px; }
+  .dnav .dpos { white-space: nowrap; }
+  .dnav .dstep { min-width: 40px; font-size: 20px; line-height: 1; padding: 2px 12px; }
 }
 
 /* cloud storage: settings block and the "From server" list */
@@ -120,9 +131,9 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .cloud .citem .body { display: grid; flex: 1; min-width: 0; }
 .cloud .citem .body b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* admin (AdminPanel.vue): tokens and uploads, in a wide dialog */
+/* admin (AdminPanel.vue): tokens and uploads, on a card up to 1320 px wide */
 .adminpage { min-height: 100vh; display: grid; justify-items: center; align-content: start; padding: 24px 12px; background: #f4f5f7; }
-.dialog.admin { width: min(980px, 100%); display: grid; gap: 10px; }
+.dialog.admin { width: min(1320px, 100%); display: grid; gap: 10px; }
 .dialog.admin h2 { margin: 0; }
 .dialog.admin p { margin: 0; }
 .dialog.admin .seg { margin: 0; }
@@ -130,8 +141,11 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .adminauth label { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 8px; font-size: 13px; }
 .adminauth button { justify-self: start; }
 .dialog.admin input, .dialog.admin select { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 13px; background: #fff; }
-.adminpane { display: grid; gap: 8px; }
+/* the tables follow the room they have (container queries below), not the screen */
+.adminpane { display: grid; gap: 8px; container: apane / inline-size; }
+.adminpane > * { min-width: 0; }
 .issue { display: grid; gap: 6px; padding: 10px; background: var(--canvas); border-radius: 10px; }
+.issue > * { max-width: 760px; }
 .issuerow { display: flex; gap: 6px; flex-wrap: wrap; }
 .issuerow input { flex: 1; min-width: 180px; }
 .issued { display: grid; gap: 8px; padding: 12px; border: 2px solid var(--accent); border-radius: 12px; background: #f1faf5; }
@@ -147,6 +161,10 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .atable { width: 100%; border-collapse: collapse; font-size: 13px; }
 .atable th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; background: var(--canvas); padding: 6px 8px; white-space: nowrap; }
 .atable td { padding: 6px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+.atable .nw { white-space: nowrap; }
+.atable td.name { min-width: 140px; max-width: 300px; overflow-wrap: anywhere; }
+.atable td.name .sub { display: none; }
+.atable td.name .sub code { font-size: 11px; }
 .atable .num { text-align: right; }
 .atable .act { text-align: right; white-space: nowrap; }
 .atable .confirm { display: inline-flex; gap: 6px; align-items: center; }
@@ -156,15 +174,22 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .settings .cloudset .row button { white-space: nowrap; flex: none; }
 .settings .cloudset .row { justify-content: flex-start; }
 /* admin: last seen and the map (AdminPanel.vue, AdminMap.vue) */
-.atable td.seen { min-width: 160px; }
+.atable td.seen { min-width: 200px; }
+.atable tr.open td { background: #f8faf9; }
+.atable .seenrow td { border-top: 0; padding: 0 8px 10px; background: #f8faf9; }
+.seenwrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.seenwrap .seenfull { margin: 0; flex: 1 1 320px; background: #fff; border: 1px solid var(--line); }
+.atable .seenfull.incell { display: none; }
 .atable td.seen .chip { margin-left: 4px; cursor: help; }
 .builtins { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
 .builtins li { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .adminmap { display: grid; gap: 8px; }
 .mapfilters { justify-content: flex-start; flex-wrap: wrap; }
 .mapfilters label { display: inline-flex; gap: 6px; align-items: center; }
+.mapfilters select { max-width: 280px; text-overflow: ellipsis; }
 .mapfilters > :last-child { margin-left: auto; }
-.amap { height: min(62vh, 560px); min-height: 320px; border: 1px solid var(--line); border-radius: 10px; }
+/* the map fills the window below the page's header and filters */
+.amap { height: calc(100vh - 350px); height: calc(100dvh - 350px); min-height: 360px; border: 1px solid var(--line); border-radius: 10px; }
 .maplegend { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .maplegend span { display: inline-flex; align-items: center; gap: 6px; }
 .maplegend i { width: 18px; height: 4px; border-radius: 2px; display: inline-block; }
@@ -177,16 +202,12 @@ button.small { padding: 4px 10px; font-size: 13px; }
 /* ---- touch and phone ------------------------------------------------------------------------------------------
    Two queries: (pointer: coarse) = a finger, so 44 px targets and tap instead of hover, at any width;
    (max-width: 700px) = a phone (360-430 px portrait, and most phones in landscape), where the open place or task
-   becomes a full-screen panel. 701-900 px (small tablets, narrow windows) keeps the stacked layout above. */
+   becomes a full-screen panel. 701-1099 px: the panel in the map's place (above). */
 .dnav { display: none; }
-.atable .more, .builtins .more { display: none; }
+.atable .more, .builtins .more { color: var(--accent); }
 .seenfull { white-space: pre-line; margin-top: 4px; padding: 6px 8px; background: var(--canvas); border-radius: 8px; color: var(--ink);
   overflow-wrap: anywhere; font-size: 12px; }
 
-@media (hover: none) {
-  .atable .more, .builtins .more { display: inline-flex; color: var(--accent); }
-}
-@media (hover: hover) { .atable .seenfull, .builtins .seenfull { display: none; } }   /* the tooltips say it */
 
 @media (pointer: coarse) {
   .primary, .secondary, .danger, .ghost, button.small { min-height: 44px; }
@@ -203,10 +224,10 @@ button.small { padding: 4px 10px; font-size: 13px; }
 }
 
 @media (max-width: 700px) {
-  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; }
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; height: auto; }
   .mapwrap { grid-row: 1; height: 42vh; height: 42dvh; }
   .app.sess .mapwrap { height: 28vh; height: 28dvh; min-height: 170px; }   /* an open session: room for its list */
-  .side { grid-row: 2; min-width: 0; }
+  .side { grid-row: 2; min-width: 0; border-right: 0; }
   .pane { overflow: visible; padding: 10px 12px; }
   .sidehead { padding-top: calc(10px + env(safe-area-inset-top)); }
   .importbar { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
@@ -254,6 +275,25 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .issuerow input { min-width: 0; }
   .issued .qr { width: min(240px, 100%); height: auto; aspect-ratio: 1; }
   .issued .qrrow .small { min-width: 0; }
+  .builtins li { overflow-wrap: anywhere; }
+  .amap { height: 60vh; height: 60dvh; min-height: 300px; }
+  .mapfilters > :last-child { margin-left: 0; }
+  .mapfilters label { flex: 1 1 140px; min-width: 0; max-width: 100%; }
+  .dialog.admin > *, .adminmap > * { min-width: 0; }
+  .mapfilters select { flex: 1; min-width: 0; max-width: none; }
+}
+
+/* admin tables by the room they have (.adminpane): every column from ~980 px; below that the tokens' prefix and
+   created date (below ~760 px the uploads' date and uploader) move under the name; below ~720 px, cards */
+@container apane (max-width: 979px) {
+  .atable.tokens .wide { display: none; }
+  .atable.tokens td.name .sub { display: block; }
+}
+@container apane (max-width: 759px) {
+  .atable.ups .wide { display: none; }
+  .atable.ups td.name .sub { display: block; }
+}
+@container apane (max-width: 719px) {
   .tablewrap { overflow: visible; border: 0; }
   .atable.cards, .atable.cards tbody { display: block; }
   .atable.cards thead { display: none; }
@@ -267,14 +307,14 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .atable.cards td.act:empty { display: none; }
   .atable.cards td.num { text-align: left; }
   .atable.cards td.seen { min-width: 0; }
+  .atable.cards td.name { max-width: none; }
+  .atable.cards td.wide { display: block; }
+  .atable.cards td.name .sub, .atable.cards .seenrow { display: none; }
+  .atable.cards .seenfull.incell { display: block; }
+  .atable.cards tr.open td { background: none; }
+  .atable.cards .nw { white-space: normal; }
   .atable.cards .act .confirm { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
   .atable.cards .act .confirm > .small { flex-basis: 100%; white-space: normal; }
   .atable.cards .act button { flex: 1 1 auto; }
   .atable.cards .act > button { width: 100%; }
-  .builtins li { overflow-wrap: anywhere; }
-  .amap { height: 60vh; height: 60dvh; min-height: 300px; }
-  .mapfilters > :last-child { margin-left: 0; }
-  .mapfilters label { flex: 1 1 140px; min-width: 0; max-width: 100%; }
-  .dialog.admin > *, .adminpane > *, .adminmap > * { min-width: 0; }
-  .mapfilters select { flex: 1; min-width: 0; }
 }

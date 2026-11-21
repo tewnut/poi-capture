@@ -205,14 +205,15 @@ function nextPlace() {
 }
 function movePin(lat: number, lon: number) { reviewRef.value?.setPin(lat, lon) }
 
-// phone (<= 700 px, the PHONE query in style.css): the open place or task is a full-screen panel with back,
-// previous / next and a horizontal swipe; "Map" shows the map above it (to check or drag the pin)
-const PHONE = '(max-width: 700px)'
-const phoneMq = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(PHONE) : null
-const phone = ref(!!phoneMq?.matches)
-const onPhoneMq = (e: MediaQueryListEvent) => (phone.value = e.matches)
-onMounted(() => phoneMq?.addEventListener?.('change', onPhoneMq))
-onBeforeUnmount(() => phoneMq?.removeEventListener?.('change', onPhoneMq))
+// phone (<= 700 px in style.css): the open place or task is a full-screen panel; tablet (701-1099 px): the panel
+// takes the map's place. Both have back, previous / next and a horizontal swipe; "Map" shows the map above the panel
+// (to check or drag the pin). PANEL is the widest of the two queries.
+const PANEL = '(max-width: 1099px)'
+const panelMq = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(PANEL) : null
+const panel = ref(!!panelMq?.matches)
+const onPanelMq = (e: MediaQueryListEvent) => (panel.value = e.matches)
+onMounted(() => panelMq?.addEventListener?.('change', onPanelMq))
+onBeforeUnmount(() => panelMq?.removeEventListener?.('change', onPanelMq))
 const detailEl = ref<HTMLElement>()
 const mapRef = ref<InstanceType<typeof MapView>>()
 const mapPeek = ref(false)
@@ -243,7 +244,7 @@ function closeDetail() {
 let touch: { x: number; y: number; t: number } | null = null
 function touchStart(e: TouchEvent) {
   touch = null
-  if (!phone.value || e.touches.length !== 1 || !detailEl.value) return
+  if (!panel.value || e.touches.length !== 1 || !detailEl.value) return
   if (blocksSwipe(e.target as Element, detailEl.value, (el) => getComputedStyle(el as Element).overflowX)) return
   touch = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() }
 }
@@ -553,7 +554,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
 
     <aside v-if="openDataset && (openPlace || (openTask && state.task != null))" ref="detailEl" :class="['detail', { peek: mapPeek }]"
       @touchstart.passive="touchStart" @touchend="touchEnd" @touchcancel="touch = null">
-      <!-- phone only (style.css): back, where we are, the map, previous / next -->
+      <!-- phone and tablet only (style.css): back, where we are, the map, previous / next -->
       <nav class="dnav">
         <button class="ghost back" @click="closeDetail">‹ {{ openPlace ? t('places') : t('tasks') }}</button>
         <span class="dpos muted small">{{ stepPos + 1 }} / {{ stepList.length }}</span>
