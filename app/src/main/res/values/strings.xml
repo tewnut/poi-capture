@@ -585,10 +585,13 @@
     <string name="upload_scan_no_token">This QR code has no access token. Ask the project lead for a new setup QR code.</string>
     <string name="upload_scan_unavailable">The QR scanner is not ready yet: Google Play services is still downloading it. Try again in a minute.</string>
     <string name="upload_scan_failed">Could not open the QR scanner: %s</string>
-    <string name="upload_test_me">Connected as %1$s (%2$s)</string>
-    <string name="upload_role_uploader">uploader</string>
-    <string name="upload_role_reviewer">reviewer</string>
-    <string name="upload_role_admin">admin</string>
+    <string name="upload_test_me">Connected as %1$s · can: %2$s</string>
+    <string name="upload_scope_upload">Send rides</string>
+    <string name="upload_scope_read">View &amp; download</string>
+    <string name="upload_scope_process">Process rides</string>
+    <string name="upload_scope_delete">Delete uploads</string>
+    <string name="upload_scope_admin">Admin</string>
+    <string name="upload_test_no_upload">This token cannot send rides: ask the admin for one with Send rides</string>
     <string name="upload_url_label">Server address</string>
     <string name="upload_url_invalid">Enter an address starting with http:// or https://</string>
     <string name="upload_http_warning">http:// sends the photos and the token unencrypted: use https:// outside a test network.</string>

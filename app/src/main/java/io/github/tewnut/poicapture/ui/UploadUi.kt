@@ -42,6 +42,7 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.capture.UploadServer
 import io.github.tewnut.poicapture.capture.Uploads
+import io.github.tewnut.poicapture.core.CloudMe
 import io.github.tewnut.poicapture.core.SetupLink
 import io.github.tewnut.poicapture.core.Tus
 import io.github.tewnut.poicapture.core.UploadStatus
@@ -69,13 +70,14 @@ fun UploadServerCard(onChange: () -> Unit = {}) {
     var wifi by remember { mutableStateOf(UploadServer.wifiOnly(ctx)) }
     var testing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Pair<String, Boolean>?>(null) }   // text, ok
+    var noUpload by remember { mutableStateOf(false) }   // the tested token lacks the upload scope
     var scanned by remember { mutableStateOf<Pair<String, Boolean>?>(null) }  // what the last scan did, ok
     val valid = Tus.endpoint(url) != null
     /** The project's server answers 401 without its token: the field says so instead of "optional". */
     val projectServer = valid && Tus.endpoint(url) == Tus.endpoint(UploadServer.DEFAULT_URL)
 
     fun test() {
-        testing = true; result = null
+        testing = true; result = null; noUpload = false
         scope.launch {
             result = try {
                 val client = TusClient(url, token)
@@ -89,7 +91,8 @@ fun UploadServerCard(onChange: () -> Unit = {}) {
                         val me = withContext(Dispatchers.IO) {
                             try { client.me() } catch (e: TusClient.HttpError) { throw e } catch (_: Exception) { null }
                         }
-                        val who = me?.let { ctx.getString(R.string.upload_test_me, it.name, roleLabel(ctx, it.role)) }
+                        val who = me?.let { ctx.getString(R.string.upload_test_me, it.name, scopesLabel(ctx, it)) }
+                        noUpload = me != null && !me.canUpload
                         listOfNotNull(ok, who).joinToString("\n") to true
                     }
                 }
@@ -148,6 +151,7 @@ fun UploadServerCard(onChange: () -> Unit = {}) {
         if (testing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
     }
     result?.let { (text, ok) -> Hint(text, color = if (ok) Palette.Green else Palette.Red) }
+    if (result != null && noUpload) Hint(stringResource(R.string.upload_test_no_upload), color = Palette.Amber)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(R.string.upload_auto), modifier = Modifier.weight(1f), color = Palette.Ink)
         Switch(auto, { auto = it; UploadServer.setAuto(ctx, it) })
@@ -179,12 +183,18 @@ private fun scanSetupQr(ctx: Context, onError: (String) -> Unit, onText: (String
     }
 }
 
-/** uploader / reviewer / admin in the phone's language; anything else as the server sent it. */
-private fun roleLabel(ctx: Context, role: String): String = when (role) {
-    "uploader" -> ctx.getString(R.string.upload_role_uploader)
-    "reviewer" -> ctx.getString(R.string.upload_role_reviewer)
-    "admin" -> ctx.getString(R.string.upload_role_admin)
-    else -> role
+/** "Send rides, View & download, Admin" in the phone's language; a scope the app does not know as the server sent it. */
+private fun scopesLabel(ctx: Context, me: CloudMe): String {
+    val labels = me.scopes.map { scope ->
+        when (scope) {
+            CloudMe.UPLOAD -> ctx.getString(R.string.upload_scope_upload)
+            CloudMe.READ -> ctx.getString(R.string.upload_scope_read)
+            CloudMe.PROCESS -> ctx.getString(R.string.upload_scope_process)
+            CloudMe.DELETE -> ctx.getString(R.string.upload_scope_delete)
+            else -> scope
+        }
+    } + listOfNotNull(if (me.admin) ctx.getString(R.string.upload_scope_admin) else null)
+    return labels.ifEmpty { listOf("–") }.joinToString(", ")
 }
 
 /**

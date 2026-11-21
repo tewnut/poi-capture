@@ -566,10 +566,13 @@
     <string name="upload_scan_no_token">Mã QR này không có mã truy cập. Hỏi trưởng dự án để lấy mã QR thiết lập mới.</string>
     <string name="upload_scan_unavailable">Trình quét QR chưa sẵn sàng: Dịch vụ Google Play vẫn đang tải xuống. Hãy thử lại sau một phút.</string>
     <string name="upload_scan_failed">Không mở được trình quét QR: %s</string>
-    <string name="upload_test_me">Đã kết nối với tên %1$s (%2$s)</string>
-    <string name="upload_role_uploader">người tải lên</string>
-    <string name="upload_role_reviewer">người duyệt</string>
-    <string name="upload_role_admin">quản trị viên</string>
+    <string name="upload_test_me">Đã kết nối với tên %1$s · có quyền: %2$s</string>
+    <string name="upload_scope_upload">Gửi chuyến đi</string>
+    <string name="upload_scope_read">Xem và tải về</string>
+    <string name="upload_scope_process">Xử lý chuyến đi</string>
+    <string name="upload_scope_delete">Xoá dữ liệu tải lên</string>
+    <string name="upload_scope_admin">Quản trị</string>
+    <string name="upload_test_no_upload">Mã này không gửi được chuyến đi: hãy xin quản trị viên một mã có quyền Gửi chuyến đi</string>
     <string name="upload_url_label">Địa chỉ máy chủ</string>
     <string name="upload_url_invalid">Nhập địa chỉ bắt đầu bằng http:// hoặc https://</string>
     <string name="upload_http_warning">http:// gửi ảnh và mã truy cập không mã hóa: hãy dùng https:// ngoài mạng thử nghiệm.</string>

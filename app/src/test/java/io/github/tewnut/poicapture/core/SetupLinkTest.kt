@@ -3,6 +3,7 @@ package io.github.tewnut.poicapture.core
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SetupLinkTest {
@@ -58,12 +59,44 @@ class SetupLinkTest {
     }
 
     @Test fun meParsesOnlyItsSchema() {
-        assertEquals(CloudMe("t1", "Sơn – phone", "uploader"),
+        assertEquals(CloudMe("t1", "Sơn – phone", "uploader", listOf("upload"), false),
             CloudMe.parse("""{"schema":"poi-cloud-me/1","id":"t1","name":"Sơn – phone","role":"uploader"}"""))
-        assertEquals(CloudMe("admin", "admin", "admin"), CloudMe.parse("""{"schema":"poi-cloud-me/1","id":"admin","role":"admin"}"""))
         assertNull(CloudMe.parse("""{"id":"t1","name":"x","role":"uploader"}"""))
         assertNull(CloudMe.parse("""{"schema":"poi-cloud-me/1","name":"x"}"""))
         assertNull(CloudMe.parse("<html>Not found</html>"))
         assertNull(CloudMe.parse(null))
+    }
+
+    @Test fun meReadsScopesAndAdmin() {
+        val me = CloudMe.parse("""{"schema":"poi-cloud-me/1","id":"t2","name":"Lan","scopes":["upload","read","future"],"admin":false,"role":"custom"}""")!!
+        assertEquals(listOf("upload", "read", "future"), me.scopes)
+        assertFalse(me.admin)
+        assertTrue(me.canUpload)
+        assertEquals("custom", me.role)
+
+        val reviewer = CloudMe.parse("""{"schema":"poi-cloud-me/1","id":"t3","name":"R","scopes":["read"],"admin":false,"role":"reviewer"}""")!!
+        assertEquals(listOf("read"), reviewer.scopes)   // scopes win over the role summary
+        assertFalse(reviewer.canUpload)
+
+        val admin = CloudMe.parse("""{"schema":"poi-cloud-me/1","id":"admin","name":"Admin","scopes":["upload","read","process","delete"],"admin":true,"role":"admin"}""")!!
+        assertTrue(admin.admin)
+        assertEquals(listOf("upload", "read", "process", "delete"), admin.scopes)
+
+        val none = CloudMe.parse("""{"schema":"poi-cloud-me/1","id":"t4","name":"x","scopes":[],"admin":false}""")!!
+        assertEquals(emptyList<String>(), none.scopes)
+        assertFalse(none.canUpload)
+    }
+
+    @Test fun meDerivesScopesFromAnOldRole() {
+        fun old(role: String) = CloudMe.parse("""{"schema":"poi-cloud-me/1","id":"t","name":"n","role":"$role"}""")!!
+        assertEquals(listOf("upload"), old("uploader").scopes)
+        assertFalse(old("uploader").admin)
+        assertEquals(listOf("upload", "read", "process"), old("reviewer").scopes)
+        assertFalse(old("reviewer").admin)
+        assertEquals(listOf("upload", "read", "process", "delete"), old("admin").scopes)
+        assertTrue(old("admin").admin)
+        assertEquals(CloudMe("admin", "admin", "admin", listOf("upload", "read", "process", "delete"), true),
+            CloudMe.parse("""{"schema":"poi-cloud-me/1","id":"admin","role":"admin"}"""))
+        assertEquals(emptyList<String>(), old("something").scopes)
     }
 }

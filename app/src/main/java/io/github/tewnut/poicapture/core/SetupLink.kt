@@ -5,7 +5,7 @@ import java.net.URI
 import java.net.URLDecoder
 
 /**
- * The setup QR / link an admin hands to a phone (server/README.md, "Tokens and roles"):
+ * The setup QR / link an admin hands to a phone (server/README.md, "Tokens and permissions"):
  * `<tus endpoint>#token=<secret>&name=<url-encoded token name>`. The part before `#` is the server address, `token`
  * the access token, `name` the token's label. Pure, so it is tested on the JVM; the token is never put in a message.
  */
@@ -50,10 +50,26 @@ data class SetupLink(val endpoint: String, val token: String, val name: String?)
     }
 }
 
-/** Who the server says a token belongs to: `GET <origin>/me` → `{"schema": "poi-cloud-me/1", "id", "name", "role"}`. */
-data class CloudMe(val id: String, val name: String, val role: String) {
+/**
+ * Who the server says a token belongs to and what it may do (server/README.md, "Tokens and permissions"):
+ * `GET <origin>/me` → `{"schema": "poi-cloud-me/1", "id", "name", "scopes": ["upload", ...], "admin": bool, "role"}`.
+ * Older servers send only `role`; [scopes] and [admin] are then derived from it.
+ */
+data class CloudMe(
+    val id: String,
+    val name: String,
+    val role: String,
+    val scopes: List<String>,
+    val admin: Boolean,
+) {
+    val canUpload: Boolean get() = UPLOAD in scopes
+
     companion object {
         const val SCHEMA = "poi-cloud-me/1"
+        const val UPLOAD = "upload"
+        const val READ = "read"
+        const val PROCESS = "process"
+        const val DELETE = "delete"
 
         /** `https://h.example:8443/files/` → `https://h.example:8443/me`; null when not an http(s) URL. */
         fun url(endpoint: String): String? {
@@ -62,14 +78,27 @@ data class CloudMe(val id: String, val name: String, val role: String) {
             return URI(u.scheme, null, u.host, u.port, "/me", null, null).toString()
         }
 
-        /** null for anything but a poi-cloud-me/1 answer with a name and a role (e.g. a plain tus server's page). */
+        /** What a token with only a [role] (a server before scopes) may do. */
+        fun scopesOfRole(role: String): List<String> = when (role) {
+            "uploader" -> listOf(UPLOAD)
+            "reviewer" -> listOf(UPLOAD, READ, PROCESS)
+            "admin" -> listOf(UPLOAD, READ, PROCESS, DELETE)
+            else -> emptyList()
+        }
+
+        /** null for anything but a poi-cloud-me/1 answer with a role or scopes (e.g. a plain tus server's page). */
         fun parse(body: String?): CloudMe? {
             val o = runCatching { JSONObject(body ?: return null) }.getOrNull() ?: return null
             if (o.optString("schema") != SCHEMA) return null
             val name = o.optString("name").trim()
             val role = o.optString("role").trim()
-            if (role.isEmpty()) return null
-            return CloudMe(o.optString("id"), name.ifEmpty { o.optString("id") }, role)
+            val arr = o.optJSONArray("scopes")
+            if (role.isEmpty() && arr == null) return null
+            val scopes = if (arr != null) {
+                (0 until arr.length()).mapNotNull { arr.optString(it).trim().takeIf { s -> s.isNotEmpty() } }.distinct()
+            } else scopesOfRole(role)
+            val admin = if (o.has("admin")) o.optBoolean("admin") else role == "admin"
+            return CloudMe(o.optString("id"), name.ifEmpty { o.optString("id") }, role, scopes, admin)
         }
     }
 }
