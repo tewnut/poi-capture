@@ -6,10 +6,13 @@
 import { computed, reactive } from 'vue'
 import {
   loadCloud, saveCloud, me, fetchIndex, downloadItem, endpoint, CloudError,
-  type CloudConfig, type CloudItem, type Me,
+  listReviews, checkout, releaseCheckout, getReview, putReviewPackage,
+  type CloudConfig, type CloudItem, type Me, type ReviewInfo,
 } from './cloud'
+import { build, parse, collect, reviewFiles, progress, REVIEW_SCHEMA } from './reviewpkg'
+import type { Dataset } from './types'
 import { importFiles } from './importer'
-import { state, add, setReviewer } from './store'
+import { state, add, setReviewer, applyReview, photoBlob, saveReviews, setSynced } from './store'
 export { rows, type Row } from './sessions'
 
 export type Status = 'none' | 'checking' | 'ok' | 'error'
@@ -25,7 +28,22 @@ export const conn = reactive({
   listing: false,
   listError: '',
   pulling: '' as string,               // the session id being downloaded
+  /** Per session: who has it checked out, and the last review saved on the server (GET /reviews). */
+  reviews: {} as Record<string, ReviewInfo>,
+  reviewBusy: '' as string,            // the session whose review is being checked out / saved / checked in
 })
+
+/** The sessions this reviewer holds: the only ones the store lets change (store.ts state.editable). */
+function syncEditable() {
+  const mine = new Set<string>()
+  for (const r of Object.values(conn.reviews)) if (r.lock && conn.me && r.lock.by.id === conn.me.id) mine.add(r.sessionId)
+  state.editable = mine
+}
+function setInfo(info: ReviewInfo) {
+  if (!info.sessionId) return
+  conn.reviews = { ...conn.reviews, [info.sessionId]: info }
+  syncEditable()
+}
 
 export const connected = computed(() => conn.status === 'ok' && !!conn.me)
 /** The key may list and download (View & download, or Process rides). */
@@ -54,7 +72,9 @@ export async function refresh(f: typeof fetch = fetch) {
   if (!connected.value || !canRead.value) { conn.items = null; return }
   conn.listing = true; conn.listError = ''
   try {
-    conn.items = await fetchIndex(conn.cfg, f, '')
+    const [items, reviews] = await Promise.all([fetchIndex(conn.cfg, f, ''), listReviews(conn.cfg, f).catch(() => null)])
+    conn.items = items
+    if (reviews) { conn.reviews = Object.fromEntries(reviews.map((r) => [r.sessionId, r])); syncEditable() }
   } catch (e: any) {
     conn.listError = e?.message || String(e)
   } finally {
@@ -74,6 +94,77 @@ export function signOut() {
   conn.cfg = { ...conn.cfg, token: '' }
   saveCloud(conn.cfg)
   conn.me = null; conn.items = null; conn.status = 'none'; conn.error = ''; conn.keyRefused = false
+  conn.reviews = {}; syncEditable()
+}
+
+// ---- reviews: check out → edit in this browser → save / check in (server/README.md "Reviews")
+
+/** The server's saved review of [d] replaces this browser's, when it is newer than the one loaded here. */
+export async function loadSaved(d: Dataset, force = false, f: typeof fetch = fetch) {
+  const saved = conn.reviews[d.id]?.saved
+  if (!saved || (!force && state.synced[d.id] && state.synced[d.id] >= saved.at)) return
+  const zip = await getReview(conn.cfg, d.id, f)
+  if (!zip) return
+  const { doc, files } = parse(zip, d.id)
+  const blobs = new Map([...files].map(([p, b]) => [p, new Blob([b as BlobPart], { type: p.endsWith('.png') ? 'image/png' : p.endsWith('.webp') ? 'image/webp' : 'image/jpeg' })]))
+  await applyReview(d.id, doc.reviews, doc.removals, blobs, saved.at)
+}
+
+/** Take the session: the server's latest review comes into this browser first; then it can be edited. */
+export async function checkOut(d: Dataset, f: typeof fetch = fetch) {
+  conn.reviewBusy = d.id
+  try {
+    const info = await checkout(conn.cfg, d.id, f)
+    // a review saved on the server is the one to go on from; none yet: this browser's (older work) stays
+    await loadSaved(d, false, f)
+    setInfo(info)
+  } finally {
+    conn.reviewBusy = ''
+  }
+}
+
+/** Upload this browser's review of [d]; [checkin] hands the session back so another reviewer can take it. */
+export async function saveToServer(d: Dataset, checkin: boolean, f: typeof fetch = fetch) {
+  conn.reviewBusy = d.id
+  try {
+    const { reviews, removals } = collect(d.id, state.reviews, state.removals)
+    const files = new Map<string, Uint8Array>()
+    for (const p of reviewFiles(reviews)) {
+      const b = await photoBlob(d.id, p)
+      if (b) files.set(p, new Uint8Array(await b.arrayBuffer()))
+    }
+    const savedAt = new Date().toISOString()
+    const zip = build({ schema: REVIEW_SCHEMA, sessionId: d.id, reviewer: state.reviewer, savedAt, reviews, removals }, files)
+    const info = await putReviewPackage(conn.cfg, d.id, zip, progress(d, reviews, removals), checkin, f)
+    state.dirty.delete(d.id)
+    await saveReviews()
+    if (info.saved) await setSynced(d.id, info.saved.at)
+    setInfo(info)
+  } finally {
+    conn.reviewBusy = ''
+  }
+}
+
+/** Give up the checkout without uploading: this browser's unsaved changes are replaced by the server's review. */
+export async function giveUp(d: Dataset, f: typeof fetch = fetch) {
+  conn.reviewBusy = d.id
+  try {
+    await releaseCheckout(conn.cfg, d.id, f)
+    const cur = conn.reviews[d.id]
+    setInfo({ sessionId: d.id, lock: null, saved: cur?.saved ?? null })
+    state.dirty.delete(d.id)
+    await saveReviews()
+    await loadSaved(d, true, f).catch(() => {})
+  } finally {
+    conn.reviewBusy = ''
+  }
+}
+
+/** An admin frees another reviewer's checkout. */
+export async function forceRelease(sessionId: string, f: typeof fetch = fetch) {
+  await releaseCheckout(conn.cfg, sessionId, f)
+  const cur = conn.reviews[sessionId]
+  setInfo({ sessionId, lock: null, saved: cur?.saved ?? null })
 }
 
 /** Download a processed session into this browser (first open, or the server's newer version). */

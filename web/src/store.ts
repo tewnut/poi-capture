@@ -19,6 +19,12 @@ export const state = reactive({
   reviews: {} as Record<string, Review>,          // `${dataset}|${place}`
   removals: {} as Record<string, RemovalReview>,  // `${dataset}|${task index}`
   reviewer: localStorage.getItem('reviewer') || '',
+  /** Sessions this reviewer has checked out on the server (connection.ts): only these can be edited. */
+  editable: new Set<string>(),
+  /** Checked-out sessions with changes not saved to the server yet. */
+  dirty: new Set<string>(),
+  /** Per session, the server review (its savedAt) last loaded into this browser. */
+  synced: {} as Record<string, string>,
   loading: true,
   error: '' as string,
 })
@@ -32,6 +38,8 @@ export async function load() {
     state.datasets = ((await getMany(dsKeys, meta)) as Dataset[]).sort((a, b) => (b.session.startedAt || '').localeCompare(a.session.startedAt || ''))
     state.reviews = (await get('reviews', meta)) || {}
     state.removals = (await get('removals', meta)) || {}
+    state.synced = (await get('synced', meta)) || {}
+    state.dirty = new Set((await get('dirty', meta)) || [])
     state.shown = new Set(state.datasets.map((d) => d.id))
   } catch (e: any) {
     state.error = `Could not open the browser storage: ${e.message}`
@@ -121,6 +129,26 @@ export async function cropPhoto(ds: string, path: string, [x, y, w, h]: [number,
 export async function saveReviews() {
   await set('reviews', JSON.parse(JSON.stringify(state.reviews)), meta)
   await set('removals', JSON.parse(JSON.stringify(state.removals)), meta)
+  await set('dirty', [...state.dirty], meta)
+}
+
+export async function setSynced(ds: string, at: string | null) {
+  if (at) state.synced[ds] = at
+  else delete state.synced[ds]
+  await set('synced', { ...state.synced }, meta)
+}
+
+/** A review loaded from the server replaces this session's reviews, removals and reviewer photos in this browser. */
+export async function applyReview(ds: string, reviews: Record<string, Review>, removals: Record<string, RemovalReview>,
+  files: Map<string, Blob>, savedAt: string | null) {
+  for (const k of Object.keys(state.reviews)) if (k.startsWith(ds + '|')) delete state.reviews[k]
+  for (const k of Object.keys(state.removals)) if (k.startsWith(ds + '|')) delete state.removals[k]
+  for (const [id, r] of Object.entries(reviews)) state.reviews[rkey(ds, id)] = r
+  for (const [i, r] of Object.entries(removals)) state.removals[`${ds}|${i}`] = r
+  for (const [path, b] of files) await putPhoto(ds, path, b)
+  state.dirty.delete(ds)
+  await saveReviews()
+  await setSynced(ds, savedAt)
 }
 
 export function setReviewer(name: string) {
@@ -132,13 +160,18 @@ export function reviewOf(ds: string, p: Place): Review {
   return state.reviews[rkey(ds, p.id)] || { decision: 'todo', fields: {} }
 }
 
+/** Reviews change only in a session this reviewer has checked out (state.editable); anything else is ignored. */
 export async function putReview(ds: string, p: Place, r: Review) {
+  if (!state.editable.has(ds)) return
   state.reviews[rkey(ds, p.id)] = { ...r, reviewer: state.reviewer || undefined, at: new Date().toISOString() }
+  state.dirty.add(ds)
   await saveReviews()
 }
 
 export async function putRemoval(ds: string, i: number, decision: RemovalReview['decision']) {
+  if (!state.editable.has(ds)) return
   state.removals[`${ds}|${i}`] = { decision, reviewer: state.reviewer || undefined, at: new Date().toISOString() }
+  state.dirty.add(ds)
   await saveReviews()
 }
 

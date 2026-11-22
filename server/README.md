@@ -126,6 +126,24 @@ daily cron, with their R2 parts).
 Why not the alternatives: storing every PATCH as its own object and concatenating on download makes many small
 objects and slow downloads; per-upload state in R2 object metadata cannot serialise two PATCHes to the same upload.
 
+### Reviews (checkout / check-in)
+
+A processed session is reviewed by one person at a time, in the reviewer web app. The review (every decision, field
+edit, pin and the photos the reviewer added or cropped) travels as one zip, `review.json` + those photos
+(web/src/reviewpkg.ts), kept in R2 as `reviews/<session id>.zip`. Every call needs `read` (View & download) or
+`process`.
+
+- `GET /reviews` → `{schema: "poi-cloud-reviews/1", reviews: [{sessionId, lock, saved}]}`: `lock` = `{by: {id, name},
+  at, until}` or null (free); `saved` = `{by, at, size, done, total}` or null (nothing saved yet).
+- `POST /reviews/<session>/checkout`: take the lock. `200` with the review's state when it was free, expired, or
+  already this key's (renewed); `409` with who has it otherwise.
+- `GET /reviews/<session>`: the last saved review zip (`404` none).
+- `PUT /reviews/<session>[?checkin=1]`, body the zip (at most 100 MB), headers `X-Review-Done` / `X-Review-Total`
+  (decided / to decide, for the list): only by the key holding the checkout (`409` otherwise). It renews the lock;
+  `checkin=1` releases it: the next reviewer can check out and goes on from there.
+- `DELETE /reviews/<session>/checkout`: give up the checkout without saving (one's own; an admin's: anybody's).
+- A checkout with no save for 24 hours expires.
+
 ### Direct uploads (presigned R2 parts)
 
 From Vietnam, uploads to Cloudflare's customer addresses (our Worker, on workers.dev or our own domain, and Pages)

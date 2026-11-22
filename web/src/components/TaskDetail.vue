@@ -8,6 +8,7 @@ import type { Dataset, Task } from '../types'
 const props = defineProps<{ ds: Dataset; task: Task; index: number }>()
 const emit = defineEmits<{ close: []; openPlace: [id: string] }>()
 const r = computed(() => state.removals[`${props.ds.id}|${props.index}`])
+const ro = computed(() => !state.editable.has(props.ds.id))   // not checked out: the decision shows, cannot change
 const place = computed(() => props.ds.places.find((p) => p.id === props.task.place) || null)
 const photo = computed(() => props.task.photo || place.value?.photos.find((p) => p.cover)?.file || null)
 const TYPE = { visit: 'taskTypeVisit', removal: 'taskTypeRemoval', verify_removal: 'taskTypeVerify' } as const
@@ -29,9 +30,10 @@ const osmUrl = computed(() => `https://www.openstreetmap.org/?mlat=${props.task.
     <p><b>{{ t('why') }}:</b> {{ tWhy(task.why) }}</p>
     <p v-if="task.type === 'visit'" class="muted small">{{ t('visitHowTo') }}</p>
     <div v-if="task.type !== 'visit'" class="acts">
-      <button :class="['secondary', { on: r?.decision === 'confirmed' }]" @click="putRemoval(ds.id, index, 'confirmed')">{{ t('confirmRemoval') }}</button>
-      <button :class="['secondary', { on: r?.decision === 'verify' }]" @click="putRemoval(ds.id, index, 'verify')">{{ t('checkOnSite') }}</button>
-      <button :class="['ghost', { on: r?.decision === 'dismissed' }]" @click="putRemoval(ds.id, index, 'dismissed')">{{ t('dismiss') }}</button>
+      <p v-if="ro && !r" class="muted small">{{ t('readOnlyHint') }}</p>
+      <button :class="['secondary', { on: r?.decision === 'confirmed' }]" :disabled="ro" @click="putRemoval(ds.id, index, 'confirmed')">{{ t('confirmRemoval') }}</button>
+      <button :class="['secondary', { on: r?.decision === 'verify' }]" :disabled="ro" @click="putRemoval(ds.id, index, 'verify')">{{ t('checkOnSite') }}</button>
+      <button :class="['ghost', { on: r?.decision === 'dismissed' }]" :disabled="ro" @click="putRemoval(ds.id, index, 'dismissed')">{{ t('dismiss') }}</button>
       <div v-if="r" class="muted small">{{ t(DECISION[r.decision]) }}{{ r.reviewer ? ` ${t('by')} ${r.reviewer}` : '' }}{{ r.at ? `, ${r.at.slice(0, 16).replace('T', ' ')}` : '' }}</div>
     </div>
     <div class="links">

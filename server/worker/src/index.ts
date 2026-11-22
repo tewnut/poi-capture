@@ -7,6 +7,8 @@
 //   GET /me, GET|POST /admin/tokens, DELETE /admin/tokens/<id>   who am I; personal tokens (admin)
 //   POST /direct, POST /direct/<id>/urls, POST /direct/<id>/complete   direct uploads: the client PUTs its parts
 //                                               straight to R2 with presigned URLs (README "Direct uploads")
+//   GET /reviews, POST|DELETE /reviews/<session>/checkout, GET|PUT /reviews/<session>   a session's review: one
+//                                               reviewer checks it out (a lock), saves, checks in (README "Reviews")
 //
 // Tokens and permissions (../README.md): ADMIN_TOKEN = the admin password, TOKEN = the old shared token, personal
 // tokens issued by an admin with independent scopes (upload, read, process, delete), kept as SHA-256 hashes.
@@ -38,6 +40,8 @@ export interface Env {
   R2_SECRET_ACCESS_KEY?: string
 }
 
+const REVIEW_LOCK_MS = 24 * 3600 * 1000         // a checkout with no save for this long is free again
+const MAX_REVIEW = 100 * 1024 * 1024             // a review package (review.json + the reviewer's photos), bytes
 const DIRECT_PART = 8 * 1024 * 1024             // direct uploads: every part this size except the last (R2: >= 5 MiB, equal)
 const DIRECT_URL_S = 6 * 3600                   // a presigned part URL is valid this long; the client asks again after
 
@@ -48,7 +52,7 @@ const SEEN_MS = 60 * 1000                       // the last-seen record: at most
 
 const TUS_HEADERS = ['Authorization', 'Content-Type', 'Location', 'Tus-Extension', 'Tus-Max-Size', 'Tus-Resumable',
   'Tus-Version', 'Upload-Defer-Length', 'Upload-Expires', 'Upload-Length', 'Upload-Metadata',
-  'Upload-Offset', 'X-Client', 'X-HTTP-Method-Override', 'X-Requested-With']
+  'Upload-Offset', 'X-Client', 'X-HTTP-Method-Override', 'X-Requested-With', 'X-Review-Done', 'X-Review-Total']
 
 // ------------------------------------------------------------------------------------------------ state (DO)
 
@@ -117,6 +121,22 @@ function fromRow(r: Row): UploadState {
 }
 
 const iso = (ms: unknown) => (ms ? new Date(Number(ms)).toISOString() : null)
+
+/** GET /reviews: a session's checkout (null when free or expired) and its last saved review. */
+export type ReviewInfo = {
+  sessionId: string
+  lock: { by: By; at: string; until: string } | null
+  saved: { by: By; at: string; size: number; done: number | null; total: number | null } | null
+}
+function reviewInfo(r: Row): ReviewInfo {
+  const locked = !!r.lock_id && Number(r.lock_until) > Date.now()
+  return {
+    sessionId: String(r.session_id),
+    lock: locked ? { by: { id: String(r.lock_id), name: String(r.lock_name ?? '') }, at: iso(r.lock_at)!, until: iso(r.lock_until)! } : null,
+    saved: r.saved_at ? { by: { id: String(r.saved_id), name: String(r.saved_name ?? '') }, at: iso(r.saved_at)!, size: Number(r.size),
+      done: r.done == null ? null : Number(r.done), total: r.total == null ? null : Number(r.total) } : null,
+  }
+}
 const strOrNull = (v: unknown) => (v == null ? null : String(v))
 const numOrNull = (v: unknown) => (v == null ? null : Number(v))
 
@@ -155,6 +175,66 @@ export class Uploads extends DurableObject<Env> {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS seen (
       id TEXT PRIMARY KEY, at INTEGER NOT NULL, country TEXT, region TEXT, city TEXT, network TEXT, lat REAL, lon REAL,
       client TEXT, user_agent TEXT, prev_client TEXT, prev_at INTEGER)`)
+    // one row per reviewed session: who has it checked out (lock_*), and the last saved review (saved_*)
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS reviews (
+      session_id TEXT PRIMARY KEY, lock_id TEXT, lock_name TEXT, lock_at INTEGER, lock_until INTEGER,
+      saved_id TEXT, saved_name TEXT, saved_at INTEGER, size INTEGER, done INTEGER, total INTEGER)`)
+  }
+
+  // ---- reviews (README "Reviews"): a lock per session, and the last saved review's details
+
+  private reviewRow(sid: string): Row | null {
+    return this.sql.exec('SELECT * FROM reviews WHERE session_id = ?', sid).toArray()[0] ?? null
+  }
+
+  reviewList(): ReviewInfo[] {
+    return this.sql.exec('SELECT * FROM reviews ORDER BY COALESCE(saved_at, lock_at) DESC').toArray().map(reviewInfo)
+  }
+
+  reviewOf(sid: string): ReviewInfo | null {
+    const r = this.reviewRow(sid)
+    return r ? reviewInfo(r) : null
+  }
+
+  /** Check out [sid] for [by]: free, expired, or already [by]'s (renewed) → 200; another reviewer's → 409. */
+  checkout(sid: string, by: By): { status: 200 | 409; info: ReviewInfo } {
+    const now = Date.now()
+    const r = this.reviewRow(sid)
+    if (r && r.lock_id && r.lock_id !== by.id && Number(r.lock_until) > now) return { status: 409, info: reviewInfo(r) }
+    if (r) {
+      const same = r.lock_id === by.id && Number(r.lock_until) > now
+      this.sql.exec('UPDATE reviews SET lock_id = ?, lock_name = ?, lock_at = ?, lock_until = ? WHERE session_id = ?',
+        by.id, by.name, same ? Number(r.lock_at) : now, now + REVIEW_LOCK_MS, sid)
+    } else {
+      this.sql.exec('INSERT INTO reviews (session_id, lock_id, lock_name, lock_at, lock_until) VALUES (?, ?, ?, ?, ?)',
+        sid, by.id, by.name, now, now + REVIEW_LOCK_MS)
+    }
+    return { status: 200, info: reviewInfo(this.reviewRow(sid)!) }
+  }
+
+  /** Give up the checkout: [by]'s own (null: an admin, anybody's). 404 none, 403 someone else's. */
+  releaseReview(sid: string, by: string | null): { status: 204 | 403 | 404 } {
+    const r = this.reviewRow(sid)
+    if (!r || !r.lock_id || Number(r.lock_until) <= Date.now()) return { status: 404 }
+    if (by !== null && r.lock_id !== by) return { status: 403 }
+    this.sql.exec('UPDATE reviews SET lock_id = NULL, lock_name = NULL, lock_at = NULL, lock_until = NULL WHERE session_id = ?', sid)
+    return { status: 204 }
+  }
+
+  /** May [by] save [sid]? Only while holding its checkout (409 otherwise, with who has it). */
+  canSave(sid: string, by: string): { status: 200 | 409; info: ReviewInfo | null } {
+    const r = this.reviewRow(sid)
+    if (!r || r.lock_id !== by || Number(r.lock_until) <= Date.now()) return { status: 409, info: r ? reviewInfo(r) : null }
+    return { status: 200, info: reviewInfo(r) }
+  }
+
+  /** The review package is in R2: record it, renew the lock, or release it on check-in. */
+  saved(sid: string, by: By, size: number, done: number | null, total: number | null, checkin: boolean): ReviewInfo {
+    const now = Date.now()
+    this.sql.exec(`UPDATE reviews SET saved_id = ?, saved_name = ?, saved_at = ?, size = ?, done = ?, total = ?,
+      lock_until = ? WHERE session_id = ?`, by.id, by.name, now, size, done, total, now + REVIEW_LOCK_MS, sid)
+    if (checkin) this.sql.exec('UPDATE reviews SET lock_id = NULL, lock_name = NULL, lock_at = NULL, lock_until = NULL WHERE session_id = ?', sid)
+    return reviewInfo(this.reviewRow(sid)!)
   }
 
   // ---- last seen (one row per token id, overwritten)
@@ -780,6 +860,63 @@ async function direct(env: Env, req: Request, base: string, rest: string, p: Pri
   return json(200, { schema: 'poi-cloud-direct/1', id, location: `${origin}${base}/${id}`, size: s.size, complete: true })
 }
 
+// ------------------------------------------------------------------------------------------------ reviews
+
+const reviewKey = (sid: string) => `reviews/${sid}.zip`
+const intHeader = (v: string | null) => (v != null && /^\d{1,7}$/.test(v) ? Number(v) : null)
+
+/**
+ * README "Reviews". Reading (list, download) needs read (or process); checking out, saving and checking in too: a
+ * reviewer's key has View & download. Saving needs the checkout. An admin may release anybody's checkout.
+ */
+async function reviews(env: Env, req: Request, rest: string, p: Principal): Promise<Response> {
+  if (!canRead(p)) return text(403, 'Forbidden\n')
+  const by: By = { id: p.id, name: p.name }
+  if (!rest) {
+    if (req.method !== 'GET') return text(405, 'Method not allowed\n')
+    return json(200, { schema: 'poi-cloud-reviews/1', reviews: await stub(env).reviewList() })
+  }
+  const m = /^([A-Za-z0-9_-]{1,64})(\/checkout)?$/.exec(rest)
+  if (!m) return text(404, 'Not found\n')
+  const [, sid, co] = m
+  if (co) {
+    if (req.method === 'POST') {
+      const r = await stub(env).checkout(sid, by)
+      if (r.status === 409) return json(409, { schema: 'poi-cloud-review/1', error: `checked out by ${r.info.lock?.by.name}`, ...r.info })
+      return json(200, { schema: 'poi-cloud-review/1', ...r.info })
+    }
+    if (req.method === 'DELETE') {
+      const r = await stub(env).releaseReview(sid, p.admin ? null : p.id)
+      if (r.status === 403) return text(403, 'Checked out by someone else\n')
+      if (r.status === 404) return text(404, 'Not checked out\n')
+      return new Response(null, { status: 204 })
+    }
+    return text(405, 'Method not allowed\n')
+  }
+  if (req.method === 'GET') {
+    const o = await env.BUCKET.get(reviewKey(sid))
+    if (!o) return text(404, 'No review saved\n')
+    return new Response(o.body, { headers: { 'Content-Type': 'application/zip', 'Content-Length': String(o.size), 'Cache-Control': 'no-store' } })
+  }
+  if (req.method === 'PUT') {
+    const can = await stub(env).canSave(sid, p.id)
+    if (can.status === 409) {
+      const who = can.info?.lock?.by.name
+      return json(409, { schema: 'poi-cloud-review/1', error: who ? `checked out by ${who}` : 'not checked out', ...(can.info || { sessionId: sid, lock: null, saved: null }) })
+    }
+    const len = Number(req.headers.get('Content-Length') || NaN)
+    if (!Number.isFinite(len) || len < 1) return text(411, 'Content-Length required\n')
+    if (len > MAX_REVIEW) return text(413, 'Review too large\n')
+    if (!req.body) return text(400, 'Body required\n')
+    await env.BUCKET.put(reviewKey(sid), req.body, { httpMetadata: { contentType: 'application/zip' }, customMetadata: { by: p.id } })
+    const checkin = new URL(req.url).searchParams.get('checkin') === '1'
+    const info = await stub(env).saved(sid, by, len, intHeader(req.headers.get('X-Review-Done')), intHeader(req.headers.get('X-Review-Total')), checkin)
+    console.log(`review ${sid} saved by ${p.id}${checkin ? ', checked in' : ''}`)
+    return json(200, { schema: 'poi-cloud-review/1', ...info })
+  }
+  return text(405, 'Method not allowed\n')
+}
+
 async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(req.url)
   const base = '/' + (env.BASE_PATH || '/files').replace(/^\/+|\/+$/g, '')
@@ -788,7 +925,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
     return new Response(null, {
       status: 204,
       headers: {
-        'Access-Control-Allow-Methods': 'POST, HEAD, PATCH, OPTIONS, DELETE, GET',
+        'Access-Control-Allow-Methods': 'POST, HEAD, PATCH, OPTIONS, DELETE, GET, PUT',
         'Access-Control-Allow-Headers': TUS_HEADERS.join(', '),
         'Access-Control-Max-Age': '86400',
       },
@@ -798,7 +935,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const isMe = url.pathname === '/me'
   const isAdmin = url.pathname.startsWith('/admin/')
   const isDirect = url.pathname === '/direct' || url.pathname.startsWith('/direct/')
-  if (!isMe && !isAdmin && !isDirect && url.pathname !== base && !url.pathname.startsWith(base + '/')) return text(404, 'Not found\n')
+  const isReviews = url.pathname === '/reviews' || url.pathname.startsWith('/reviews/')
+  if (!isMe && !isAdmin && !isDirect && !isReviews && url.pathname !== base && !url.pathname.startsWith(base + '/')) return text(404, 'Not found\n')
   const p = await principal(env, req)
   if (!p) return text(401, 'Unauthorized\n', { 'WWW-Authenticate': 'Bearer' })
   if (p.id !== 'open') ctx.waitUntil(stub(env).touchSeen(p.id, seenInput(req)).catch(() => {}))
@@ -806,6 +944,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (isMe) return req.method === 'GET' ? json(200, { schema: 'poi-cloud-me/1', ...me(p) }) : text(405, 'Method not allowed\n')
   if (isAdmin) return p.admin ? admin(env, req, url.pathname.slice('/admin/'.length)) : forbidden()
   if (isDirect) return direct(env, req, base, url.pathname.slice('/direct'.length).replace(/^\/+/, ''), p)
+  if (isReviews) return reviews(env, req, url.pathname.slice('/reviews'.length).replace(/^\/+/, ''), p)
 
   const rest = url.pathname.slice(base.length).replace(/^\/+/, '')
   let method = req.method

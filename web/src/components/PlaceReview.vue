@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Photo from './Photo.vue'
 import CropEditor from './CropEditor.vue'
-import { reviewOf, putReview, gstat, photoUrl, putPhoto, delPhoto, cropPhoto } from '../store'
+import { state, rkey, reviewOf, putReview, gstat, photoUrl, putPhoto, delPhoto, cropPhoto } from '../store'
 import { keptPhotos, removedPhotos } from '../photos'
 import { confirmFields, pendingSuggestions, suggestionKind, missingStreet } from '../fields'
 import { t } from '../i18n'
@@ -17,6 +17,10 @@ const emit = defineEmits<{ close: []; next: [] }>()
 const clone = (x: Review): Review => JSON.parse(JSON.stringify(x))
 const r = ref<Review>(clone(reviewOf(props.ds.id, props.place)))
 watch(() => [props.ds.id, props.place.id], () => { r.value = clone(reviewOf(props.ds.id, props.place)); big.value = 0; openMarks.value = null })
+/** Not checked out by this reviewer: shown as saved, nothing can be changed (store.ts putReview ignores it too). */
+const ro = computed(() => !state.editable.has(props.ds.id))
+// read-only: follow the saved review (another reviewer's, loaded from the server)
+watch(() => state.reviews[rkey(props.ds.id, props.place.id)], () => { if (ro.value) r.value = clone(reviewOf(props.ds.id, props.place)) })
 const big = ref(0)
 /** The field whose source dots are spelled out (tap on the dots; the same words are on hover). */
 const openMarks = ref<FieldKey | null>(null)
@@ -60,6 +64,7 @@ async function newTab() {
 const edits = (): PhotoEdits => (r.value.photos ||= {})
 const busy = ref('')
 async function removePhoto() {
+  if (ro.value) return
   const p = photos.value[big.value]
   if (!p) return
   const e = edits()
@@ -77,11 +82,13 @@ async function removePhoto() {
   await save()
 }
 async function restore(file: string) {
+  if (ro.value) return
   const e = edits()
   e.removed = (e.removed || []).filter((f) => f !== file)
   await save()
 }
 async function makeCover() {
+  if (ro.value) return
   const p = photos.value[big.value]
   if (!p) return
   edits().cover = p.file
@@ -91,6 +98,7 @@ async function makeCover() {
 const picker = ref<HTMLInputElement>()
 const IMG = /^image\/(jpeg|png|webp)$/
 async function addPhotos(list: FileList | File[] | null | undefined) {
+  if (ro.value) return
   const files = [...(list || [])].filter((f) => IMG.test(f.type))
   if (!files.length) return
   busy.value = t('adding')
@@ -122,6 +130,7 @@ function onPaste(ev: ClipboardEvent) {
 }
 const cropping = ref<{ file: string; url: string; rect: CropRect | null } | null>(null)
 async function startCrop() {
+  if (ro.value) return
   const p = photos.value[big.value]
   if (!p) return
   const url = await photoUrl(props.ds.id, p.file)    // always crop from the original
@@ -170,6 +179,7 @@ function fieldState(k: FieldKey) { return r.value.fields[k]?.state }
 function readValue(k: FieldKey) { return props.place.fields[k]?.value ?? '' }
 function shown(k: FieldKey) { return r.value.fields[k]?.value ?? readValue(k) }
 function setField(k: FieldKey, state: 'ok' | 'edited' | 'rejected', value?: string) {
+  if (ro.value) return
   r.value.fields[k] = { state, value: value ?? shown(k) }
   save()
 }
@@ -178,14 +188,16 @@ function edit(k: FieldKey, e: Event) {
   setField(k, v === readValue(k) ? 'ok' : 'edited', v)
 }
 function usePin(src: PinSource) {
+  if (ro.value) return
   const p = src === 'agent' ? props.place.pins.agent : first.value
   if (p) { r.value.pin = { lat: p.lat, lon: p.lon, source: src }; save() }
 }
-async function save() { await putReview(props.ds.id, props.place, r.value) }
+async function save() { if (!ro.value) await putReview(props.ds.id, props.place, r.value) }
 
 /** Confirm the place: the fields not decided yet are accepted as fields.ts says (clear readings, Google and website
  *  values); suggestions (unsure readings, the ride's road) stay open, shown, until the reviewer accepts them. */
 async function decide(d: Review['decision']) {
+  if (ro.value) return
   if (d === 'confirmed') {
     r.value.fields = confirmFields(props.place, r.value)
     if (!r.value.pin) usePin(pinSource.value)
@@ -229,7 +241,7 @@ function marks(k: FieldKey) {
       <div>
         <h2>{{ place.name }}</h2>
         <div class="muted">
-          <input class="cat" :value="r.category ?? place.category ?? ''" :placeholder="t('category')" @change="r.category = ($event.target as HTMLInputElement).value; save()" />
+          <input class="cat" :disabled="ro" :value="r.category ?? place.category ?? ''" :placeholder="t('category')" @change="r.category = ($event.target as HTMLInputElement).value; save()" />
           · <span :class="['chip', place.status !== 'open' ? 'bad' : '']">{{ t('status_' + place.status) }}</span>
           <span v-if="place.confidence === 'low'" class="chip warn">{{ t('namePartly') }}</span>
           <span v-if="noStreet" class="chip warn">{{ t('noStreet') }}</span>
@@ -245,9 +257,9 @@ function marks(k: FieldKey) {
         <div class="frame">
           <Photo class="big" :ds="ds.id" :path="photos[big]?.show" :alt="place.name" @click="full = true" />
           <div class="tools">
-            <button :title="t('cropT')" :aria-label="t('cropT')" @click="startCrop">✂</button>
-            <button v-if="!photos[big]?.cover" :title="t('makeCover')" :aria-label="t('makeCover')" @click="makeCover">★</button>
-            <button :title="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" :aria-label="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" @click="removePhoto">🗑</button>
+            <button v-if="!ro" :title="t('cropT')" :aria-label="t('cropT')" @click="startCrop">✂</button>
+            <button v-if="!ro && !photos[big]?.cover" :title="t('makeCover')" :aria-label="t('makeCover')" @click="makeCover">★</button>
+            <button v-if="!ro" :title="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" :aria-label="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" @click="removePhoto">🗑</button>
             <button :title="t('fullScreen')" :aria-label="t('fullScreen')" @click="full = true">⤢</button>
             <button :title="t('newTab')" :aria-label="t('newTab')" @click="newTab">↗</button>
           </div>
@@ -264,12 +276,12 @@ function marks(k: FieldKey) {
         <template v-if="photos.length > 1">
           <button v-for="(p, i) in photos" :key="p.file" :class="{ on: i === big }" @click="big = i"><Photo :ds="ds.id" :path="p.show" /></button>
         </template>
-        <button class="addph" :title="t('addPhotosT')" :disabled="!!busy" @click="picker?.click()">{{ busy || '+ ' + t('addPhotos') }}</button>
+        <button v-if="!ro" class="addph" :title="t('addPhotosT')" :disabled="!!busy" @click="picker?.click()">{{ busy || '+ ' + t('addPhotos') }}</button>
         <input ref="picker" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden @change="onPick" />
       </div>
       <div v-if="removed.length" class="removed muted">
         {{ t('removedN', { n: removed.length }) }}
-        <button v-for="p in removed" :key="p.file" :title="t('restore')" @click="restore(p.file)"><Photo :ds="ds.id" :path="p.file" /><span>↺</span></button>
+        <button v-for="p in removed" :key="p.file" :title="t('restore')" :disabled="ro" @click="restore(p.file)"><Photo :ds="ds.id" :path="p.file" /><span>↺</span></button>
       </div>
       <div v-if="edited" class="muted small">{{ t('photoEditsNote') }}</div>
     </div>
@@ -285,10 +297,10 @@ function marks(k: FieldKey) {
           <div v-if="place.fields[k] && !place.fields[k]?.source" class="src">{{ t('photoN', { n: place.fields[k]?.photo ?? '?' }) }}<span v-if="place.fields[k]?.sure && place.fields[k]?.sure !== 'high'"> · {{ t('sure_' + place.fields[k]?.sure) }}</span></div>
           <div v-if="suggestion(k)" class="sugg">{{ t(suggestion(k) === 'ride' ? 'suggestRide' : 'suggestLow') }}</div>
         </th>
-        <td><input :value="shown(k)" :placeholder="place.fields[k] ? '' : k === 'street' ? t('streetMissing') : t('notOnPhotos')" @change="edit(k, $event)" /></td>
+        <td><input :disabled="ro" :value="shown(k)" :placeholder="place.fields[k] ? '' : k === 'street' ? t('streetMissing') : t('notOnPhotos')" @change="edit(k, $event)" /></td>
         <td class="acts">
-          <button :class="['ok', { on: fieldState(k) === 'ok' || fieldState(k) === 'edited' }]" :title="t('correct')" :disabled="!shown(k)" @click="setField(k, 'ok')">✓</button>
-          <button :class="['no', { on: fieldState(k) === 'rejected' }]" :title="t('wrongLeaveOut')" :disabled="!shown(k)" @click="setField(k, 'rejected')">✕</button>
+          <button :class="['ok', { on: fieldState(k) === 'ok' || fieldState(k) === 'edited' }]" :title="t('correct')" :disabled="ro || !shown(k)" @click="setField(k, 'ok')">✓</button>
+          <button :class="['no', { on: fieldState(k) === 'rejected' }]" :title="t('wrongLeaveOut')" :disabled="ro || !shown(k)" @click="setField(k, 'rejected')">✕</button>
         </td>
       </tr>
     </table>
@@ -333,7 +345,7 @@ function marks(k: FieldKey) {
       </template>
     </div>
 
-    <textarea :value="r.comment || ''" :placeholder="t('comment')" @change="r.comment = ($event.target as HTMLTextAreaElement).value; save()"></textarea>
+    <textarea :disabled="ro" :value="r.comment || ''" :placeholder="t('comment')" @change="r.comment = ($event.target as HTMLTextAreaElement).value; save()"></textarea>
 
     <div v-if="full" class="viewer" @click.self="full = false">
       <Photo class="vimg" :ds="ds.id" :path="photos[big]?.show" :alt="place.name" />
@@ -342,9 +354,9 @@ function marks(k: FieldKey) {
         <span>
           <button v-if="photos.length > 1" :title="t('prev')" :aria-label="t('prev')" @click="step(-1)">‹</button>
           <button v-if="photos.length > 1" :title="t('next')" :aria-label="t('next')" @click="step(1)">›</button>
-          <button :title="t('cropT')" :aria-label="t('cropT')" @click="startCrop">✂</button>
-          <button v-if="!photos[big]?.cover" :title="t('makeCover')" :aria-label="t('makeCover')" @click="makeCover">★</button>
-          <button :title="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" :aria-label="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" @click="removePhoto">🗑</button>
+          <button v-if="!ro" :title="t('cropT')" :aria-label="t('cropT')" @click="startCrop">✂</button>
+          <button v-if="!ro && !photos[big]?.cover" :title="t('makeCover')" :aria-label="t('makeCover')" @click="makeCover">★</button>
+          <button v-if="!ro" :title="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" :aria-label="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" @click="removePhoto">🗑</button>
           <button :title="t('newTab')" :aria-label="t('newTab')" @click="newTab">↗</button>
           <button :title="t('closeEsc')" :aria-label="t('closeEsc')" @click="full = false">✕</button>
         </span>
@@ -353,7 +365,8 @@ function marks(k: FieldKey) {
 
     <CropEditor v-if="cropping" :url="cropping.url" :rect="cropping.rect" @save="saveCrop" @cancel="cropping = null" />
 
-    <footer>
+    <footer v-if="ro" class="rofoot muted small">{{ t('readOnlyHint') }}</footer>
+    <footer v-else>
       <button class="primary" @click="decide('confirmed')">{{ r.decision === 'confirmed' ? t('confirmedBtn') : t('confirm') }}</button>
       <button class="secondary" @click="decide('visit')">{{ r.decision === 'visit' ? t('visitQueued') : t('needsVisit') }}</button>
       <button class="danger" @click="decide('rejected')">{{ r.decision === 'rejected' ? t('rejectedF') : t('reject') }}</button>

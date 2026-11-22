@@ -25,6 +25,16 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 const en: Record<string, Msg> = {
   appName: 'POI Capture Reviewer',
+  // reviews: checkout / check-in (ReviewBar.vue, connection.ts)
+  checkOut: 'Check out to review', checkIn: 'Check in', checkInTitle: 'Upload your review (finished or not) and hand the session back, so another reviewer can take it',
+  checkedOutYou: 'Checked out by you', checkedOutBy: (p) => `Checked out by ${p.name} ${p.when}`, readOnly: 'read-only',
+  unsaved: 'changes not on the server yet', savedWhen: (p) => `saved to the server ${p.when}`, notSavedYet: 'not saved to the server yet',
+  saveToServer: 'Save to server', working: 'Working…', giveUp: 'Give up checkout',
+  giveUpConfirm: 'Hand it back without uploading? Your changes since the last save are lost.',
+  releaseLock: 'Release (admin)', releaseConfirm: (p) => `Release ${p.name}’s checkout? Their changes not saved to the server stay only in their browser.`,
+  lastSavedBy: (p) => `Last saved by ${p.name} ${p.when}`, notReviewedYet: 'Not reviewed yet',
+  readOnlyHint: 'Read-only: check the session out (top of the list) to review it.',
+  lockYou: '✎ checked out by you', lockOther: (p) => `🔒 ${p.name}`, reviewProgress: (p) => `reviewed ${p.done}/${p.total}`,
   // settings page and the connection (SettingsPage.vue, connection.ts)
   settingsBack: 'Sessions', setConnection: 'Connection', setBrowser: 'This browser',
   connStatus_none: 'Not connected', connStatus_checking: 'Checking…', connStatus_ok: 'Connected', connStatus_error: 'Cannot connect',
@@ -225,6 +235,15 @@ const en: Record<string, Msg> = {
 
 const vi: Record<string, Msg> = {
   appName: 'POI Capture Reviewer',
+  checkOut: 'Nhận để duyệt', checkIn: 'Trả phiên', checkInTitle: 'Tải kết quả duyệt (xong hoặc chưa) lên và trả phiên, để người khác nhận tiếp',
+  checkedOutYou: 'Bạn đang giữ phiên này', checkedOutBy: (p) => `${p.name} đang giữ ${p.when}`, readOnly: 'chỉ xem',
+  unsaved: 'có thay đổi chưa lên máy chủ', savedWhen: (p) => `đã lưu lên máy chủ ${p.when}`, notSavedYet: 'chưa lưu lên máy chủ',
+  saveToServer: 'Lưu lên máy chủ', working: 'Đang xử lý…', giveUp: 'Bỏ giữ phiên',
+  giveUpConfirm: 'Trả phiên mà không tải lên? Các thay đổi từ lần lưu trước sẽ mất.',
+  releaseLock: 'Mở khoá (quản trị)', releaseConfirm: (p) => `Mở khoá phiên ${p.name} đang giữ? Thay đổi chưa lưu lên máy chủ chỉ còn trong trình duyệt của họ.`,
+  lastSavedBy: (p) => `Lưu gần nhất: ${p.name} ${p.when}`, notReviewedYet: 'Chưa duyệt',
+  readOnlyHint: 'Chỉ xem: hãy nhận phiên (phía trên danh sách) để duyệt.',
+  lockYou: '✎ bạn đang giữ', lockOther: (p) => `🔒 ${p.name}`, reviewProgress: (p) => `đã duyệt ${p.done}/${p.total}`,
   settingsBack: 'Các phiên', setConnection: 'Kết nối', setBrowser: 'Trình duyệt này',
   connStatus_none: 'Chưa kết nối', connStatus_checking: 'Đang kiểm tra…', connStatus_ok: 'Đã kết nối', connStatus_error: 'Không kết nối được',
   connIntro: 'Các phiên đến từ máy chủ của dự án: điện thoại gửi chuyến đi lên đó, tác tử xử lý, và bạn duyệt ở đây. Bạn cần mã truy cập do quản trị viên cấp.',

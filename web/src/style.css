@@ -392,3 +392,13 @@ a.button { display: inline-block; text-decoration: none; border-radius: 10px; pa
 .dangerzone { display: grid; gap: 6px; padding: 10px; border: 1px solid #f3c6cf; border-radius: 10px; background: #fff7f8; justify-items: start; }
 .dangerzone p { margin: 0; }
 .mpick { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 4px 2px; color: var(--accent); font-weight: 600; cursor: pointer; }
+
+/* the open session's checkout (ReviewBar.vue) */
+.reviewbar { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; margin-top: 8px;
+  padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--canvas); }
+.reviewbar.mine { background: #eef8f2; border-color: #b9dcc7; }
+.reviewbar.other { background: #fff7e6; border-color: #f1d9a6; }
+.reviewbar .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.reviewbar .confirm { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.reviewbar p { margin: 0; flex-basis: 100%; }
+.rofoot { padding: 10px 0; }

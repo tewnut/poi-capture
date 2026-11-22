@@ -452,3 +452,55 @@ describe('direct uploads (presigned R2 parts)', () => {
     expect((await post('/direct/abc/complete', { parts: [] })).status).toBe(404)
   })
 })
+
+describe('reviews (checkout / check-in)', () => {
+  const ROOT = 'https://cloud.test'
+  async function key(name: string, scopes: string[]) {
+    const r = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, scopes }) })
+    return { Authorization: `Bearer ${(await r.json<{ secret: string }>()).secret}` }
+  }
+  const put = (h: Record<string, string>, sid: string, body: Uint8Array, checkin = false, done = '3', total = '10') =>
+    SELF.fetch(`${ROOT}/reviews/${sid}${checkin ? '?checkin=1' : ''}`, { method: 'PUT', body,
+      headers: { ...h, 'Content-Type': 'application/zip', 'X-Review-Done': done, 'X-Review-Total': total } })
+
+  it('one reviewer at a time: check out, save, check in, then the next one', async () => {
+    const son = await key('Sơn', ['read'])
+    const lan = await key('Lan', ['read'])
+    const sid = 's_review1'
+    const a = await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'POST', headers: son })
+    expect(a.status).toBe(200)
+    expect((await a.json<any>()).lock.by.name).toBe('Sơn')
+    // Lan cannot check it out, nor save over it
+    const b = await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'POST', headers: lan })
+    expect(b.status).toBe(409)
+    expect((await b.json<any>()).lock.by.name).toBe('Sơn')
+    expect((await put(lan, sid, bytes(10))).status).toBe(409)
+    // Sơn saves (keeps the lock), then checks in
+    const s1 = await put(son, sid, bytes(100, 3))
+    expect(s1.status).toBe(200)
+    expect(await s1.json<any>()).toMatchObject({ lock: { by: { name: 'Sơn' } }, saved: { by: { name: 'Sơn' }, size: 100, done: 3, total: 10 } })
+    const s2 = await put(son, sid, bytes(120, 4), true, '10', '10')
+    expect((await s2.json<any>())).toMatchObject({ lock: null, saved: { size: 120, done: 10 } })
+    expect(new Uint8Array(await (await SELF.fetch(`${ROOT}/reviews/${sid}`, { headers: lan })).arrayBuffer())).toEqual(bytes(120, 4))
+    // after check-in, saving needs a new checkout; Lan can take it now
+    expect((await put(son, sid, bytes(10))).status).toBe(409)
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'POST', headers: lan })).status).toBe(200)
+    const list = await (await SELF.fetch(`${ROOT}/reviews`, { headers: lan })).json<any>()
+    expect(list.reviews.find((r: any) => r.sessionId === sid)).toMatchObject({ lock: { by: { name: 'Lan' } }, saved: { by: { name: 'Sơn' } } })
+  })
+
+  it('giving up a checkout: one\'s own, or any as admin; a phone key cannot review', async () => {
+    const son = await key('Sơn', ['read'])
+    const lan = await key('Lan', ['read'])
+    const phone = await key('Phone', ['upload'])
+    const sid = 's_review2'
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'POST', headers: phone })).status).toBe(403)
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'POST', headers: son })).status).toBe(200)
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'DELETE', headers: lan })).status).toBe(403)
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'DELETE', headers: { Authorization: 'Bearer admin-token' } })).status).toBe(204)
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'POST', headers: lan })).status).toBe(200)
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'DELETE', headers: lan })).status).toBe(204)
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}`, { headers: lan })).status).toBe(404)
+  })
+})

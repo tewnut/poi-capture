@@ -7,6 +7,7 @@ import type { Dataset, Task } from '../types'
 const props = defineProps<{ ds: Dataset; task: Task; index: number }>()
 const emit = defineEmits<{ open: []; openPlace: [id: string] }>()
 const r = computed(() => state.removals[`${props.ds.id}|${props.index}`])
+const ro = computed(() => !state.editable.has(props.ds.id))   // not checked out: the decision shows, cannot change
 const sel = computed(() => state.open === props.ds.id && state.task === props.index)
 const LABEL = { visit: 'taskVisit', removal: 'taskRemoval', verify_removal: 'taskVerify' } as const
 const DONE = { confirmed: 'removalConfirmed', verify: 'willCheck', dismissed: 'dismissed', todo: 'toReview' } as const
@@ -22,9 +23,9 @@ const DONE = { confirmed: 'removalConfirmed', verify: 'willCheck', dismissed: 'd
     </div>
     <div class="muted">{{ tWhy(task.why) }}</div>
     <div v-if="task.type !== 'visit'" class="tact" @click.stop>
-      <button :class="['secondary', { on: r?.decision === 'confirmed' }]" @click="putRemoval(ds.id, index, 'confirmed')">{{ t('confirmRemoval') }}</button>
-      <button :class="['secondary', { on: r?.decision === 'verify' }]" @click="putRemoval(ds.id, index, 'verify')">{{ t('checkOnSite') }}</button>
-      <button :class="['ghost', { on: r?.decision === 'dismissed' }]" @click="putRemoval(ds.id, index, 'dismissed')">{{ t('dismiss') }}</button>
+      <button :class="['secondary', { on: r?.decision === 'confirmed' }]" :disabled="ro" @click="putRemoval(ds.id, index, 'confirmed')">{{ t('confirmRemoval') }}</button>
+      <button :class="['secondary', { on: r?.decision === 'verify' }]" :disabled="ro" @click="putRemoval(ds.id, index, 'verify')">{{ t('checkOnSite') }}</button>
+      <button :class="['ghost', { on: r?.decision === 'dismissed' }]" :disabled="ro" @click="putRemoval(ds.id, index, 'dismissed')">{{ t('dismiss') }}</button>
     </div>
   </div>
 </template>

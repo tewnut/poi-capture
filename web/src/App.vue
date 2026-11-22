@@ -12,6 +12,7 @@ import StageBar from './components/StageBar.vue'
 import Photo from './components/Photo.vue'
 import AdminPanel from './components/AdminPanel.vue'
 import SettingsPage from './components/SettingsPage.vue'
+import ReviewBar from './components/ReviewBar.vue'
 import { state, load, remove, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, stageOf, STAGES } from './store'
 import { to } from './router'
 import { t } from './i18n'
@@ -21,7 +22,7 @@ import { geojson, csv, osm, tasksGeojson, download, type Published, type Removed
 import { buildProject, projectName } from './project'
 import { missingStreet, pendingSuggestions } from './fields'
 import { humanSize, type CloudItem } from './cloud'
-import { conn, connected, canRead, connect, refresh, rows, pull, type Row } from './connection'
+import { conn, connected, canRead, connect, refresh, rows, pull, loadSaved, saveToServer, type Row } from './connection'
 import { swipeStep, neighbour, blocksSwipe, type Step } from './swipe'
 import type { Dataset, Place } from './types'
 
@@ -100,9 +101,12 @@ const sessions = computed(() => allRows.value.filter((r) =>
 function clearSessionFilters() { fStage.value = ''; fKind.value = ''; fHold.value = '' }
 const stageCount = (s: string) => allRows.value.filter((r) => rowStage(r) === s).length
 function kindLabel(x: Row | Dataset) {
-  const kind = 'session' in x ? x.session.kind : x.kind
-  const hold = 'session' in x ? x.session.holding || 'mount' : rowHolding(x)
-  return t(kind === 'poi' ? 'kindPoi' : hold === 'hand' ? 'kindSweepHand' : 'kindSweepMount')
+  const d = 'session' in x ? x : dsOf(x)
+  const kind = d ? d.session.kind : (x as Row).kind
+  if (kind === 'poi') return t('kindPoi')
+  // not downloaded yet: the server does not say how the phone was held
+  const hold = d ? d.session.holding || 'mount' : (x as Row).item?.metadata.holding ?? (x as Row).raw?.metadata.holding
+  return hold == null ? t('sweep') : t(hold === 'hand' ? 'kindSweepHand' : 'kindSweepMount')
 }
 /** Download a session from the server, then open it (or [then], the address that asked for it). */
 async function fetchSession(item: CloudItem, then?: string) {
@@ -116,6 +120,28 @@ async function fetchSession(item: CloudItem, then?: string) {
   } finally {
     busy.value = ''
   }
+}
+// a session open read-only shows the latest review saved on the server (another reviewer's progress)
+watch(() => [openDataset.value?.id, conn.reviews[openDataset.value?.id || '']?.saved?.at], () => {
+  const d = openDataset.value
+  if (d && connected.value && !state.editable.has(d.id)) loadSaved(d).catch((e) => { state.error = e?.message || String(e) })
+})
+// checked out with unsaved changes: saved to the server every 2 minutes (the lock stays)
+const AUTOSAVE_MS = 2 * 60 * 1000
+let autosave: ReturnType<typeof setInterval> | undefined
+onMounted(() => { autosave = setInterval(() => {
+  for (const id of [...state.dirty]) {
+    const d = state.datasets.find((x) => x.id === id)
+    if (d && state.editable.has(id) && !conn.reviewBusy) saveToServer(d, false).catch(() => {})
+  }
+}, AUTOSAVE_MS) })
+onBeforeUnmount(() => clearInterval(autosave))
+/** The list's word on a session's review: who has it checked out, or how far the last saved review got. */
+function lockLabel(r: Row): { text: string; cls: string } | null {
+  const i = conn.reviews[r.sessionId]
+  if (i?.lock) return i.lock.by.id === conn.me?.id ? { text: t('lockYou'), cls: 'ok' } : { text: t('lockOther', { name: i.lock.by.name }), cls: 'visit' }
+  if (i?.saved && i.saved.total != null) return { text: t('reviewProgress', { done: i.saved.done ?? 0, total: i.saved.total }), cls: 'todo' }
+  return null
 }
 function openRow(r: Row) {
   if (dsOf(r)) router.push(to.session(r.sessionId))
@@ -339,6 +365,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
                     <span class="chip new" v-if="dsOf(r)!.places.filter((p) => gstat(p) === 'new').length">{{ t('newToGoogle', { n: dsOf(r)!.places.filter((p) => gstat(p) === 'new').length }) }}</span>
                     <span class="chip todo" v-if="dsOf(r)!.tasks.length">{{ t('nTasks', { n: dsOf(r)!.tasks.length }) }}</span>
                     <span class="chip" v-if="r.state === 'local' && !r.item && connected">{{ t('onlyHere') }}</span>
+                    <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]">{{ lockLabel(r)!.text }}</span>
                   </div>
                   <StageBar :ds="dsOf(r)!" />
                 </template>
@@ -346,6 +373,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
                   <span v-if="conn.pulling === r.sessionId" class="chip">{{ t('downloadingShort') }}</span>
                   <span v-else-if="r.state === 'waiting'" class="chip">{{ t('waitingAgent') }}</span>
                   <span v-else class="chip ok">{{ t('onServer', { size: humanSize(r.item?.size ?? null) }) }}</span>
+                  <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]">{{ lockLabel(r)!.text }}</span>
                 </div>
               </div>
               <button v-if="r.state === 'updated' && r.item" class="secondary small" :disabled="!!conn.pulling" :title="t('updateTitle')" @click="fetchSession(r.item)">{{ t('update') }}</button>
@@ -394,6 +422,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
           <h1>{{ openDataset.session.name || openDataset.session.id }}</h1>
           <div class="muted small">{{ (openDataset.session.startedAt || '').slice(0, 10) }} · {{ kindLabel(openDataset) }}</div>
           <StageBar :ds="openDataset" />
+          <ReviewBar :ds="openDataset" />
         </div>
         <nav class="seg">
           <button :class="{ on: view === 'places' }" @click="router.push(to.session(openDataset.id))">{{ t('places') }} <span class="n">{{ openDataset.places.length }}</span></button>

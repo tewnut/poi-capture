@@ -488,3 +488,76 @@ export function shortClient(client: string | null, userAgent: string | null = nu
   const detail = paren ? (label === 'App' ? paren.split(';').pop()!.trim() : paren) : ''
   return detail ? `${label} ${ver} (${detail})` : `${label} ${ver}`
 }
+
+// ---- reviews (server/README.md "Reviews"): one reviewer at a time checks a session out, saves, checks in
+
+export const REVIEWS_SCHEMA = 'poi-cloud-reviews/1'
+export type ReviewInfo = {
+  sessionId: string
+  lock: { by: { id: string; name: string }; at: string; until: string } | null
+  saved: { by: { id: string; name: string }; at: string; size: number; done: number | null; total: number | null } | null
+}
+
+function parseReviewInfo(v: any): ReviewInfo | null {
+  if (!v || typeof v.sessionId !== 'string') return null
+  const by = (b: any) => (b && typeof b.id === 'string' ? { id: b.id, name: str(b.name) || b.id } : null)
+  const lb = by(v.lock?.by), sb = by(v.saved?.by)
+  return {
+    sessionId: v.sessionId,
+    lock: lb && str(v.lock.at) && str(v.lock.until) ? { by: lb, at: v.lock.at, until: v.lock.until } : null,
+    saved: sb && str(v.saved.at) ? { by: sb, at: v.saved.at, size: num(v.saved.size) ?? 0, done: num(v.saved.done), total: num(v.saved.total) } : null,
+  }
+}
+
+/** Someone else has the session checked out (409): who, from the server's answer. */
+export class CheckedOut extends CloudError {
+  constructor(public info: ReviewInfo) { super(`checked out by ${info.lock?.by.name || 'someone else'}`, 409) }
+}
+
+export async function listReviews(cfg: CloudConfig, f: typeof fetch = fetch): Promise<ReviewInfo[]> {
+  const r = await f(`${root(cfg)}/reviews`, { headers: headers(cfg), cache: 'no-store' })
+  await check(r, 'reviews')
+  const j = (await r.json()) as any
+  if (j?.schema !== REVIEWS_SCHEMA || !Array.isArray(j.reviews)) throw new Error('not a reviews list')
+  return j.reviews.map(parseReviewInfo).filter((x: ReviewInfo | null): x is ReviewInfo => !!x)
+}
+
+async function reviewAnswer(r: Response, what: string): Promise<ReviewInfo> {
+  if (r.status === 409) {
+    const info = parseReviewInfo(await r.json().catch(() => null))
+    throw new CheckedOut(info || { sessionId: '', lock: null, saved: null })
+  }
+  await check(r, what)
+  const info = parseReviewInfo(await r.json())
+  if (!info) throw new Error(`${what}: unexpected answer`)
+  return info
+}
+
+export async function checkout(cfg: CloudConfig, sessionId: string, f: typeof fetch = fetch): Promise<ReviewInfo> {
+  return reviewAnswer(await f(`${root(cfg)}/reviews/${encodeURIComponent(sessionId)}/checkout`, { method: 'POST', headers: headers(cfg) }), 'check out')
+}
+
+/** Give up the checkout (one's own; an admin's: anybody's) without saving. */
+export async function releaseCheckout(cfg: CloudConfig, sessionId: string, f: typeof fetch = fetch): Promise<void> {
+  const r = await f(`${root(cfg)}/reviews/${encodeURIComponent(sessionId)}/checkout`, { method: 'DELETE', headers: headers(cfg) })
+  if (r.status === 404) return   // not checked out (any more)
+  await check(r, 'release')
+}
+
+/** The last saved review package; null when nothing was saved yet. */
+export async function getReview(cfg: CloudConfig, sessionId: string, f: typeof fetch = fetch): Promise<Uint8Array | null> {
+  const r = await f(`${root(cfg)}/reviews/${encodeURIComponent(sessionId)}`, { headers: headers(cfg), cache: 'no-store' })
+  if (r.status === 404) return null
+  await check(r, 'review')
+  return new Uint8Array(await r.arrayBuffer())
+}
+
+/** Save the review package (needs the checkout); [checkin] also releases it. */
+export async function putReviewPackage(cfg: CloudConfig, sessionId: string, zip: Uint8Array, p: { done: number; total: number },
+  checkin: boolean, f: typeof fetch = fetch): Promise<ReviewInfo> {
+  const r = await f(`${root(cfg)}/reviews/${encodeURIComponent(sessionId)}${checkin ? '?checkin=1' : ''}`, {
+    method: 'PUT', body: zip,
+    headers: { ...headers(cfg), 'Content-Type': 'application/zip', 'X-Review-Done': String(p.done), 'X-Review-Total': String(p.total) },
+  })
+  return reviewAnswer(r, checkin ? 'check in' : 'save')
+}
