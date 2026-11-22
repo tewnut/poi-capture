@@ -27,18 +27,33 @@ read a few degrees off on that ride); without it only "assumed" bearings get the
 }
 Position: rays from >= 2 sightings that span >= 8 degrees are intersected (weighted least squares, the handoff's step 4);
 otherwise the cover sighting is pushed out defaultFacadeDistanceM along its bearing (single-photo estimate).
+
+Optional, by the ride's target (docs/sweep-targets.md): "addresses" (house-number plates) and "signs" (traffic signs)
+next to "places", each built like a place (folder, best photos, position from the sightings) with place.layer
+"address" / "sign", numbered after the places:
+  "addresses": [{"houseNumber": "106", "street": "Nguyễn Thanh Sơn", "unit": "Hẻm 12", "photos": [33, 36], "cover": 34,
+                 "sightings": [{"photo": 34, "x": 0.41}], "confidence": "high", "placeRef": "<a place's name>", "note": ""}]
+  "signs": [{"code": "P.131a", "label": "Cấm đỗ xe", "group": "prohibitory", "extra": "6h-9h", "text": "",
+             "photos": [120, 123], "cover": 122, "sightings": [{"photo": 121, "x": 0.82}], "side": "right",
+             "confidence": "high", "note": ""}]
+A sign was photographed by a camera looking ahead: each photo's bearing is its travel bearing ("forward"), x across
+the frame an angle off it (hFovDeg); no facade snap. facingDeg = the travel bearing at the cover photo.
+"defaultSignDistanceM" (default 15) is the single-photo distance for signs.
 """
 import csv, html, json, math, os, re, shutil, sys, tempfile, urllib.parse
 
 import mapview
 import result
-from paths import arg_path, folder_no, place_folders
+from paths import arg_path, folder_no, layer_of, place_folders
 
 FIELDS = ('name', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'signText', 'other')
+SIGN_GROUPS = {'P': 'prohibitory', 'W': 'danger', 'R': 'mandatory', 'I': 'indication', 'S': 'supplementary'}
 
 
 def fields_of(pl):
     """The values read on the photos, each {value, photo, sure}; a bare value is accepted (sure = high)."""
+    if pl.get('layer') in ('address', 'sign'):
+        return dict(pl['fields'])   # made by address_item / sign_item: no "name" field (the name is the label)
     out = {}
     for k, v in (pl.get('fields') or {}).items():
         if v in (None, '', []):
@@ -104,15 +119,24 @@ def offset_applies(photo):
     return str(photo.get('cameraBearingSource') or '').startswith('assumed')
 
 
+def is_forward(photo):
+    """A forward camera's bearing is the GPS travel direction, not the compass: no compass correction."""
+    return str(photo.get('cameraBearingSource') or '').startswith('forward')
+
+
 def bearing_of(photo, x):
     """Bearing from the camera to a point at horizontal position x (0..1) in the upright photo."""
     hf = photo.get('hFovDeg') or 69.1
     f = 0.5 / math.tan(math.radians(hf / 2))
-    base = photo['cameraBearing'] + (BEARING_OFFSET if BEARING_ALL or offset_applies(photo) else 0)
+    base = photo['cameraBearing'] + (0 if is_forward(photo) else
+                                     BEARING_OFFSET if BEARING_ALL or offset_applies(photo) else 0)
     return (base + math.degrees(math.atan((x - 0.5) / f))) % 360
 
 
-def locate(place, photos, default_d):
+def locate(place, photos, default_d, gate=None):
+    """(lat, lon, how). gate: (nearest, farthest) camera distance a triangulated point may have; default 0.5x-2.5x
+    the facade distance (shopfronts at the side); a sign ahead is seen from 3 to 80 m."""
+    lo, hi = gate or (0.5 * default_d, 2.5 * default_d)
     sights = [s for s in place.get('sightings') or [] if photos[s['photo']].get('lat') is not None]
     if not sights:
         sights = [{'photo': place['cover'], 'x': 0.5}]
@@ -149,7 +173,7 @@ def locate(place, photos, default_d):
             dist = [math.hypot(sol[0] - px, sol[1] - py) for (px, py), _u, _p, _s in rays]
             # sweep bearings are mostly assumed (mount yaw unknown): a point much nearer or farther than the
             # shopfronts seen on the photos is a bearing error, not a finding
-            if in_front and 0.5 * default_d <= min(dist) and max(dist) <= 2.5 * default_d:
+            if in_front and lo <= min(dist) and max(dist) <= hi:
                 lat, lon = to_ll(sol[0], sol[1], lat0, lon0)
                 # 2-sigma of the larger axis of the error ellipse ((sum w M)^-1)
                 tr, dt = a11 + a22, det
@@ -192,6 +216,60 @@ def agent_pin(pl, lat, lon, photos, d):
         la, lo = facade_snap(lat, lon, photos, float(a.get('distanceM') or d))
         return {'lat': round(la, 6), 'lon': round(lo, 6), 'why': a.get('why') or 'moved onto the shopfront line'}
     return {'lat': a['lat'], 'lon': a['lon'], 'why': a.get('why')}
+
+
+def forward_photos(photos):
+    """The photos as a forward camera saw them: bearing = travel bearing (the camera looks along the road), for
+    locating signs. A photo without a travel bearing keeps its own camera bearing."""
+    out = []
+    for p in photos:
+        q = dict(p)
+        if p.get('travelBearing') is not None:
+            q['cameraBearing'] = p['travelBearing']
+        if q.get('cameraBearing') is not None:
+            q['cameraBearingSource'] = 'forward'
+        out.append(q)
+    return out
+
+
+def _read(value, pl):
+    return {'value': value, 'photo': pl.get('cover'), 'sure': pl.get('confidence') or 'high'}
+
+
+def address_item(a, photos, ride_street=None):
+    """An entry of places.json "addresses" as a place-like item (layer "address"). The name's street is the plate's,
+    else the road the plate was photographed from (result.py then fills the street field from it, source "ride")."""
+    a = dict(a)
+    lo, hi = a.get('photos') or [a['cover'], a['cover']]
+    road, _how = result.pick_road(photos[a['cover']].get('roadName'),
+                                  [photos[i].get('roadName') for i in range(lo, hi + 1)], ride_street)
+    fields = {'houseNumber': _read(str(a['houseNumber']), a)}
+    if a.get('street'):
+        fields['street'] = _read(a['street'], a)
+    if a.get('unit'):
+        fields['other'] = _read(a['unit'], a)
+    a.update({'layer': 'address', 'name': ' '.join(x for x in (str(a['houseNumber']), a.get('street') or road) if x),
+              'category': 'address', 'photos': [lo, hi], 'fields': fields})
+    return a
+
+
+def sign_item(s):
+    """An entry of places.json "signs" as a place-like item (layer "sign"): name = its label, the code a field."""
+    s = dict(s)
+    code = (s.get('code') or '').strip()
+    fields = {}
+    if code:
+        fields['signCode'] = _read(code, s)
+    if s.get('text') or s.get('signText'):
+        fields['signText'] = _read(s.get('text') or s.get('signText'), s)
+    if s.get('extra'):
+        fields['other'] = _read(s['extra'], s)
+    s.update({'layer': 'sign', 'name': s.get('label') or code or 'traffic sign', 'category': 'traffic_sign',
+              'photos': s.get('photos') or [s['cover'], s['cover']], 'fields': fields, 'code': code or None,
+              'group': s.get('group') or SIGN_GROUPS.get(code[:1].upper()), 'signText': None})
+    if (s.get('agentPin') or {}).get('snap'):
+        s.pop('agentPin')   # no shopfront line to snap a sign onto
+    return s
 
 
 def sign_x(place, i):
@@ -320,10 +398,21 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             q = os.path.join(out, d)
             shutil.rmtree(q) if os.path.isdir(q) else os.remove(q)
     os.makedirs(out, exist_ok=True)
-    for n, pl in enumerate(spec['places'], 1):
+    target = session.get('target') or 'shops'
+    sign_d = float(spec.get('defaultSignDistanceM') or 15)
+    fwd = forward_photos(photos) if spec.get('signs') else None
+    items = ([dict(pl, layer='place') for pl in spec.get('places') or []]
+             + [address_item(x, photos, spec.get('street')) for x in spec.get('addresses') or []]
+             + [sign_item(x) for x in spec.get('signs') or []])
+    for n, pl in enumerate(items, 1):
         a, b = pl['photos']
-        lat, lon, how = locate(pl, photos, default_d)
-        d = os.path.join(out, f"{n:02d}_{safe(pl['name'])}")
+        layer = pl['layer']
+        if layer == 'sign':   # seen ahead, along the road: anywhere from a few metres to a block away
+            lat, lon, how = locate(pl, fwd, sign_d, gate=(3, 80))
+        else:
+            lat, lon, how = locate(pl, photos, default_d)
+        prefix = {'address': 'addr_', 'sign': 'sign_'}.get(layer, '')
+        d = os.path.join(out, f"{n:02d}_{prefix}{safe(pl['name'])}")
         os.makedirs(d)
         # only the best photos go in the folder (cover first); the others are listed, or kept in more/ (--keep-all)
         keep, how_chosen = choose(pl, photos, best_n)
@@ -349,6 +438,8 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
         old = previous.get(old_dir)
         if not old or old[0] != pl['name']:   # renumbered: find it by name
             old_dir, old = next(((k, v) for k, v in previous.items() if v[0] == pl['name']), (None, None))
+        if layer != 'place':
+            old = None   # nothing is looked up for an address or a sign
         if old and old[2]:
             for x in old[2].get('images') or []:
                 kept = os.path.join(web_keep, old_dir, x.get('file') or '')
@@ -357,15 +448,24 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
         # the road it was photographed from (phone's roadName), not the ride's street
         road, road_from = result.pick_road(cover.get('roadName'), [photos[i].get('roadName') for i in range(a, b + 1)],
                                            spec.get('street'))
+        extra = {}
+        if layer == 'address':
+            extra = {'placeRef': pl.get('placeRef') or None}
+        elif layer == 'sign':
+            # facing: the way a driver who sees it drives = the travel bearing when it was photographed
+            tb = cover.get('travelBearing') if cover.get('travelBearing') is not None else cover.get('cameraBearing')
+            extra = {'sign': {'code': pl.get('code'), 'group': pl.get('group'),
+                              'facingDeg': None if tb is None else round(tb % 360, 1), 'side': pl.get('side')}}
         meta = {
-            'place': {'name': pl['name'], 'category': pl.get('category'), 'signText': pl.get('signText'),
+            'place': {'layer': layer, **extra,
+                      'name': pl['name'], 'category': pl.get('category'), 'signText': pl.get('signText'),
                       'confidence': pl.get('confidence'), 'note': pl.get('note') or None,
                       'status': pl.get('status') or 'open',
                       'readBy': 'vision model, from the photos in this folder',
                       'street': road, 'streetFrom': road_from,
                       'address': None, 'phone': None, 'openingHours': None, 'website': None,
                       'position': {'lat': round(lat, 6), 'lon': round(lon, 6), **how,
-                                   'cameraBearing': bearing_note,
+                                   'cameraBearing': 'forward: the travel bearing' if layer == 'sign' else bearing_note,
                                    'googleMaps': gmaps(lat, lon),
                                    'coverCameraOnGoogleMaps': gmaps(cover['lat'], cover['lon'])}},
             'review': {'status': 'todo', 'comment': None},
@@ -374,7 +474,8 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             'googleMaps': old[1] if old and old[0] == pl['name'] else None,
             **({'website': old[2]} if old and old[0] == pl['name'] and old[2] else {}),
             'groundTruth': ground_truth(pl, lat, lon, door_pos, door_session),
-            'session': {'id': session.get('id'), 'name': session.get('name'), 'kind': session.get('kind')},
+            'session': {'id': session.get('id'), 'name': session.get('name'), 'kind': session.get('kind'),
+                        'target': target},
             'photos': files,
             'photoSelection': {'how': how_chosen, 'seenOn': b - a + 1, 'kept': len(files),
                                'whyBest': pl.get('bestWhy')},
@@ -401,7 +502,8 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
     # the ride for the map: every photo's camera position, in order
     shots = [[p['idx'], round(p['lat'], 6), round(p['lon'], 6),
               None if p.get('cameraBearing') is None else round(p['cameraBearing'], 1)] for p in photos if p.get('lat') is not None]
-    json.dump({'session': {k: session.get(k) for k in ('id', 'name', 'kind', 'holding', 'startedAt', 'endedAt')},
+    json.dump({'session': {**{k: session.get(k) for k in ('id', 'name', 'kind', 'holding', 'startedAt', 'endedAt')},
+                           'target': target},
                'street': spec.get('street'), 'track': [[x[1], x[2]] for x in shots], 'photos': shots},
               open(os.path.join(out, 'sweep.json'), 'w', encoding='utf-8'), ensure_ascii=False)
     write_indexes(out, session)
@@ -412,6 +514,13 @@ def csv_cell(v):
     return "'" + v if isinstance(v, str) and v[:1] in ('=', '+', '-', '@', '\t', '\r') else v
 
 
+def sign_code(m):
+    """A sign's code: the field (the reader may have corrected it), else the sign block's; None for other layers."""
+    if layer_of(m) != 'sign':
+        return None
+    return ((m.get('fields') or {}).get('signCode') or {}).get('value') or (m['place'].get('sign') or {}).get('code')
+
+
 def write_indexes(out, session=None):
     rows = [(d, json.load(open(os.path.join(out, d, 'place.json'), encoding='utf-8'))) for d in place_folders(out)]
     if session is None and rows:
@@ -420,17 +529,21 @@ def write_indexes(out, session=None):
     # places.csv (Excel-friendly), places.geojson, README.txt, index.html
     with open(os.path.join(out, 'places.csv'), 'w', newline='', encoding='utf-8-sig') as fh:
         w = csv.writer(fh)
-        w.writerow(['#', 'name', 'category', 'confidence', 'photos', 'lat', 'lon', 'position', 'review link',
+        w.writerow(['#', 'layer', 'name', 'category', 'signCode', 'confidence', 'photos', 'lat', 'lon', 'position',
+                    'review link',
                     'google name', 'google address', 'google phone', 'google hours', 'google website', 'google link',
                     'google distance m', 'folder'])
         for d, m in rows:
             p = m['place']; pos = p['position']
-            w.writerow([csv_cell(x) for x in [folder_no(d), p['name'], p['category'], p['confidence'], len(m['photos']), pos['lat'], pos['lon'],
+            w.writerow([csv_cell(x) for x in [folder_no(d), layer_of(m), p['name'], p['category'], sign_code(m),
+                        p['confidence'], len(m['photos']), pos['lat'], pos['lon'],
                         pos['method'], pos['googleMaps'], g(m, 'name'), g(m, 'address'), g(m, 'phone'),
                         ' | '.join(g(m, 'openingHours') or []), g(m, 'website'), g(m, 'url'), g(m, 'distanceM'), d]])
     feats = [{'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [m['place']['position']['lon'], m['place']['position']['lat']]},
-              'properties': {'folder': d, 'name': m['place']['name'], 'category': m['place']['category'],
-                             'confidence': m['place']['confidence'], 'googleName': g(m, 'name')}} for d, m in rows]
+              'properties': {'folder': d, 'layer': layer_of(m), 'name': m['place']['name'],
+                             'category': m['place']['category'], 'confidence': m['place']['confidence'],
+                             'googleName': g(m, 'name'),
+                             **({'signCode': sign_code(m)} if layer_of(m) == 'sign' else {})}} for d, m in rows]
     json.dump({'type': 'FeatureCollection', 'features': feats}, open(os.path.join(out, 'places.geojson'), 'w', encoding='utf-8'),
               ensure_ascii=False, indent=1)
     lines = [f"{folder_no(d):>2}  {m['place']['name']:<38} {len(m['photos']):>2} photos  {m['place']['position']['googleMaps']}"
@@ -455,6 +568,8 @@ def write_indexes(out, session=None):
                   (('<br><small>' + '<br>'.join(e(h) for h in gm.get('openingHours') or []) + '</small>') if gm.get('openingHours') else '') +
                   (f'<br><a href="{e(gm["url"])}" target="_blank">open on Google Maps</a>' if gm.get('url') else '') + '</p>'
                   ) if gm.get('name') else ('<p class="g muted">Google Maps: ' + e(gm.get('status') or 'not looked up yet') + '</p>')
+        if layer_of(m) != 'place':   # never looked up on Google: say what it is instead
+            gblock = f'<p class="muted">{e(layer_of(m))}' + (f' · {e(str(sign_code(m)))}' if sign_code(m) else '') + '</p>'
         tr = m.get('groundTruth')
         tline = (f'<p class="t">Door captured on site ({e(tr["label"])}): <b>{tr["errorM"]} m</b> from the estimate</p>'
                  if tr else '')

@@ -30,6 +30,8 @@ export type CloudItem = {
   sessionId: string | null
   name: string | null
   kind: string | null
+  /** What the ride was captured for: shops | addresses | signs (docs/sweep-targets.md); null = not sent (shops). */
+  target: string | null
   filename: string
   /** The token that uploaded it; null for uploads made before the server recorded it. */
   by: { id: string; name: string } | null
@@ -234,7 +236,7 @@ export function parseIndex(json: unknown): CloudItem[] {
       id: u.id, size, offset,
       complete: u.complete === true || (size != null && offset === size),
       createdAt: str(u.createdAt) || str(m.createdAt),
-      type: str(m.type) || 'unknown', sessionId: str(m.sessionId), name: str(m.name), kind: str(m.kind),
+      type: str(m.type) || 'unknown', sessionId: str(m.sessionId), name: str(m.name), kind: str(m.kind), target: str(m.target),
       filename: str(m.filename) || `${u.id}.zip`, by, metadata, trip: parseTrip(metadata),
     })
   }

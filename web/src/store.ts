@@ -2,7 +2,7 @@
 // reviewer's browser has its own copy (no sign-in yet; docs/pipeline.md). Export / publish writes files.
 import { reactive, computed } from 'vue'
 import { createStore, get, set, del, keys, getMany, clear } from 'idb-keyval'
-import type { Dataset, Review, RemovalReview, Place, Decision } from './types'
+import type { Dataset, Review, RemovalReview, Place, Decision, Layer } from './types'
 import type { Imported } from './importer'
 import { googleMergeable } from './fields'
 
@@ -15,6 +15,7 @@ export const state = reactive({
   open: null as string | null,         // dataset whose places are listed
   place: null as string | null,        // selected place id
   task: null as number | null,         // selected task (index in the open dataset's tasks)
+  layer: '' as '' | Layer,             // the open session's layer chip (places / addresses / signs); '' = all
   missing: '' as string,               // a link to a session that is not in this browser
   reviews: {} as Record<string, Review>,          // `${dataset}|${place}`
   removals: {} as Record<string, RemovalReview>,  // `${dataset}|${task index}`

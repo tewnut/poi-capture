@@ -6,7 +6,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { state, reviewOf, gstat, openPlace, openDataset, openTask } from '../store'
 import { t, lang } from '../i18n'
-import type { Dataset, Place, Review } from '../types'
+import { layerOf, type Dataset, type Place, type Review } from '../types'
 
 const emit = defineEmits<{ select: [ds: string, place: string]; movePin: [lat: number, lon: number] }>()
 const el = ref<HTMLDivElement>()
@@ -25,12 +25,27 @@ function pinOf(p: Place, r: Review) {
 }
 
 function icon(p: Place, r: Review, selected: boolean, n: string) {
+  const l = layerOf(p)
+  if (l !== 'place') return layerIcon(p, r, selected, l)
   const color = r.decision !== 'todo' ? DECISION_COLOR[r.decision] : G_COLOR[gstat(p)]
   const ring = p.status !== 'open' ? 'removal' : p.confidence === 'low' ? 'low' : ''
   return L.divIcon({
     className: '', iconSize: [26, 26], iconAnchor: [13, 13],
     html: `<div class="pin ${ring} ${selected ? 'sel' : ''} ${esc(r.decision)}" style="background:${color}">${r.decision === 'confirmed' ? '✓' : r.decision === 'rejected' ? '✕' : esc(n)}</div>`,
   })
+}
+
+/** An address: a small square with its house number; a sign: a red-ringed circle (a sign's own look) with its code. */
+function layerIcon(p: Place, r: Review, selected: boolean, l: 'address' | 'sign') {
+  const mark = r.decision === 'confirmed' ? '✓' : r.decision === 'rejected' ? '✕' : ''
+  const cls = `${selected ? 'sel' : ''} ${esc(r.decision)}`
+  if (l === 'address') {
+    const num = mark || esc(r.fields.houseNumber?.value || p.fields.houseNumber?.value || '?')
+    const bg = r.decision !== 'todo' ? DECISION_COLOR[r.decision] : '#475569'
+    return L.divIcon({ className: '', iconSize: [36, 18], iconAnchor: [18, 9], html: `<div class="apin ${cls}" style="background:${bg}">${num}</div>` })
+  }
+  const code = mark || esc((r.fields.signCode?.value || p.fields.signCode?.value || p.sign?.code || '').replace(/^[A-Z]\./, ''))
+  return L.divIcon({ className: '', iconSize: [26, 26], iconAnchor: [13, 13], html: `<div class="spin ${cls}">${code}</div>` })
 }
 
 function drawAll() {
@@ -52,6 +67,8 @@ function drawDataset(d: Dataset, bounds: L.LatLngExpression[]) {
     for (const s of d.shots) L.circleMarker([s[1], s[2]], { radius: 2.2, color: '#4b5a52', weight: 1, fillOpacity: 0.8 })
       .bindTooltip(t('photoN', { n: s[0] })).addTo(base)
   d.places.forEach((p, k) => {
+    // the open session shows the layer its chips picked (App.vue)
+    if (state.open === d.id && state.layer && layerOf(p) !== state.layer) return
     const r = reviewOf(d.id, p)
     const at = pinOf(p, r)
     bounds.push([at.lat, at.lon])
@@ -139,7 +156,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => { ro?.disconnect(); map?.remove() })
 
-watch(() => [state.datasets.length, state.shown.size, state.open, state.reviews, lang.value], drawAll, { deep: true })
+watch(() => [state.datasets.length, state.shown.size, state.open, state.layer, state.reviews, lang.value], drawAll, { deep: true })
 watch(() => state.place, () => { drawAll(); focusPlace() })
 watch(() => [state.task, state.open], () => {
   drawAll()
@@ -180,6 +197,13 @@ defineExpose({ fitOpen, focusOpen })
 .pin.low { border-style: dashed; border-color: #222; }
 .pin.removal { border-color: #d6336c; border-width: 3px; }
 .pin.sel { transform: scale(1.3); box-shadow: 0 0 0 4px rgba(31,122,82,.35); }
+.apin { height: 18px; max-width: 36px; padding: 0 3px; box-sizing: border-box; border-radius: 3px; color: #fff; font: 700 10px/14px system-ui;
+  text-align: center; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); overflow: hidden; white-space: nowrap; text-overflow: clip; }
+.spin { width: 26px; height: 26px; box-sizing: border-box; border-radius: 50%; background: #fff; color: #222; font: 700 9px/20px system-ui;
+  text-align: center; border: 3px solid #d6336c; box-shadow: 0 1px 4px rgba(0,0,0,.35); overflow: hidden; white-space: nowrap; }
+.spin.confirmed { color: #1f7a52; font-size: 12px; }
+.spin.rejected, .apin.rejected { opacity: .6; }
+.apin.sel, .spin.sel { transform: scale(1.3); box-shadow: 0 0 0 4px rgba(31,122,82,.35); }
 .leaflet-marker-icon > .rm { width: 18px; height: 18px; border-radius: 4px; background: #d6336c; color: #fff; font: 700 11px/18px system-ui; text-align: center; }
 .final-pin { width: 30px; height: 40px; background: no-repeat center/contain
   url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 40'%3E%3Cpath d='M15 39C15 39 2 22 2 14a13 13 0 0 1 26 0c0 8-13 25-13 25z' fill='%23f59f00' stroke='white' stroke-width='2'/%3E%3Ccircle cx='15' cy='14' r='5' fill='white'/%3E%3C/svg%3E"); }

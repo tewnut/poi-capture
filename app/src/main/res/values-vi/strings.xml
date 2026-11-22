@@ -525,8 +525,6 @@
     <string name="capture_gps_lost_banner">Mất GPS: ảnh dùng vị trí cuối cùng. Ra chỗ thoáng để cập nhật lại.</string>
     <string name="capture_gps_wait_title">Đang chờ GPS</string>
     <string name="guide_intro">Hãy chụp nhiều hơn mặt tiền: agent đọc từng ảnh và điền thông tin địa điểm từ đó.</string>
-    <string name="guide_next">Tiếp theo: %1$s</string>
-    <string name="guide_done">Đã đủ cho địa điểm này. Chụp thêm góc khác cũng tốt, hoặc bấm Địa điểm tiếp.</string>
     <string name="guide_front_title">Mặt tiền</string>
     <string name="guide_front_text">Toàn bộ cửa hàng, chụp thẳng, thấy biển hiệu</string>
     <string name="guide_sign_title">Biển hiệu</string>
@@ -626,4 +624,19 @@
     <string name="onboarding_key_skip">Bỏ qua và bắt đầu</string>
     <string name="upload_server_at">Máy chủ: %s</string>
     <string name="upload_server_change">Đổi</string>
+    <string name="setup_target_title">Chuyến này để ghi gì?</string>
+    <string name="setup_target_shops">Cửa hàng</string>
+    <string name="setup_target_shops_sub">Camera nhìn ngang sang dãy cửa hàng. Như trước.</string>
+    <string name="setup_target_addresses">Cửa hàng + số nhà</string>
+    <string name="setup_target_addresses_sub">Camera nhìn ngang. Ảnh gấp đôi, lớn hơn, chạy chậm hơn.</string>
+    <string name="setup_target_signs">Biển báo giao thông</string>
+    <string name="setup_target_signs_sub">Camera nhìn về PHÍA TRƯỚC, dọc con đường. Cứ 8 m một ảnh.</string>
+    <string name="setup_target_signs_hint">Xoay điện thoại nhìn về phía trước, qua tay lái, trước khi bắt đầu.</string>
+    <string name="setup_target_shops_info">Biển hiệu cửa hàng cùng số điện thoại, giờ mở cửa và địa chỉ. Camera nhìn sang dãy cửa hàng.</string>
+    <string name="setup_target_addresses_info">Mọi thứ của chuyến cửa hàng, thêm mọi biển số nhà, dù có cửa hàng hay không. Biển số nhỏ nên ứng dụng chụp khoảng gấp đôi số ảnh, ở cỡ lớn nhất, và nhắc bạn chạy chậm hơn.</string>
+    <string name="setup_target_signs_info">Mọi biển báo giao thông: loại biển, biển phụ và vị trí đặt. Camera phải nhìn về phía trước dọc con đường; ứng dụng chụp mỗi 8 m và cảnh báo khi điện thoại bị xoay ngang.</string>
+    <string name="service_mount_side_signs">Camera đang nhìn NGANG: để ghi biển báo, xoay camera nhìn về phía trước dọc con đường</string>
+    <plurals name="capture_plates_seen">
+        <item quantity="other">🔢 Thấy số nhà trên %d ảnh</item>
+    </plurals>
 </resources>

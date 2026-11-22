@@ -37,8 +37,10 @@ export function pendingSuggestions(place: Place, review: Review): FieldKey[] {
   return FIELD_KEYS.filter((k) => !review.fields[k] && suggestionKind(place.fields[k]) != null)
 }
 
-/** No street at all: nothing read, suggested or typed, or the reviewer rejected it without typing another. */
+/** No street at all: nothing read, suggested or typed, or the reviewer rejected it without typing another.
+ *  A traffic sign has no address. */
 export function missingStreet(place: Place, review: Review): boolean {
+  if (place.layer === 'sign') return false
   const r = review.fields.street
   if (r) return r.state === 'rejected' || !r.value
   return !place.fields.street?.value

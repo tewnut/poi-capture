@@ -75,6 +75,13 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .chip.rejected { background: #f1f1f1; color: #888; text-decoration: line-through; }
 .chip.new { background: #fff0e6; color: #a23b05; }
 .chip.rm { background: #fde8ef; color: #9b1c47; }
+/* sweep targets and layers (docs/sweep-targets.md): the ride's target, the layer chips over a ride's list, and the
+   small mark before an address or a sign in the list (the same shapes as on the map, MapView.vue) */
+.chip.target { background: #e6f0fb; color: #1d4f8a; vertical-align: 1px; }
+.seg.layers { margin: 0; flex: none; }
+.lymark { display: inline-block; width: 9px; height: 9px; margin-right: 5px; vertical-align: 0; }
+.lymark.ly-address { background: #475569; border-radius: 2px; }
+.lymark.ly-sign { border: 2px solid #d6336c; border-radius: 50%; background: #fff; width: 7px; height: 7px; }
 
 .ptitle { display: flex; justify-content: space-between; align-items: center; }
 .prow { display: flex; gap: 10px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: #fff; padding: 6px; }

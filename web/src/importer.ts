@@ -1,7 +1,7 @@
 // Turn dropped files (a folder from the agentic processing, or a zip of it, or a raw session zip from the phone)
 // into a Dataset plus its photo files. Nothing leaves the browser.
 import { unzipSync, strFromU8 } from 'fflate'
-import type { Dataset, Place, Task } from './types'
+import { LAYERS, type Dataset, type Place, type Target, type Task } from './types'
 
 export type Imported = { dataset: Dataset; files: Map<string, Blob> }
 
@@ -70,15 +70,20 @@ function keepImages(files: Map<string, Blob>, wanted: Set<string>): Map<string, 
   return m
 }
 
+const TARGETS: Target[] = ['shops', 'addresses', 'signs']
+/** The ride's target; older apps and Place capture send none (= shops). */
+const targetOf = (v: unknown): Target => (TARGETS.includes(v as Target) ? (v as Target) : 'shops')
+
 function fromResult(r: any, files: Map<string, Blob>): Imported {
   if (r.schema !== 'poi-result/1') throw new Error(`result.json: unknown schema ${r.schema}`)
-  const places: Place[] = r.places
+  // addresses and signs come as entries of their own (docs/sweep-targets.md); an older result has places only
+  const places: Place[] = (r.places || []).map((p: any) => ({ ...p, layer: LAYERS.includes(p.layer) ? p.layer : 'place' }))
   const tasks: Task[] = r.tasks || []
   const wanted = new Set<string>([...places.flatMap((p) => p.photos.map((x) => x.file)), ...tasks.map((t) => t.photo || '').filter(Boolean)])
   const kept = keepImages(files, wanted)
   return {
     dataset: {
-      id: r.session.id, source: 'result', importedAt: new Date().toISOString(), session: r.session,
+      id: r.session.id, source: 'result', importedAt: new Date().toISOString(), session: { ...r.session, target: targetOf(r.session.target) },
       track: r.track || [], shots: r.shots || [], places, tasks, files: [...kept.keys()],
     },
     files: kept,
@@ -124,12 +129,12 @@ async function fromRaw(m: any, files: Map<string, Blob>): Promise<Imported> {
   return {
     dataset: {
       id: `${s.id}-raw`, source: 'raw', importedAt: new Date().toISOString(),
-      session: { id: s.id, name: s.name, kind: s.kind, holding: s.holding, startedAt: s.startedAt },
+      session: { id: s.id, name: s.name, kind: s.kind, holding: s.holding, startedAt: s.startedAt, target: targetOf(s.target) },
       track, shots, shotFiles, places, tasks: [], files: [...kept.keys()],
     },
     files: kept,
   }
 }
 
-export const _test = { stripTop, fromResult }
+export const _test = { stripTop, fromResult, fromRaw }
 export { strFromU8 }

@@ -22,7 +22,10 @@ object SignOcr {
     private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
     /** Blocking (call off the main thread). Full-resolution still, not preview frames: small text needs the pixels. */
-    fun read(file: File): SignReading {
+    fun read(file: File): SignReading = SignText.read(lines(file))
+
+    /** The text lines of a photo, boxes in the photo's pixels. Blocking. */
+    fun lines(file: File): List<TextLine> {
         val rotation = when (runCatching { ExifInterface(file).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1) }.getOrDefault(1)) {
             ExifInterface.ORIENTATION_ROTATE_90 -> 90
             ExifInterface.ORIENTATION_ROTATE_180 -> 180
@@ -32,14 +35,13 @@ object SignOcr {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeFile(file.path, it) }
         val sample = if (maxOf(bounds.outWidth, bounds.outHeight) > 3200) 2 else 1
         val bmp = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: return SignText.read(emptyList())
+            ?: return emptyList()
         try {
             val text = Tasks.await(recognizer.process(InputImage.fromBitmap(bmp, rotation)), 30, TimeUnit.SECONDS)
-            val lines = text.textBlocks.flatMap { it.lines }.map { l ->
+            return text.textBlocks.flatMap { it.lines }.map { l ->
                 val b = l.boundingBox
                 TextLine(l.text, (b?.height() ?: 0) * sample, b?.let { intArrayOf(it.left * sample, it.top * sample, it.right * sample, it.bottom * sample) })
             }
-            return SignText.read(lines)
         } finally {
             bmp.recycle()
         }

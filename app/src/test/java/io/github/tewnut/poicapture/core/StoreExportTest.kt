@@ -171,3 +171,23 @@ class SessionSplitTest {
         assertTrue(SessionSplit.split(store, "s_ride-2", "No street").isEmpty())   // a part is not cut again
     }
 }
+
+class SweepTargetSessionTest {
+    @get:Rule val tmp = TemporaryFolder()
+
+    @Test fun theTargetIsSavedAndSentWithTheRide() {
+        val store = SessionStore(tmp.newFolder("sessions"))
+        val s = Session(id = "s_signs", createdAt = "2026-11-22T03:00:00Z", contributor = "tester", note = "",
+            vehicle = Vehicle.UNSPECIFIED, mode = Mode.PHOTO_AUTO, sideOfTravel = Side.RIGHT, road = Road.of(WAY, listOf(WAY)),
+            settings = Settings(), target = SweepTarget.SIGNS)
+        store.create(s)
+        assertEquals(SweepTarget.SIGNS, store.load("s_signs")!!.target)
+        assertEquals("signs", sessionUploadMetadata(s, "x.zip", 0)["target"])
+        // older rides and Place capture: shops / no target sent
+        val old = JSONObject(s.toJson().toString()).apply { remove("target") }
+        assertEquals(SweepTarget.SHOPS, Session.fromJson(old).target)
+        val place = Session(id = "s_poi", createdAt = "2026-11-22T03:00:00Z", contributor = "t", note = "", vehicle = Vehicle.UNSPECIFIED,
+            mode = Mode.PHOTO_MANUAL, sideOfTravel = Side.RIGHT, road = Road.auto(), settings = Settings(), kind = SessionKind.POI)
+        assertNull(sessionUploadMetadata(place, "p.zip", 0)["target"])
+    }
+}

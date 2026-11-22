@@ -5,6 +5,31 @@ import kotlin.math.roundToInt
 import kotlin.math.tan
 
 /**
+ * What a street sweep is for (docs/sweep-targets.md). It sets how the phone captures; what is read from the photos
+ * is decided by the agent (a shops ride may still be read for house numbers when its photos allow).
+ * - SHOPS: the camera sideways at the fronts, a photo every 30-45 % of a frame of slide.
+ * - ADDRESSES: shops and every house-number plate: plates are small, so about twice as dense, half the blur (slower).
+ * - SIGNS: traffic signs, the camera looking **ahead**: no sideways slide to measure, a photo every [SIGN_EVERY_M].
+ */
+enum class SweepTarget(val json: String, val earliest: Double, val latest: Double, val maxBlurPx: Double) {
+    SHOPS("shops", 0.30, 0.45, 8.0),
+    ADDRESSES("addresses", 0.18, 0.25, 4.0),
+    SIGNS("signs", 0.30, 0.45, 8.0);
+
+    /** Photos are triggered by the distance ridden (GPS), not by the slide of the camera frames. */
+    val byDistance: Boolean get() = this == SIGNS
+
+    companion object {
+        /** Missing (older apps, Place capture): shops. */
+        fun of(s: String?) = entries.firstOrNull { it.json == s } ?: SHOPS
+        /** Signs ride: a photo every this many metres (a sign is on 3+ photos as it is approached). */
+        const val SIGN_EVERY_M = 8.0
+        /** House numbers: the largest photo the camera gives (long edge). */
+        const val ADDRESSES_LONG_EDGE = 4000
+    }
+}
+
+/**
  * How densely to photograph and how fast to ride, from the distance between the camera and the shop fronts
  * (not from the vehicle):
  * - one landscape frame covers `coverageM = 2 · d · tan(hFov/2)` of facade;
@@ -21,6 +46,7 @@ data class CapturePlan(
     val maxSpeedKmh: Int,
     val blurLimitKmh: Int,
     val rateLimitKmh: Int,
+    val target: SweepTarget = SweepTarget.SHOPS,
 ) {
     companion object {
         const val DEFAULT_HFOV = 70.0
@@ -45,20 +71,29 @@ data class CapturePlan(
         const val SPEED_CAP_KMH = 30          // never suggest more on city streets
         const val OVERLAP_LATEST = 0.45       // = OverlapTrigger.latest
 
-        fun of(facadeDistanceM: Double, hFovDeg: Double? = null, imageWidthPx: Int = 2560): CapturePlan {
+        fun of(facadeDistanceM: Double, hFovDeg: Double? = null, imageWidthPx: Int = 2560,
+               target: SweepTarget = SweepTarget.SHOPS): CapturePlan {
+            if (target.byDistance) {
+                // looking ahead, the frame moves toward the signs, not across them: blur is small, the camera's
+                // shot rate is the limit
+                val every = SweepTarget.SIGN_EVERY_M
+                val rateKmh = (every * MAX_SHOTS_PER_SEC * 3.6).roundToInt()
+                return CapturePlan(facadeDistanceM, hFovDeg ?: DEFAULT_HFOV, every / target.latest, every,
+                    minOf(rateKmh, SPEED_CAP_KMH), SPEED_CAP_KMH, rateKmh, target)
+            }
             val d = facadeDistanceM.coerceIn(2.0, 30.0)
             val fov = (hFovDeg ?: DEFAULT_HFOV).coerceIn(30.0, 120.0)
             val half = fov / 2 * PI / 180.0
             val coverage = 2 * d * tan(half)
             // the photos are triggered by how far the scene slid in the frames (OverlapTrigger), at the latest after
             // 45 % of a frame: the widest spacing to expect, used for the speed the camera can keep up with
-            val every = (coverage * OVERLAP_LATEST).coerceIn(1.0, 10.0)
+            val every = (coverage * target.latest).coerceIn(1.0, 10.0)
             val focalPx = (imageWidthPx / 2.0) / tan(half)
-            val blurMps = MAX_BLUR_PX * d / (EXPOSURE_S * focalPx)
+            val blurMps = target.maxBlurPx * d / (EXPOSURE_S * focalPx)
             val rateMps = every * MAX_SHOTS_PER_SEC
             val blurKmh = (blurMps * 3.6).roundToInt()
             val rateKmh = (rateMps * 3.6).roundToInt()
-            return CapturePlan(d, fov, coverage, every, minOf(blurKmh, rateKmh, SPEED_CAP_KMH), blurKmh, rateKmh)
+            return CapturePlan(d, fov, coverage, every, minOf(blurKmh, rateKmh, SPEED_CAP_KMH), blurKmh, rateKmh, target)
         }
     }
 }

@@ -542,8 +542,6 @@
     <string name="capture_gps_lost_banner">GPS lost: photos keep the last position. Step outside to refresh it.</string>
     <string name="capture_gps_wait_title">Waiting for GPS</string>
     <string name="guide_intro">Photograph more than the front: the agent reads every photo and fills in the place from it.</string>
-    <string name="guide_next">Next: %1$s</string>
-    <string name="guide_done">Enough for this place. More angles are welcome, or tap Next place.</string>
     <string name="guide_front_title">Front</string>
     <string name="guide_front_text">The whole shop, straight on, with its sign</string>
     <string name="guide_sign_title">Sign</string>
@@ -646,4 +644,20 @@
     <string name="onboarding_key_skip">Skip and start</string>
     <string name="upload_server_at">Server: %s</string>
     <string name="upload_server_change">Change</string>
+    <string name="setup_target_title">What is this ride for?</string>
+    <string name="setup_target_shops">Shops</string>
+    <string name="setup_target_shops_sub">Camera sideways at the shopfronts. As before.</string>
+    <string name="setup_target_addresses">Shops + house numbers</string>
+    <string name="setup_target_addresses_sub">Camera sideways. Twice as many photos, larger, ride slower.</string>
+    <string name="setup_target_signs">Traffic signs</string>
+    <string name="setup_target_signs_sub">Camera facing FORWARD, along the road. A photo every 8 m.</string>
+    <string name="setup_target_signs_hint">Turn the phone to look ahead, over the handlebars, before you start.</string>
+    <string name="setup_target_shops_info">Shop signs with their phone, hours and address. The camera faces the shopfronts.</string>
+    <string name="setup_target_addresses_info">Everything a shops ride gets, plus every house-number plate, shop or not. Plates are small, so the app takes about twice as many photos at the largest size and asks you to ride slower.</string>
+    <string name="setup_target_signs_info">Every traffic sign: its type, extra plate and where it stands. The camera must look ahead along the road; the app takes a photo every 8 m and warns if the phone is turned sideways.</string>
+    <string name="service_mount_side_signs">Camera is facing SIDEWAYS: for traffic signs, turn it to look ahead along the road</string>
+    <plurals name="capture_plates_seen">
+        <item quantity="one">🔢 House number found on %d photo</item>
+        <item quantity="other">🔢 House numbers found on %d photos</item>
+    </plurals>
 </resources>

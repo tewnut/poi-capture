@@ -40,31 +40,10 @@ val PLACE_GUIDE = listOf(
     GuideStep(R.drawable.guide_plate, R.string.guide_plate_title, R.string.guide_plate_text),
 )
 
-/** Over the camera, for the place being photographed: the next kind of photo with its example, and progress dots. */
-@Composable
-fun PlaceGuideCard(photosOfPlace: Int, modifier: Modifier = Modifier) {
-    val done = photosOfPlace >= PLACE_GUIDE.size
-    val step = PLACE_GUIDE[photosOfPlace.coerceIn(0, PLACE_GUIDE.size - 1)]
-    Row(modifier.widthIn(max = 440.dp).background(Color(0xCC000000), RoundedCornerShape(12.dp)).padding(8.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (!done) Image(painterResource(step.image), stringResource(step.title),
-            Modifier.size(72.dp, 54.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            if (done) Text(stringResource(R.string.guide_done), color = Color.White, fontSize = 13.sp, lineHeight = 17.sp)
-            else {
-                Text(stringResource(R.string.guide_next, stringResource(step.title)), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                Text(stringResource(step.text), color = Color(0xFFDDE5E0), fontSize = 12.sp, lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                PLACE_GUIDE.indices.forEach { i ->
-                    Box(Modifier.size(7.dp).background(if (i < photosOfPlace) Palette.GreenLight else Color(0x66FFFFFF), CircleShape))
-                }
-            }
-        }
-    }
-}
-
-/** The same four kinds as a list, for the instructions. */
+/**
+ * The four kinds as a list, in the instructions (New session ⓘ). Not over the camera: the capture screen keeps only
+ * the camera and its action buttons.
+ */
 @Composable
 fun PlaceGuideList() {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

@@ -2,7 +2,7 @@
 // Only what the photos showed or the reviewer confirmed is written: never the Google block or Google's pin
 // (Google's terms; docs/pipeline.md).
 import type { Dataset, Place, Review, FieldKey, RemovalReview, Task } from './types'
-import { FIELD_KEYS } from './types'
+import { FIELD_KEYS, layerOf } from './types'
 import { exportNames } from './photos'
 
 export type Published = {
@@ -27,10 +27,13 @@ export function record(x: Published) {
   for (const k of FIELD_KEYS) v[k] = value(place, review, k)
   // fields whose value is still Google's (filled from Google and not edited by the reviewer)
   const fromGoogle = FIELD_KEYS.filter((k) => v[k] && place.fields[k]?.source === 'google' && review.fields[k]?.state !== 'edited')
+  const layer = layerOf(place)
   return {
     id: place.id,
+    layer,
     name: v.name || place.name,
     category: review.category || place.category || null,
+    ...(layer === 'sign' ? { signCode: v.signCode } : {}),
     status: place.status,
     phone: v.phone, houseNumber: v.houseNumber, street: v.street, openingHours: v.openingHours, website: v.website,
     lat: +pin.lat.toFixed(7), lon: +pin.lon.toFixed(7),
@@ -60,7 +63,7 @@ export function geojson(places: Published[], removed: Removed[]) {
   return JSON.stringify({ type: 'FeatureCollection', features: feats }, null, 1)
 }
 
-const CSV_COLS = ['id', 'change', 'name', 'category', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
+const CSV_COLS = ['id', 'change', 'name', 'category', 'layer', 'signCode', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
   'fromGoogle', 'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment', 'photos'] as const
 
 /** A CSV cell. Text starting with = + - @ (or a tab / return) is prefixed with ' so spreadsheets do not run it
@@ -111,16 +114,47 @@ export function osmHours(v: string | null): string | null {
   return `Mo-Su ${t(m[1], m[2])}-${t(m[3], m[4])}`
 }
 
+/** OSM tags of a house number: only the address, and only with a confirmed number. */
+function addressTags(r: Record<string, any>): Record<string, string> | null {
+  if (!r.houseNumber) return null
+  const tags: Record<string, string> = { 'addr:housenumber': r.houseNumber }
+  if (r.street) tags['addr:street'] = r.street.split(',')[0].trim()
+  return tags
+}
+
+/** OSM tags of a traffic sign: only with a confirmed code; direction = the way a driver facing it drives. */
+function signTags(r: Record<string, any>, p: Place): Record<string, string> | null {
+  const code = (r.signCode || '').trim()
+  if (!code) return null
+  const tags: Record<string, string> = { traffic_sign: `VN:${code}` }
+  const f = p.sign?.facingDeg
+  if (typeof f === 'number' && Number.isFinite(f)) tags.direction = String(((Math.round(f) % 360) + 360) % 360)
+  return tags
+}
+
 /** New nodes (negative ids) for JOSM: open it, check against what is already mapped, then upload by hand. */
 export function osm(places: Published[]) {
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>',
     '<osm version="0.6" generator="poi-capture-reviewer" upload="never">',
     '  <!-- New places confirmed in POI Capture Reviewer. Check against existing OSM data in JOSM before uploading;',
     '       follow the OSM import / organised editing guidelines. Removals are in the GeoJSON / CSV export. -->']
-  places.forEach((x, i) => {
+  let n = 0
+  const node = (r: Record<string, any>, tags: Record<string, string>) => {
+    tags.check_date = (r.reviewedAt || r.captured || '').slice(0, 10)
+    lines.push(`  <node id="-${++n}" lat="${r.lat}" lon="${r.lon}" version="0">`)
+    for (const [k, v] of Object.entries(tags)) if (v) lines.push(`    <tag k="${esc(k)}" v="${esc(v)}"/>`)
+    lines.push('  </node>')
+  }
+  for (const x of places) {
     const r: Record<string, any> = { ...record(x) }
     // OpenStreetMap does not accept data copied from Google: those fields stay out of the .osm file
     for (const k of (r.fromGoogle as string).split(' ').filter(Boolean)) r[k] = null
+    // addresses and signs are nodes of their own, without the shop tags; left out when the number / code is missing
+    if (r.layer !== 'place') {
+      const tags = r.layer === 'address' ? addressTags(r) : signTags(r, x.place)
+      if (tags) node(r, tags)
+      continue
+    }
     const tags: Record<string, string> = { name: r.name, ...(OSM_TAGS[r.category || ''] || {}) }
     if (r.phone) tags.phone = r.phone.split(/[,;]\s*/).map((p: string) => p.replace(/^0/, '+84 ').replace(/\s+/g, ' ')).join(';')
     if (r.houseNumber) tags['addr:housenumber'] = r.houseNumber
@@ -129,11 +163,8 @@ export function osm(places: Published[]) {
     if (oh) tags.opening_hours = oh
     if (r.website && /\./.test(r.website) && !/\s/.test(r.website)) tags.website = r.website.startsWith('http') ? r.website : `https://${r.website}`
     if (x.place.status !== 'open') tags.disused = 'yes'
-    tags.check_date = (r.reviewedAt || r.captured || '').slice(0, 10)
-    lines.push(`  <node id="-${i + 1}" lat="${r.lat}" lon="${r.lon}" version="0">`)
-    for (const [k, v] of Object.entries(tags)) if (v) lines.push(`    <tag k="${esc(k)}" v="${esc(v)}"/>`)
-    lines.push('  </node>')
-  })
+    node(r, tags)
+  }
   lines.push('</osm>')
   return lines.join('\n') + '\n'
 }

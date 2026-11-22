@@ -3,9 +3,11 @@
     python result.py <out>      (re)write <out>/result.json from the place folders; build.write_indexes calls it
 
 result.json (schema "poi-result/1"):
-  session   id, name, kind (sweep | poi), holding, startedAt, street
+  session   id, name, kind (sweep | poi), target (shops | addresses | signs; missing = shops), holding, startedAt, street
   track     [[lat, lon], ...] the ride (sweeps), shots [[photoIndex, lat, lon, cameraBearing], ...]
-  places    one per place folder:
+  places    one per place folder (docs/sweep-targets.md for the layers):
+            layer (place | address | sign), placeRef (address: the shop it is on),
+            sign {code, group, facingDeg, side} (sign),
             id, folder, name, category, status (open | closed | for_rent | under_construction | gone | unknown),
             confidence, fields {name|phone|houseNumber|street|openingHours|website|signText|other:
                                 {value, photo, sure}}  (read from the photos; photo = sweep index or photo id;
@@ -25,7 +27,7 @@ import json, os, sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import arg_path, folder_no, place_folders  # noqa: E402
+from paths import arg_path, folder_no, layer_of, place_folders  # noqa: E402
 
 STATUS_GONE = ('closed', 'for_rent', 'gone')
 
@@ -323,13 +325,16 @@ def place_entry(folder, m, session_id):
                             'uncertaintyM': pos.get('uncertaintyM'), 'sightings': pos.get('sightings') or []})
     pins['google'] = _google_pin(m.get('googleMaps'))
     pins.setdefault('agent', None)
+    layer = layer_of(m)
+    extra = {'placeRef': p.get('placeRef')} if layer == 'address' else {'sign': p.get('sign')} if layer == 'sign' else {}
     return {
-        'id': f'{session_id}-{folder_no(folder)}', 'folder': folder, 'name': p['name'], 'category': p.get('category'),
+        'id': f'{session_id}-{folder_no(folder)}', 'folder': folder, 'layer': layer, **extra,
+        'name': p['name'], 'category': p.get('category'),
         'status': p.get('status') or 'open', 'confidence': p.get('confidence'),
         'fields': add_ride_street(
             merge_google(merge_source(m.get('fields') or {}, _web_fields(m.get('website'), m.get('fields') or {},
                                                                          m.get('googleMaps')), 'website'),
-                         m.get('googleMaps')), place_road(m)), 'note': p.get('note'),
+                         m.get('googleMaps')), place_road(m) if layer != 'sign' else None), 'note': p.get('note'),
         'website': {k: (m.get('website') or {}).get(k) for k in ('status', 'url', 'title', 'description', 'address')}
                    if m.get('website') else None,
         'photos': [{'file': f"{folder}/{x['file']}", 'index': x.get('sweepIndex'), 'cover': x.get('cover'),
@@ -345,6 +350,8 @@ def place_entry(folder, m, session_id):
 def tasks_for(places, removals):
     out = []
     for p in places:
+        if (p.get('layer') or 'place') != 'place':
+            continue   # visits and removals are for businesses (Place capture)
         g = p.get('google') or {}
         pin = p['pins'].get('agent') or p['pins'].get('algorithm') or p['pins'].get('contributor')
         cover = next((x['file'] for x in p['photos'] if x.get('cover')), None)
@@ -379,6 +386,7 @@ def write(out):
     sw = json.load(open(os.path.join(out, 'sweep.json'), encoding='utf-8')) if os.path.isfile(os.path.join(out, 'sweep.json')) else {}
     ses = dict(sw.get('session') or metas[0][1].get('session') or {})
     ses['street'] = sw.get('street')
+    ses['target'] = ses.get('target') or 'shops'   # older rides and Place capture
     removals = json.load(open(os.path.join(out, 'removals.json'), encoding='utf-8')) if os.path.isfile(os.path.join(out, 'removals.json')) else []
     places = [place_entry(d, m, ses.get('id')) for d, m in metas]
     res = {'schema': 'poi-result/1', 'generatedAt': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),

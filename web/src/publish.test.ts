@@ -172,3 +172,52 @@ describe('photo edits', () => {
     expect(k[0]).toMatchObject({ file: 'a/1.jpg', cover: true })
   })
 })
+
+describe('addresses and signs (docs/sweep-targets.md)', () => {
+  const addr: Place = { id: 's1-a1', name: '106 Nguyễn Thanh Sơn', category: 'address', status: 'open', layer: 'address', placeRef: 'Bún Bò',
+    fields: { houseNumber: { value: '106', sure: 'high' }, street: { value: 'Nguyễn Thanh Sơn, Thảo Điền', sure: 'high' } },
+    photos: [], pins: { agent: { lat: 10.1, lon: 106.1 } } }
+  const sign: Place = { id: 's1-s1', name: 'Cấm đỗ xe', category: 'traffic_sign', status: 'open', layer: 'sign',
+    sign: { code: 'P.131a', group: 'prohibitory', facingDeg: 271.6, side: 'right' },
+    fields: { signCode: { value: 'P.131a', sure: 'high' }, name: { value: 'Cấm đỗ xe' }, other: { value: '6h-9h' } },
+    photos: [], pins: { agent: { lat: 10.2, lon: 106.2 } } }
+  const ok = (p: Place): Review => ({ decision: 'confirmed', fields: Object.fromEntries(Object.entries(p.fields).map(([k, f]) => [k, { state: 'ok', value: f!.value }])) })
+
+  it('an address is a node with addr:housenumber and addr:street only', () => {
+    const x = osm([{ dataset, place: addr, review: ok(addr) }])
+    expect(x).toContain('<tag k="addr:housenumber" v="106"/>')
+    expect(x).toContain('<tag k="addr:street" v="Nguyễn Thanh Sơn"/>')
+    expect(x).not.toContain('k="name"')
+  })
+
+  it('a sign is a node with traffic_sign=VN:<code> and direction, only with a confirmed code', () => {
+    const x = osm([{ dataset, place: sign, review: ok(sign) }])
+    expect(x).toContain('<tag k="traffic_sign" v="VN:P.131a"/>')
+    expect(x).toContain('<tag k="direction" v="272"/>')
+    expect(x).not.toContain('k="name"')
+    const noCode: Review = { decision: 'confirmed', fields: { signCode: { state: 'rejected', value: 'P.131a' } } }
+    expect(osm([{ dataset, place: sign, review: noCode }])).not.toContain('<node')
+    const edited: Review = { decision: 'confirmed', fields: { signCode: { state: 'edited', value: 'P.130' } } }
+    expect(osm([{ dataset, place: { ...sign, sign: { code: 'P.131a' } }, review: edited }])).toContain('v="VN:P.130"')
+    expect(osm([{ dataset, place: { ...sign, sign: { code: 'P.131a' } }, review: edited }])).not.toContain('direction')
+  })
+
+  it('numbers the nodes one by one when some are left out', () => {
+    const x = osm([{ dataset, place: sign, review: { decision: 'confirmed', fields: {} } }, { dataset, place: addr, review: ok(addr) }])
+    expect(x).toContain('id="-1"')
+    expect(x).not.toContain('id="-2"')
+  })
+
+  it('GeoJSON and CSV carry the layer, and the sign code for signs', () => {
+    const all = [{ dataset, place: addr, review: ok(addr) }, { dataset, place: sign, review: ok(sign) }, { dataset, place, review: { decision: 'confirmed', fields: {} } as Review }]
+    const props = JSON.parse(geojson(all, [])).features.map((f: any) => f.properties)
+    expect(props.map((p: any) => p.layer)).toEqual(['address', 'sign', 'place'])
+    expect(props[1].signCode).toBe('P.131a')
+    expect('signCode' in props[0]).toBe(false)
+    const c = csv(all, []).split('\r\n')
+    const cols = c[0].replace('﻿', '').split(',')
+    expect(c[2].split(',')[cols.indexOf('layer')]).toBe('sign')
+    expect(c[2].split(',')[cols.indexOf('signCode')]).toBe('P.131a')
+    expect(c[3].split(',')[cols.indexOf('layer')]).toBe('place')
+  })
+})

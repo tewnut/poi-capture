@@ -110,6 +110,8 @@ class Session(
     val parentId: String? = null,
     val part: Int? = null,
     val parts: Int? = null,
+    // street sweep: what the ride is for, which sets how it captures (docs/sweep-targets.md); "shops" before 0.17
+    val target: SweepTarget = SweepTarget.SHOPS,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("schema", SCHEMA).put("kind", kind.json).put("createdAt", createdAt)
@@ -117,6 +119,7 @@ class Session(
         .put("contributor", contributor).put("email", email).put("note", note).put("name", name.orNull())
         .put("vehicle", vehicle.json).put("mode", mode.json).put("holding", holding.json)
         .put("sideOfTravel", sideOfTravel.json)
+        .put("target", if (kind == SessionKind.SWEEP) target.json else JSONObject.NULL)
         .put("travel", travel?.json.orNull()).put("sideOfWay", sideOfWay?.json.orNull())
         .put("road", road.toJson())
         .put("settings", JSONObject()
@@ -167,6 +170,7 @@ class Session(
             parentId = o.optStr("parentId"),
             part = o.optInt("part", 0).takeIf { it > 0 },
             parts = o.optInt("parts", 0).takeIf { it > 0 },
+            target = SweepTarget.of(o.optStr("target")),
         )
     }
 }

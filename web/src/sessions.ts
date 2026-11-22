@@ -13,6 +13,7 @@ export type Row = {
   name: string
   date: string | null
   kind: string | null
+  target: string | null         // shops | addresses | signs; null = not said (shops)
   item: CloudItem | null        // the newest processed result on the server
   raw: CloudItem | null         // the newest raw ride on the server
   state: 'here' | 'updated' | 'remote' | 'waiting' | 'local'
@@ -25,19 +26,19 @@ export function rows(items: CloudItem[] | null, datasets: Dataset[]): Row[] {
     const id = i.sessionId || i.id
     if (out.has(id)) continue   // newest first: the first one is the one to review
     const s = importState(i, datasets)
-    out.set(id, { key: id, sessionId: id, name: i.name || id, date: i.trip?.startedAt || i.createdAt, kind: i.kind, item: i, raw: null,
+    out.set(id, { key: id, sessionId: id, name: i.name || id, date: i.trip?.startedAt || i.createdAt, kind: i.kind, target: i.target, item: i, raw: null,
       state: s === 'imported' ? 'here' : s === 'updated' ? 'updated' : 'remote' })
   }
   for (const i of done.filter((x) => x.type === 'raw-session')) {
     const id = i.sessionId || i.id
     const r = out.get(id)
-    if (r) { r.raw = r.raw || i; continue }
-    out.set(id, { key: id, sessionId: id, name: i.name || id, date: i.trip?.startedAt || i.createdAt, kind: i.kind, item: null, raw: i, state: 'waiting' })
+    if (r) { r.raw = r.raw || i; r.target = r.target || i.target; continue }
+    out.set(id, { key: id, sessionId: id, name: i.name || id, date: i.trip?.startedAt || i.createdAt, kind: i.kind, target: i.target, item: null, raw: i, state: 'waiting' })
   }
   for (const d of datasets) {
     const r = out.get(d.id)
     if (r) { if (r.state === 'waiting') r.state = 'local'; continue }
-    out.set(d.id, { key: d.id, sessionId: d.id, name: d.session.name || d.id, date: d.session.startedAt || null, kind: d.session.kind ?? null, item: null, raw: null, state: 'local' })
+    out.set(d.id, { key: d.id, sessionId: d.id, name: d.session.name || d.id, date: d.session.startedAt || null, kind: d.session.kind ?? null, target: d.session.target ?? null, item: null, raw: null, state: 'local' })
   }
   return [...out.values()].sort((a, b) => (b.date || '').localeCompare(a.date || ''))
 }

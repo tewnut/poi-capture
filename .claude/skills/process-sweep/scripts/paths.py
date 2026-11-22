@@ -6,8 +6,11 @@
   drive's root). Elsewhere (Linux, macOS, WSL) the path is returned as is.
 - folder_no(d): "07_Ph\u1edf_V\u1ee5" -> "07", "104_Highlands" -> "104" (the full number, not 2 characters).
 - place_folders(out): the place folders (those with a place.json) in numeric order: 9, 10, 99, 100, not 10, 100, 11.
+- layer_of(m): a place.json's layer: "place" (a business), "address" (a house-number plate) or "sign" (a traffic sign).
+- business_folders(out): the place folders of layer "place" only: the ones Google / website enrichment looks up
+  (an address or a sign has no name to search for).
 """
-import os, re
+import json, os, re
 
 _MSYS = re.compile(r'^/([A-Za-z])(?:/(.*))?$')
 
@@ -37,3 +40,16 @@ def _key(d):
 
 def place_folders(out):
     return sorted((d for d in os.listdir(out) if os.path.isfile(os.path.join(out, d, 'place.json'))), key=_key)
+
+
+def layer_of(m):
+    return ((m or {}).get('place') or {}).get('layer') or 'place'
+
+
+def business_folders(out):
+    keep = []
+    for d in place_folders(out):
+        with open(os.path.join(out, d, 'place.json'), encoding='utf-8') as f:
+            if layer_of(json.load(f)) == 'place':
+                keep.append(d)
+    return keep

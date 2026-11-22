@@ -5,7 +5,7 @@ import type { Dataset } from './types'
 
 const item = (o: Partial<CloudItem>): CloudItem => ({
   id: 'u' + Math.random().toString(36).slice(2), size: 1000, offset: 1000, complete: true, createdAt: '2026-11-20T10:00:00Z',
-  type: 'processed-result', sessionId: 's1', name: 'Ride 1', kind: 'sweep', filename: 'x.zip', by: null, metadata: {}, trip: null, ...o,
+  type: 'processed-result', sessionId: 's1', name: 'Ride 1', kind: 'sweep', target: null, filename: 'x.zip', by: null, metadata: {}, trip: null, ...o,
 })
 const ds = (id: string, importedAt: string, name = id) =>
   ({ id, source: 'result', importedAt, session: { id, name, startedAt: '2026-11-19T08:00:00Z', kind: 'sweep' }, places: [], tasks: [] }) as unknown as Dataset
@@ -37,6 +37,15 @@ describe('session rows', () => {
     const r = rows([item({ sessionId: 's1', trip: { startedAt: '2026-11-20T06:00:00Z', track: null, endedAt: null, distanceM: null, photos: null } })],
       [ds('old', '2026-11-01T00:00:00Z')])
     expect(r.map((x) => [x.sessionId, x.state])).toEqual([['s1', 'remote'], ['old', 'local']])
+  })
+
+  it('the ride’s target comes from the upload metadata; a processed result without one takes its raw ride’s', () => {
+    const r = rows([item({ sessionId: 's1' }), item({ type: 'raw-session', sessionId: 's1', target: 'signs' }),
+      item({ type: 'raw-session', sessionId: 's2', target: 'addresses' })], [])
+    expect(Object.fromEntries(r.map((x) => [x.sessionId, x.target]))).toEqual({ s1: 'signs', s2: 'addresses' })
+    const local = { ...ds('d', 'x'), session: { id: 'd', target: 'signs' } } as unknown as Dataset
+    expect(rows(null, [local])[0].target).toBe('signs')
+    expect(rows([item({ sessionId: 's3' })], [])[0].target).toBeNull()   // not said: shops
   })
 
   it('no connection: the downloaded sessions only', () => {

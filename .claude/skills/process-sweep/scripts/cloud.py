@@ -11,7 +11,7 @@ never from the command line, and is never printed.
 
 A push is resumable: the upload URL is kept in "<zip>.tus.json" beside the zip; run the same push again after an
 interruption and it continues from the server's offset (HEAD). A folder is zipped first (a processed place folder
-with result.json; its session id and name are read from it).
+with result.json; its session id, name, kind and target are read from it).
 
 Standard library only.
 """
@@ -166,17 +166,27 @@ def zip_folder(folder: str) -> str:
 
 
 def read_session(zip_path: str) -> dict:
-    """session id / name / kind from result.json (processed) or manifest.json (raw), wherever it sits in the zip."""
+    """session id / name / kind / target from result.json (processed) or manifest.json (raw), wherever it sits in
+    the zip."""
     try:
         with zipfile.ZipFile(zip_path) as z:
             for n in sorted(z.namelist(), key=len):
                 base = n.rsplit('/', 1)[-1]
                 if base in ('result.json', 'manifest.json'):
                     s = json.loads(z.read(n)).get('session') or {}
-                    return {'sessionId': s.get('id'), 'name': s.get('name'), 'kind': s.get('kind')}
+                    return {'sessionId': s.get('id'), 'name': s.get('name'), 'kind': s.get('kind'),
+                            'target': s.get('target')}
     except (zipfile.BadZipFile, ValueError, KeyError):
         pass
     return {}
+
+
+def push_metadata(info: dict, filename: str, type_: str, session_id: str | None, name: str | None) -> dict:
+    """The upload's metadata; `target` only when the result names one (the web list shows it; None is not sent)."""
+    return {'filename': filename, 'filetype': 'application/zip', 'type': type_,
+            'sessionId': session_id or info.get('sessionId'), 'name': name or info.get('name'),
+            'kind': info.get('kind'), 'target': info.get('target'),
+            'createdAt': datetime.now(timezone.utc).isoformat(timespec='seconds')}
 
 
 def push(cloud: Cloud, path: str, type_: str, session_id: str | None, name: str | None) -> str:
@@ -190,10 +200,7 @@ def push(cloud: Cloud, path: str, type_: str, session_id: str | None, name: str 
         state_file = path + '.tus.json'
     try:
         size = os.path.getsize(zip_path)
-        info = read_session(zip_path)
-        meta = {'filename': filename, 'filetype': 'application/zip', 'type': type_,
-                'sessionId': session_id or info.get('sessionId'), 'name': name or info.get('name'),
-                'kind': info.get('kind'), 'createdAt': datetime.now(timezone.utc).isoformat(timespec='seconds')}
+        meta = push_metadata(read_session(zip_path), filename, type_, session_id, name)
         url, offset = None, 0
         if os.path.exists(state_file):
             st = json.load(open(state_file, encoding='utf-8'))

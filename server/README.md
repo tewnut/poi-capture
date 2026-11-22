@@ -24,7 +24,9 @@ Both speak [tus](https://tus.io/protocols/resumable-upload) 1.0 (core, creation,
 | `POST` + `X-HTTP-Method-Override: PATCH` | accepted as a PATCH (Android's HTTP client has no PATCH; tusd does this too) |
 
 Upload metadata the clients send: `filename`, `filetype`, `type` (`raw-session` | `processed-result`), `sessionId`,
-`name`, `kind` (`sweep` | `poi`), `createdAt`, and from the phone `photoCount`.
+`name`, `kind` (`sweep` | `poi`), `target` (a sweep's purpose: `shops` | `addresses` | `signs`, docs/sweep-targets.md;
+missing = `shops`), `createdAt`, and from the phone `photoCount`. The server stores metadata as given; the web list
+reads `target` from it.
 
 Finished uploads cannot be deleted through tus (the phone must not remove what the agent has not pulled yet);
 clean up `DATA_DIR` by hand (each upload is `<id>` + `<id>.json`).

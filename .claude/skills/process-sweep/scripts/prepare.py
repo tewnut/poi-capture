@@ -7,6 +7,7 @@ Writes into <workdir>:
   session.json  the session record
   sheets/       sheet_NNN.jpg: 4 photos per sheet (2 x 2, 1000 px wide each; a sheet mixing landscape and portrait
                 photos gives each its own shape of cell), each labelled "#idx"
+Prints the ride's target (session.target: shops | addresses | signs; what to read, docs/sweep-targets.md).
 """
 import json, math, os, sys, zipfile
 
@@ -137,6 +138,22 @@ def sheets(photos, out, per=4, width=1000):
         sheet.save(os.path.join(out, f"sheet_{s:03d}.jpg"), quality=85)
 
 
+TARGETS = {
+    'shops': 'shops: read every business (SKILL.md, step 2)',
+    'addresses': 'addresses (shops + house numbers): read every business and every readable house-number plate, '
+                 'shop or not ("addresses" in places.json)',
+    'signs': 'signs: the camera looked FORWARD, along the road: read every traffic sign ("signs" in places.json); '
+             "a sign's x across the frame is an angle off the travel bearing (hFovDeg of each photo), not off a "
+             'sideways view; positions come from 2-3 sightings as the rider approaches',
+}
+
+
+def target_line(session):
+    """What the ride was captured for (session.target; older apps and Place capture: shops)."""
+    t = session.get('target') or 'shops'
+    return 'target: ' + TARGETS.get(t, f'{t} (unknown: read it as shops)')
+
+
 def main():
     src, work = arg_path(sys.argv[1]), arg_path(sys.argv[2])
     os.makedirs(work, exist_ok=True)
@@ -164,6 +181,8 @@ def main():
             'sharpness': (i.get('blur') or {}).get('sharpness'),
             'compassDeg': (i.get('motion') or {}).get('cameraAzimuthDeg'), 'travelBearing': i.get('travelBearing'),
             'ocrText': (i.get('ocr') or {}).get('text'),
+            # house-number rides: the numbers the phone's text reader found on this photo (a hint where to look)
+            'plates': [p.get('text') for p in i.get('plates') or []] or None,
         })
     json.dump(photos, open(os.path.join(work, 'photos.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     json.dump(session, open(os.path.join(work, 'session.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
@@ -172,6 +191,7 @@ def main():
     for p in photos:
         roads[p['roadName']] = roads.get(p['roadName'], 0) + 1
     print(f"session {session.get('id')} | {session.get('kind')} | {session.get('name')}")
+    print(target_line(session))
     print(f"{len(photos)} photos -> {(len(photos) + 3) // 4} sheets in {os.path.join(work, 'sheets')}")
     print("roads:", sorted(roads.items(), key=lambda kv: -kv[1])[:5])
     if moved:

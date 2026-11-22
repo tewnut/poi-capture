@@ -79,6 +79,20 @@ object SignText {
     private val HOUSE_LINE_START = Regex("^\\s*(\\d{1,4}[a-z]?(?:/\\d{1,4}[a-z]?){0,3})\\s+[a-z]{2,}\\s+[a-z]{2,}")
 
     /** House number ("12", "12A", "45/3", "102/7B") written next to "Số", "SN", "ĐC" or before a street word. */
+    /** A plate holding only a house number: "106", "45/2A", "Số 12", "SN 7B" (not a time, price or phone). */
+    private val PLATE_ONLY = Regex("^(?:so nha|so|sn|no)?[:.\\s]*(\\d{1,4}[a-z]?(?:/\\d{1,4}[a-z]?){0,3})$")
+
+    /**
+     * House numbers on a photo (house-number rides, docs/sweep-targets.md): every line that is a number plate or
+     * names a number before a street, with where it is on the photo. Hints for the agent and the rider's counter; the
+     * agent reads the number itself on the full photo.
+     */
+    fun plates(lines: List<TextLine>): List<TextLine> = lines.mapNotNull { l ->
+        val f = fold(l.text).trim().replace(Regex("\\s+"), " ")
+        val n = PLATE_ONLY.find(f)?.groupValues?.get(1) ?: houseNumber(l.text)
+        n?.takeIf { it != "0" }?.let { TextLine(it.uppercase(), l.heightPx, l.box) }
+    }.distinctBy { it.text }
+
     fun houseNumber(text: String): String? {
         for (line in text.lines()) {
             val f = fold(line)

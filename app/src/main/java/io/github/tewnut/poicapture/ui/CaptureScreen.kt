@@ -332,8 +332,6 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                         modifier = Modifier.background(Palette.Green, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 6.dp))
                 }
                 if (saved == null) ReadLine(ui)
-                // what to photograph next, with an example (the agent reads every one of them)
-                if (!askRole && saved == null) PlaceGuideCard(if (ui.poiId != null) ui.poiRoles.values.sum() else 0)
                 if (askRole && current != null) Text(roleLabel(photoRoles, current) +
                     roleHint(photoRoles, current).let { h -> if (h.isNotBlank()) ": $h" else "" },
                     color = Color.White, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -447,7 +445,18 @@ private fun StatusText(ui: CaptureUi, session: Session?, poiMode: Boolean) {
     // the auto photos are waiting: say why
     if (!poiMode && ui.running && ui.aimLow) ShadowText(stringResource(R.string.capture_aim_low), color = Color(0xFFFF6B6B))
     else if (!poiMode && ui.running && ui.swinging) ShadowText(stringResource(R.string.capture_hand_swinging), color = Palette.AmberLight)
-    if (!poiMode) when (ui.mount) {
+    val signs = session?.target == io.github.tewnut.poicapture.core.SweepTarget.SIGNS
+    // house-number ride: how many photos the phone found a number on, and the last one (the rider sees it works)
+    if (!poiMode && session?.target == io.github.tewnut.poicapture.core.SweepTarget.ADDRESSES && ui.photos > 0)
+        ShadowText(pluralStringResource(R.plurals.capture_plates_seen, ui.platesSeen, ui.platesSeen) +
+            (ui.lastPlate?.let { " · $it" } ?: ""), size = 13.sp, bold = false)
+    // traffic-signs ride: the camera must look ahead, so forward is right and sideways is the mistake
+    if (!poiMode && signs) when (ui.mount) {
+        "right", "left" -> ShadowText(stringResource(R.string.service_mount_side_signs), color = Color(0xFFFF6B6B))
+        "back" -> ShadowText(stringResource(R.string.capture_mount_back), color = Color(0xFFFF6B6B))
+        "hand" -> ShadowText(stringResource(R.string.capture_hand_hint), color = Palette.AmberLight, size = 13.sp, bold = false)
+        else -> {}
+    } else if (!poiMode) when (ui.mount) {
         "right", "left" -> {}
         "hand" -> ShadowText(stringResource(R.string.capture_hand_hint), color = Palette.AmberLight, size = 13.sp, bold = false)
         "front", "back" -> ShadowText(stringResource(if (ui.mount == "front") R.string.capture_mount_front else R.string.capture_mount_back),

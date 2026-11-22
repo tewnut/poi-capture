@@ -83,6 +83,7 @@ import io.github.tewnut.poicapture.core.FieldTasks
 import io.github.tewnut.poicapture.core.PhotoRoles
 import io.github.tewnut.poicapture.core.SignReading
 import io.github.tewnut.poicapture.core.SignText
+import io.github.tewnut.poicapture.core.SweepTarget
 import io.github.tewnut.poicapture.core.PoiStatus
 import io.github.tewnut.poicapture.core.Pois
 import io.github.tewnut.poicapture.core.FootTracker
@@ -167,6 +168,8 @@ data class CaptureUi(
     val poiIndoor: Boolean = false,      // most of its photos were taken without good GPS (inside, under an arcade)
     val poiRead: SignReading? = null,  // what the phone read on its photos (hint)
     val reading: Int = 0,                // photos waiting for / in on-device text reading
+    val platesSeen: Int = 0,             // house-number ride: photos the phone found a house number on
+    val lastPlate: String? = null,       // … and the last number it read (hint, the agent reads the photos)
     val readNote: UiText? = null,        // e.g. a sign photo with no readable text: shoot closer
 )
 
@@ -210,7 +213,9 @@ class CaptureService : LifecycleService() {
     private lateinit var store: SessionStore
     private lateinit var fp: FixProcessor
     // street sweep: a photo each time the scene slid ~30–45 % of the frame (measured on the camera frames)
-    private val trigger = OverlapTrigger()
+    private var trigger = OverlapTrigger()
+    /** Street sweep looking ahead for traffic signs (SweepTarget.SIGNS): photos by distance, camera along the travel. */
+    private val signs get() = session.kind == SessionKind.SWEEP && session.target.byDistance
     private var watcher: FrameWatcher? = null
     private var accountedNs = 0L                     // slide counted up to this time (elapsedRealtimeNanos)
     private var lastFrameNs = 0L
@@ -290,10 +295,18 @@ class CaptureService : LifecycleService() {
         activeSession.value = s.id
         val st = s.settings
         facadeNow = CapturePlan.UNKNOWN_ROAD_FACADE_M          // until the road is recognised; then from its type
-        val plan = CapturePlan.of(facadeNow)                    // refined with the real field of view when the camera opens
+        // the ride's target sets the spacing (denser for house numbers) and the trigger (by distance for signs)
+        trigger = OverlapTrigger(s.target.earliest, s.target.latest)
+        val plan = CapturePlan.of(facadeNow, target = s.target)  // refined with the real field of view when the camera opens
         fp = FixProcessor(s.road.ways, s.sideOfTravel, s.travel, plan.maxSpeedKmh, st.maxAccuracyM, st.offRoadWarnM,
             st.mountOffsetDeg, fixedRoad = !s.road.auto, facadeDistanceM = facadeNow)
         applyPlan(plan)
+        if (signs) {
+            // the camera looks ahead: each photo's bearing is the travel bearing, no facade point beside the road
+            fp.facadeDistanceM = null
+            fp.cameraYawSource = "forward"
+            fp.cameraYawDeg = 0.0
+        }
         if (s.kind == SessionKind.POI) {
             fp.facadeDistanceM = null      // a place is pinned on its building: no facade estimate from the street
             val pois = store.pois(s.id)
@@ -400,7 +413,7 @@ class CaptureService : LifecycleService() {
         val fov = cam?.optDouble(if (portrait) "hFovPortraitDeg" else "hFovDeg")?.takeIf { !it.isNaN() }
             ?: if (portrait) CapturePlan.DEFAULT_HFOV_PORTRAIT else null
         val long = session.settings.photoLongEdge
-        return CapturePlan.of(facadeNow, fov, imageWidthPx = if (portrait) long * 9 / 16 else long)
+        return CapturePlan.of(facadeNow, fov, imageWidthPx = if (portrait) long * 9 / 16 else long, target = session.target)
     }
 
     private fun orientationMeta(o: JSONObject): JSONObject = o.put("orientation", if (portrait) "portrait" else "landscape")
@@ -502,7 +515,7 @@ class CaptureService : LifecycleService() {
             val d = CapturePlan.facadeForRoad(hw)
             if (d != facadeNow || hw != roadTypeNow) {
                 roadTypeNow = hw
-                if (d != facadeNow) { facadeNow = d; fp.facadeDistanceM = d; applyPlan(currentPlan()) }
+                if (d != facadeNow) { facadeNow = d; if (!signs) fp.facadeDistanceM = d; applyPlan(currentPlan()) }
             }
         }
         foot?.onFix(f)
@@ -562,7 +575,12 @@ class CaptureService : LifecycleService() {
     private fun portraitWarning(): List<UiText> =
         if (session.kind == SessionKind.SWEEP && portrait) listOf(UiText(R.string.service_turn_landscape)) else emptyList()
 
-    private fun mountWarning(): List<UiText> = when (_state.value.mount) {
+    private fun mountWarning(): List<UiText> = if (signs) when (_state.value.mount) {
+        // a signs ride needs the camera looking ahead: sideways or backwards is the mistake here
+        "left", "right" -> listOf(UiText(R.string.service_mount_side_signs))
+        "back" -> listOf(UiText(R.string.service_mount_back))
+        else -> emptyList()
+    } else when (_state.value.mount) {
         "front" -> listOf(UiText(R.string.service_mount_front))
         "back" -> listOf(UiText(R.string.service_mount_back))
         else -> emptyList()
@@ -586,7 +604,7 @@ class CaptureService : LifecycleService() {
                 mountOffsetFrontDeg = if (est.side == CameraSide.RIGHT || est.side == CameraSide.LEFT) est.offsetTowardFrontDeg.roundToInt() else null)
         }
         val side = when (est.viewSide) { CameraSide.RIGHT -> Side.RIGHT; CameraSide.LEFT -> Side.LEFT; else -> null }
-        if (side != null) {
+        if (side != null && !signs) {   // a signs ride keeps the camera along the travel (only the warning above)
             fp.side = side
             fp.cameraYawSource = est.source
             fp.cameraYawDeg = est.yawDeg
@@ -790,6 +808,7 @@ class CaptureService : LifecycleService() {
         val speed = if (freshFix() != null) fp.speedMps else null
         val used = when {
             speed != null && speed < 0.7 -> "wait"                           // waiting (lights, traffic): passing vehicles are not new facade
+            signs -> { trigger.addSpeed(speed ?: 0.0, dt, coverageM); "distance" }   // looking ahead: no slide across the frame
             fr.shift != null && dt < 0.4 -> {
                 trigger.addFrameShift(fr.shift)
                 trigger.floor(fr.shift, speed ?: 0.0, dt, coveragePerM)   // never as if the fronts were > 40 m away
@@ -861,6 +880,7 @@ class CaptureService : LifecycleService() {
         } else if (poiId == null) {   // street sweep on a mount: the compass at each photo feeds the mount estimate (CompassYaw)
             compassYaw.add(motion?.optDouble("cameraAzimuthDeg")?.takeIf { !it.isNaN() }, fp.travelBearing, fp.speedMps)
             checkMount()
+            if (signs) meta.put("sideOfWay", JSONObject.NULL)   // looking ahead: the signs on both sides and overhead
         }
         if (poiId != null) {
             meta.put("poiId", poiId)
@@ -916,6 +936,7 @@ class CaptureService : LifecycleService() {
                     return
                 }
                 store.appendItem(session.id, meta)
+                if (session.kind == SessionKind.SWEEP && session.target == SweepTarget.ADDRESSES) readPlates(id, file)
                 shooting = false
                 _state.update {
                     val roles = if (poiId != null && it.poiId == poiId) {
@@ -935,6 +956,28 @@ class CaptureService : LifecycleService() {
     }
 
     // ---------- POI mode ----------
+
+    /** A house-number ride: a photo is being read (photos that come meanwhile are not: the reading must not lag). */
+    private val plateBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * House-number ride: find the house numbers on a photo on the phone (ML Kit, ~1 s). The item gets `plates`
+     * ([{text, box}]) as a hint for the agent (which photos to read closely), and the rider a live count.
+     */
+    private fun readPlates(itemId: String, file: java.io.File) {
+        if (!plateBusy.compareAndSet(false, true)) return
+        val sid = session.id
+        ocr.execute {
+            try {
+                val plates = runCatching { SignText.plates(SignOcr.lines(file)) }.getOrNull() ?: return@execute
+                store.patchItem(sid, itemId, JSONObject().put("plates", org.json.JSONArray().apply {
+                    plates.forEach { p -> put(JSONObject().put("text", p.text).put("heightPx", p.heightPx)
+                        .apply { p.box?.let { put("box", org.json.JSONArray(it.toList())) } }) }
+                }))
+                if (plates.isNotEmpty()) _state.update { it.copy(platesSeen = it.platesSeen + 1, lastPlate = plates.maxBy { p -> p.heightPx }.text) }
+            } finally { plateBusy.set(false) }
+        }
+    }
 
     /**
      * Read the text on a place's photo on the phone (hint for the agent, stored as the item's `ocr`), and tell the

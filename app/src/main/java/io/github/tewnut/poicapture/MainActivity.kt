@@ -133,6 +133,10 @@ object Prefs {
     fun holding(ctx: Context): io.github.tewnut.poicapture.core.Holding =
         io.github.tewnut.poicapture.core.Holding.of(sp(ctx).getString("holding", null))
     fun saveHolding(ctx: Context, h: io.github.tewnut.poicapture.core.Holding) = sp(ctx).edit().putString("holding", h.json).apply()
+    /** Street sweep: what the last ride was for (the next one starts with it). */
+    fun target(ctx: Context): io.github.tewnut.poicapture.core.SweepTarget =
+        io.github.tewnut.poicapture.core.SweepTarget.of(sp(ctx).getString("target", null))
+    fun saveTarget(ctx: Context, t: io.github.tewnut.poicapture.core.SweepTarget) = sp(ctx).edit().putString("target", t.json).apply()
     /** Maps: satellite imagery instead of the street map (remembered). */
     fun satellite(ctx: Context): Boolean = sp(ctx).getBoolean("satellite", false)
     fun saveSatellite(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("satellite", v).apply()

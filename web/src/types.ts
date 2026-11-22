@@ -16,12 +16,18 @@ export type Field = {
   clarified?: boolean; photoValue?: string
 }
 
-export const FIELD_KEYS = ['name', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'signText', 'other'] as const
+export const FIELD_KEYS = ['name', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'signText', 'other', 'signCode'] as const
 export type FieldKey = (typeof FIELD_KEYS)[number]
 export const FIELD_LABEL: Record<FieldKey, string> = {
   name: 'Name', phone: 'Phone', houseNumber: 'House number', street: 'Street / area', openingHours: 'Opening hours',
-  website: 'Website', signText: 'Sign text', other: 'Other text',
+  website: 'Website', signText: 'Sign text', other: 'Other text', signCode: 'Sign code',
 }
+
+/** What a result entry is (docs/sweep-targets.md): a place (shop), a house number, or a traffic sign. Missing = place. */
+export type Layer = 'place' | 'address' | 'sign'
+export const LAYERS: Layer[] = ['place', 'address', 'sign']
+/** What a ride was captured for (chosen on the phone). Missing = shops. */
+export type Target = 'shops' | 'addresses' | 'signs'
 
 export type Sighting = { i: number; lat: number; lon: number; bearing?: number }
 
@@ -42,7 +48,14 @@ export type Place = {
   photos: { file: string; index?: number | null; cover?: boolean; why?: string | null; source?: 'website'; url?: string }[]
   pins: { algorithm?: Pin; contributor?: Pin; google?: GooglePin | null; agent?: Pin | null }
   google?: Record<string, any> | null
+  layer?: Layer
+  /** A traffic sign: QCVN 41 code and group, which way a driver facing it drives, left / right / over the road. */
+  sign?: { code?: string; group?: string; facingDeg?: number | null; side?: string }
+  /** An address: the place (shop) whose house number it is, when there is one. */
+  placeRef?: string | null
 }
+
+export const layerOf = (p: Place): Layer => p.layer || 'place'
 
 export type Task = {
   type: 'visit' | 'verify_removal' | 'removal'
@@ -58,7 +71,7 @@ export type Dataset = {
   id: string                       // session id (+ "-raw" for a raw zip)
   source: 'result' | 'raw'
   importedAt: string
-  session: { id: string; name?: string; kind?: 'sweep' | 'poi'; holding?: string | null; startedAt?: string; street?: string | null }
+  session: { id: string; name?: string; kind?: 'sweep' | 'poi'; holding?: string | null; startedAt?: string; street?: string | null; target?: Target }
   track: [number, number][]
   shots: [number, number, number, number | null][]   // [photo index, lat, lon, camera bearing]
   shotFiles?: Record<number, string>                  // raw zips: photo index -> file path

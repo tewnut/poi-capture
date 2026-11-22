@@ -310,5 +310,127 @@ class BuildRide(unittest.TestCase):
         self.assertEqual(nums[-3:], ['99', '100', '101'])
 
 
+class Targets(unittest.TestCase):
+    """docs/sweep-targets.md: addresses and signs from places.json become result.json entries of their own layer;
+    the ride's target travels to result.json and the upload metadata; enrichment leaves them out."""
+
+    def setUp(self):
+        from PIL import Image
+        self.d = tempfile.mkdtemp()
+        work, self.out = os.path.join(self.d, 'work'), os.path.join(self.d, 'out', 'ride')
+        os.makedirs(work)
+        # riding north, ~5.5 m between photos; a sign 4 m right of the line, 40 m ahead of photo 0
+        lat0, lon0 = 10.78, 106.77
+        self.sign_ll = build.to_ll(4, 40, lat0, lon0)
+        photos = []
+        for i in range(6):
+            f = os.path.join(work, f'p{i}.jpg')
+            Image.new('RGB', (64, 36), (i * 30, 90, 120)).save(f)
+            photos.append({'idx': i, 'id': f'p{i}', 'file': f, 't': f'2026-11-16T10:00:0{i}Z',
+                           'lat': lat0 + i * 0.00005, 'lon': lon0, 'accuracyM': 4, 'cameraBearing': 90,
+                           'cameraBearingSource': 'assumed', 'hFovDeg': 69, 'width': 64, 'height': 36,
+                           'speedMps': 5, 'roadName': 'Trương Văn Bang', 'blurry': False, 'sharpness': 10,
+                           'travelBearing': 0})
+        fx = 0.5 / build.math.tan(build.math.radians(69 / 2))
+
+        def x_at(i):
+            _x, y = build.to_xy(photos[i]['lat'], lon0, lat0, lon0)
+            return 0.5 + fx * 4 / (40 - y)
+        write(os.path.join(work, 'photos.json'), photos)
+        write(os.path.join(work, 'session.json'), {'id': 's_t', 'name': 'T', 'kind': 'sweep', 'target': 'signs'})
+        write(os.path.join(work, 'places.json'), {
+            'street': 'Trương Văn Bang', 'defaultFacadeDistanceM': 10, 'bearingOffsetDeg': 25,
+            'places': [{'name': 'A', 'photos': [0, 2], 'cover': 1, 'sightings': [{'photo': 1, 'x': 0.5}]}],
+            'addresses': [
+                {'houseNumber': '106', 'photos': [1, 2], 'cover': 2, 'sightings': [{'photo': 2, 'x': 0.4}],
+                 'confidence': 'high', 'placeRef': 'A', 'agentPin': {'snap': 'facade', 'why': 'on the facade'}},
+                {'houseNumber': '12/3', 'street': 'Nguyễn Thanh Sơn', 'unit': 'Hẻm 12', 'photos': [3, 3], 'cover': 3,
+                 'sightings': [{'photo': 3, 'x': 0.5}], 'confidence': 'low'}],
+            'signs': [{'code': 'P.131a', 'label': 'Cấm đỗ xe', 'extra': '6h-9h', 'photos': [0, 5], 'cover': 4,
+                       'sightings': [{'photo': i, 'x': x_at(i)} for i in (0, 4, 5)], 'side': 'right',
+                       'confidence': 'high', 'agentPin': {'snap': 'facade'}}]})
+        self.work = work
+
+    def tearDown(self):
+        shutil.rmtree(self.d)
+        build.BEARING_OFFSET, build.BEARING_ALL = 0.0, False
+
+    def run_build(self):
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()):
+            build.build(self.work, self.out)
+        return read(os.path.join(self.out, 'result.json'))
+
+    def test_layers_in_result(self):
+        res = self.run_build()
+        self.assertEqual(res['session']['target'], 'signs')
+        self.assertEqual(read(os.path.join(self.out, 'sweep.json'))['session']['target'], 'signs')
+        by = {p['name']: p for p in res['places']}
+        self.assertEqual(by['A']['layer'], 'place')
+        a = by['106 Trương Văn Bang']                         # no street on the plate: the ride's road
+        self.assertEqual((a['layer'], a['category'], a['placeRef']), ('address', 'address', 'A'))
+        self.assertEqual(a['fields']['houseNumber']['value'], '106')
+        self.assertEqual(a['fields']['street'], {'value': 'Trương Văn Bang', 'source': 'ride', 'sure': 'medium'})
+        self.assertNotIn('name', a['fields'])
+        self.assertIsNotNone(a['pins']['agent'])               # an address may be snapped to the facade
+        b = by['12/3 Nguyễn Thanh Sơn']
+        self.assertEqual(b['fields']['street']['value'], 'Nguyễn Thanh Sơn')
+        self.assertEqual(b['fields']['other']['value'], 'Hẻm 12')
+        s = by['Cấm đỗ xe']
+        self.assertEqual((s['layer'], s['category']), ('sign', 'traffic_sign'))
+        self.assertEqual(s['sign'], {'code': 'P.131a', 'group': 'prohibitory', 'facingDeg': 0, 'side': 'right'})
+        self.assertEqual(s['fields']['signCode']['value'], 'P.131a')
+        self.assertEqual(s['fields']['other']['value'], '6h-9h')
+        self.assertNotIn('street', s['fields'])
+        self.assertIsNone(s['pins']['agent'])                  # no facade snap for a sign
+        self.assertTrue(s['photos'] and all(x['file'].startswith(s['folder'] + '/') for x in s['photos']))
+        for x in s['photos']:
+            self.assertTrue(os.path.isfile(os.path.join(self.out, x['file'])))
+        # located from the forward view (travel bearing), the compass offset not applied
+        pin = s['pins']['algorithm']
+        self.assertIn('triangulated', pin['method'])
+        err = build.math.hypot(*build.to_xy(pin['lat'], pin['lon'], *self.sign_ll))
+        self.assertLess(err, 1.0)
+        # tasks only for businesses
+        self.assertTrue(all(t['place'] in (None, by['A']['id']) for t in res['tasks']))
+
+    def test_geojson_and_csv(self):
+        self.run_build()
+        g = read(os.path.join(self.out, 'places.geojson'))
+        props = {f['properties']['name']: f['properties'] for f in g['features']}
+        self.assertEqual(props['A']['layer'], 'place')
+        self.assertEqual(props['106 Trương Văn Bang']['layer'], 'address')
+        self.assertEqual((props['Cấm đỗ xe']['layer'], props['Cấm đỗ xe']['signCode']), ('sign', 'P.131a'))
+        rows = read(os.path.join(self.out, 'places.csv'), as_json=False).lstrip('﻿').splitlines()
+        self.assertTrue(rows[0].startswith('#,layer,name,category,signCode,'))
+        self.assertTrue(any(',sign,Cấm đỗ xe,traffic_sign,P.131a,' in r for r in rows))
+
+    def test_enrichment_skips_addresses_and_signs(self):
+        self.run_build()
+        everything = paths.place_folders(self.out)
+        self.assertEqual(len(everything), 4)
+        self.assertEqual(paths.business_folders(self.out), ['01_A'])
+
+    def test_target_default_and_cloud_metadata(self):
+        import cloud, zipfile
+        self.assertIn('FORWARD', prepare.target_line({'target': 'signs'}))
+        self.assertTrue(prepare.target_line({}).startswith('target: shops'))
+        res = self.run_build()
+        z = os.path.join(self.d, 'r.zip')
+        with zipfile.ZipFile(z, 'w') as f:
+            f.writestr('ride/result.json', json.dumps(res))
+        meta = cloud.push_metadata(cloud.read_session(z), 'r.zip', 'processed-result', None, None)
+        self.assertEqual((meta['target'], meta['sessionId'], meta['kind']), ('signs', 's_t', 'sweep'))
+        self.assertEqual(cloud.decode_metadata(cloud.encode_metadata(meta))['target'], 'signs')
+        bare = cloud.push_metadata({}, 'r.zip', 'processed-result', 'x', None)
+        self.assertNotIn('target', cloud.decode_metadata(cloud.encode_metadata(bare)))
+
+    def test_old_ride_is_shops(self):
+        s = read(os.path.join(self.work, 'session.json'))
+        del s['target']
+        write(os.path.join(self.work, 'session.json'), s)
+        self.assertEqual(self.run_build()['session']['target'], 'shops')
+
+
 if __name__ == '__main__':
     unittest.main()

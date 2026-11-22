@@ -72,6 +72,7 @@ import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.core.CapturePlan
+import io.github.tewnut.poicapture.core.SweepTarget
 import io.github.tewnut.poicapture.core.Coverage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -147,6 +148,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     var mode by remember { mutableStateOf(Mode.PHOTO_AUTO) }
     var kind by remember { mutableStateOf(SessionKind.SWEEP) }
     var holding by remember { mutableStateOf(Prefs.holding(ctx)) }
+    var target by remember { mutableStateOf(Prefs.target(ctx)) }
     var recenter by remember { mutableIntStateOf(0) }
     var nearWays by remember { mutableStateOf<List<Way>?>(null) }
     var roadStatus by remember { mutableStateOf<Int?>(null) }   // string resource of the road data status, null = fine
@@ -192,7 +194,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     } }
     val currentRoad = currentWay?.let { wayLabel(ctx, it) }
     // spacing and speed as the capture will start: from the type of this road (see CapturePlan.facadeForRoad)
-    val plan = CapturePlan.of(CapturePlan.facadeForRoad(currentWay?.highway))
+    val plan = CapturePlan.of(CapturePlan.facadeForRoad(currentWay?.highway), target = target)
 
     // the same rule as the capture: Start only with a GPS fix from the last 5 s
     val ready = live != null
@@ -273,6 +275,16 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                         }
                     }
                     if (kind == SessionKind.SWEEP) {
+                        // what the ride is for: it sets the spacing, the photo size, the speed and which way the camera looks
+                        Text(stringResource(R.string.setup_target_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for ((t, title, sub) in listOf(
+                                Triple(SweepTarget.SHOPS, "🏪 " + stringResource(R.string.setup_target_shops), stringResource(R.string.setup_target_shops_sub)),
+                                Triple(SweepTarget.ADDRESSES, "🔢 " + stringResource(R.string.setup_target_addresses), stringResource(R.string.setup_target_addresses_sub)),
+                                Triple(SweepTarget.SIGNS, "🚸 " + stringResource(R.string.setup_target_signs), stringResource(R.string.setup_target_signs_sub)),
+                            )) KindCard(title, sub, target == t, Modifier.fillMaxWidth()) { target = t; Prefs.saveTarget(ctx, t) }
+                        }
+                        if (target == SweepTarget.SIGNS) Hint(stringResource(R.string.setup_target_signs_hint), color = Palette.Blue)
                         Text(stringResource(R.string.setup_holding_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             KindCard("🛵 " + stringResource(R.string.setup_holding_mount), stringResource(R.string.setup_holding_mount_sub),
@@ -312,9 +324,13 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             val s = Session(id = uid("s_", now), createdAt = iso(now), contributor = contributor, note = "",
                                 vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else mode,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
-                                settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M), device = deviceJson(ctx), kind = kind, email = "",
+                                settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M,
+                                    // house numbers are small print: the largest photo the camera gives
+                                    photoLongEdge = if (kind == SessionKind.SWEEP && target == SweepTarget.ADDRESSES)
+                                        maxOf(settings.photoLongEdge, SweepTarget.ADDRESSES_LONG_EDGE) else settings.photoLongEdge), device = deviceJson(ctx), kind = kind, email = "",
                                 photoRoles = if (kind == SessionKind.POI && Prefs.askPhotoRole(ctx)) Prefs.photoRoles(ctx) else null,
-                                holding = if (kind == SessionKind.SWEEP) holding else io.github.tewnut.poicapture.core.Holding.MOUNT)
+                                holding = if (kind == SessionKind.SWEEP) holding else io.github.tewnut.poicapture.core.Holding.MOUNT,
+                                target = if (kind == SessionKind.SWEEP) target else SweepTarget.SHOPS)
                             CaptureService.store(ctx).create(s)
                             onStart(s.id)
                         },
@@ -459,6 +475,9 @@ private fun SetupInfo(photoEveryM: Double, maxSpeedKmh: Int, onClose: () -> Unit
             Item("📸", stringResource(R.string.setup_mode_auto), stringResource(R.string.setup_mode_auto_hint, String.format(Locale.ROOT, "%.1f", photoEveryM), maxSpeedKmh))
             Item("🔘", stringResource(R.string.setup_mode_manual), stringResource(R.string.setup_mode_manual_hint, maxSpeedKmh))
             Item("📏", stringResource(R.string.setup_facade_title), stringResource(R.string.setup_facade_hint))
+            Item("🏪", stringResource(R.string.setup_target_shops), stringResource(R.string.setup_target_shops_info))
+            Item("🔢", stringResource(R.string.setup_target_addresses), stringResource(R.string.setup_target_addresses_info))
+            Item("🚸", stringResource(R.string.setup_target_signs), stringResource(R.string.setup_target_signs_info))
             Section(stringResource(R.string.setup_place_title))
             Item("🏪", stringResource(R.string.setup_place_title), stringResource(R.string.setup_poi_hint))
             Text(stringResource(R.string.guide_intro), color = Palette.Muted, fontSize = 14.sp, lineHeight = 20.sp)

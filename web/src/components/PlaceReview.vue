@@ -8,7 +8,7 @@ import { keptPhotos, removedPhotos } from '../photos'
 import { confirmFields, pendingSuggestions, suggestionKind, missingStreet } from '../fields'
 import { t } from '../i18n'
 import type { Dataset, Place, Review, FieldKey, PinSource, PhotoEdits, CropRect } from '../types'
-import { FIELD_KEYS } from '../types'
+import { FIELD_KEYS, layerOf } from '../types'
 
 const props = defineProps<{ ds: Dataset; place: Place }>()
 const emit = defineEmits<{ close: []; next: [] }>()
@@ -43,7 +43,7 @@ const chips = computed(() => {
   if (first.value) c.push({ key: firstLabel.value, label: t(firstLabel.value === 'algorithm' ? 'chipAlgo' : 'chipContributor'), color: 'green', can: true })
   if (props.place.pins.agent) c.push({ key: 'agent', label: t('chipAgent'), color: 'purple', can: true })
   c.push({ key: 'manual', label: t('chipPin'), color: 'orange', can: false })
-  if (props.place.pins.google || google.value) c.push({ key: 'google', label: t('chipGoogle'), color: 'blue', can: false })
+  if (layerOf(props.place) === 'place' && (props.place.pins.google || google.value)) c.push({ key: 'google', label: t('chipGoogle'), color: 'blue', can: false })
   return c
 })
 function pick(k: View) {
@@ -208,6 +208,29 @@ async function decide(d: Review['decision']) {
 }
 defineExpose({ setPin: async (lat: number, lon: number) => { r.value.pin = { lat, lon, source: 'manual' }; await save() } })
 const G_LABEL = { found: 'gFound', new: 'gNew', todo: 'gTodo' } as const
+// an address or a sign (docs/sweep-targets.md) has its own fields and none of a shop's (Google, website, hours)
+const layer = computed(() => layerOf(props.place))
+const LAYER_KEYS: Record<'address' | 'sign', FieldKey[]> = { address: ['houseNumber', 'street', 'other'], sign: ['signCode', 'name', 'signText', 'other'] }
+const keys = computed<FieldKey[]>(() => layer.value === 'place'
+  ? FIELD_KEYS.filter((k) => k !== 'signCode' && (props.place.fields[k] || r.value.fields[k] || ['phone', 'houseNumber', 'street', 'openingHours'].includes(k)))
+  : LAYER_KEYS[layer.value])
+function fieldLabel(k: FieldKey) {
+  if (layer.value === 'sign' && k === 'name') return t('field.signName')
+  if (k === 'other' && layer.value !== 'place') return t(layer.value === 'sign' ? 'field.extraPlate' : 'field.unit')
+  return t('field.' + k)
+}
+/** A sign's group, side and facing; an address's shop: shown, not edited. */
+const layerInfo = computed(() => {
+  const p = props.place, out: string[] = []
+  const word = (key: string, v?: string | null) => { if (v) { const w = t(key + v); out.push(w === key + v ? v : w) } }
+  if (layer.value === 'sign') {
+    word('signGroup_', p.sign?.group)
+    word('signSide_', p.sign?.side)
+    if (typeof p.sign?.facingDeg === 'number') out.push(t('signFacing', { deg: Math.round(p.sign.facingDeg) }))
+  }
+  if (layer.value === 'address' && p.placeRef) out.push(t('placeRef', { name: p.placeRef }))
+  return out.join(' · ')
+})
 const pending = computed(() => pendingSuggestions(props.place, r.value))
 const noStreet = computed(() => missingStreet(props.place, r.value))
 /** A suggestion not decided yet: 'low' (unsure reading) or 'ride' (the road the photos were taken on). */
@@ -241,12 +264,14 @@ function marks(k: FieldKey) {
       <div>
         <h2>{{ place.name }}</h2>
         <div class="muted">
-          <input class="cat" :disabled="ro" :value="r.category ?? place.category ?? ''" :placeholder="t('category')" @change="r.category = ($event.target as HTMLInputElement).value; save()" />
+          <span v-if="layer !== 'place'" class="chip">{{ t('layerOne_' + layer) }}</span>
+          <input v-else class="cat" :disabled="ro" :value="r.category ?? place.category ?? ''" :placeholder="t('category')" @change="r.category = ($event.target as HTMLInputElement).value; save()" />
           · <span :class="['chip', place.status !== 'open' ? 'bad' : '']">{{ t('status_' + place.status) }}</span>
           <span v-if="place.confidence === 'low'" class="chip warn">{{ t('namePartly') }}</span>
           <span v-if="noStreet" class="chip warn">{{ t('noStreet') }}</span>
-          <span :class="['chip', 'g-' + gstat(place)]">{{ t(G_LABEL[gstat(place)]) }}</span>
+          <span v-if="layer === 'place'" :class="['chip', 'g-' + gstat(place)]">{{ t(G_LABEL[gstat(place)]) }}</span>
         </div>
+        <div v-if="layerInfo" class="muted small">{{ layerInfo }}</div>
       </div>
       <button class="ghost closex" :title="t('close')" :aria-label="t('close')" @click="emit('close')">✕</button>
     </header>
@@ -289,8 +314,8 @@ function marks(k: FieldKey) {
 
     <h3>{{ t('whatPhotosSay') }}</h3>
     <table class="fields">
-      <tr v-for="k in FIELD_KEYS.filter((k) => place.fields[k] || r.fields[k] || ['phone', 'houseNumber', 'street', 'openingHours'].includes(k))" :key="k" :class="rowClass(k)">
-        <th>{{ t('field.' + k) }}
+      <tr v-for="k in keys" :key="k" :class="rowClass(k)">
+        <th>{{ fieldLabel(k) }}
           <button v-if="marks(k).length" type="button" class="marks" :aria-expanded="openMarks === k" :aria-label="t('marksT')"
             @click="openMarks = openMarks === k ? null : k"><span v-for="(m, i) in marks(k)" :key="i" :class="['mark', m.cls]" :title="m.tip"></span></button>
           <ul v-if="openMarks === k" class="marktips"><li v-for="(m, i) in marks(k)" :key="i"><span :class="['mark', m.cls]"></span>{{ m.tip }}</li></ul>
@@ -305,7 +330,7 @@ function marks(k: FieldKey) {
       </tr>
     </table>
     <p v-if="pending.length" :class="['pending', { after: r.decision === 'confirmed' }]">
-      {{ t(r.decision === 'confirmed' ? 'pendingAfterConfirm' : 'pendingBeforeConfirm', { f: pending.map((k) => t('field.' + k)).join(', ') }) }}
+      {{ t(r.decision === 'confirmed' ? 'pendingAfterConfirm' : 'pendingBeforeConfirm', { f: pending.map(fieldLabel).join(', ') }) }}
     </p>
 
     <h3>{{ t('position') }}</h3>

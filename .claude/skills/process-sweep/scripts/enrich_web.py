@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build  # noqa: E402
-from paths import arg_path, place_folders  # noqa: E402
+from paths import arg_path, business_folders  # noqa: E402
 from result import google_mergeable  # noqa: E402
 
 UA = 'Mozilla/5.0 (compatible; poi-capture-reviewer/0.16; place details from the business website)'
@@ -389,7 +389,7 @@ def main():
     force = '--force' in sys.argv
     only = set(sys.argv[sys.argv.index('--only') + 1].split(',')) if '--only' in sys.argv else None
     n = 0
-    for d in place_folders(out):
+    for d in business_folders(out):   # no Google / website for addresses and signs
         f = os.path.join(out, d, 'place.json')
         if only and d not in only:
             continue

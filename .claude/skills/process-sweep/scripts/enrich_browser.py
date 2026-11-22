@@ -19,7 +19,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build  # noqa: E402
 from enrich import similarity, dist_m  # noqa: E402
-from paths import arg_path, place_folders  # noqa: E402
+from paths import arg_path, business_folders  # noqa: E402
 
 import shutil  # noqa: E402
 
@@ -197,7 +197,7 @@ def main():
     only = set(sys.argv[sys.argv.index('--only') + 1].split(',')) if '--only' in sys.argv else None
     now = lambda: datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     try:
-        for d in place_folders(out):
+        for d in business_folders(out):   # no Google / website for addresses and signs
             f = os.path.join(out, d, 'place.json')
             if only and d not in only:
                 continue

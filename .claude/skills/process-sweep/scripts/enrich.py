@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build  # noqa: E402
-from paths import arg_path, place_folders  # noqa: E402
+from paths import arg_path, business_folders  # noqa: E402
 
 FIELDS = ','.join('places.' + f for f in [
     'id', 'displayName', 'formattedAddress', 'location', 'nationalPhoneNumber', 'internationalPhoneNumber',
@@ -81,7 +81,7 @@ def main():
     if manual is None and not key:
         sys.exit('GOOGLE_MAPS_API_KEY is not set: look the places up by web search and pass them with --from (see SKILL.md)')
     now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-    for d in place_folders(out):
+    for d in business_folders(out):   # no Google / website for addresses and signs
         f = os.path.join(out, d, 'place.json')
         if not os.path.isfile(f):
             continue

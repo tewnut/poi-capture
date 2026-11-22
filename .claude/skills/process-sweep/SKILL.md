@@ -28,8 +28,9 @@ already grouped: say so and stop unless the user wants the enrichment only.
 ## 2. Read the contact sheets
 
 Read every `<work>/sheets/sheet_NNN.jpg` (4 photos each, labelled `#idx`, in riding order). Do not skip sheets; a
-sign is usually on 3–14 consecutive photos. For each **business** (shop, cafe, restaurant, office, showroom; not
-traffic signs, building names alone, banners, parking signs) note:
+sign is usually on 3–14 consecutive photos. What to read depends on the ride's target (prepare.py prints it; see
+"Reading by target" below). For each **business** (shop, cafe, restaurant, office, showroom; not traffic signs, which
+are never businesses (a signs ride lists them in `"signs"`), nor building names alone, banners, parking signs) note:
 
 - `name` as written on the sign (keep Vietnamese diacritics; mark unreadable parts with "…" and say why in `note`),
 - `category` (cafe, restaurant, pharmacy, grocery, fashion, bank, office, …),
@@ -75,6 +76,47 @@ pavement, 20–35 m behind a service road or garden. Write `<work>/places.json`:
               "street": {"value": "Nguyễn Thanh Sơn, P. Cát Lái, TP.HCM", "photo": 37, "sure": "high"}},
    "agentPin": {"snap": "facade", "why": "pin on the shopfront line"}, "note": ""}]}
 ```
+
+### Reading by target
+
+`session.target` (prepare.py prints it; missing = `shops`) says what the ride was captured for (docs/sweep-targets.md).
+On a house-number ride the phone reads each photo for numbers (ML Kit): `plates` in photos.json lists what it found
+("106", "45/2A"). Use it to find the plates, not as the answer: it misses small or angled plates and may read a
+price or a date as a number; read every number yourself on the full-size photo.
+
+It sets the least to read, not the most: a shops ride whose photos show plates may still get `"addresses"`.
+
+- **shops**: the businesses, as above.
+- **addresses** (shops + house numbers; photos about twice as dense): the businesses, plus **every readable
+  house-number plate**, shop or not, in `"addresses"`: `houseNumber` as written ("106", "12/3", "45A"), `street`
+  (from the plate; leave it out when the plate has none: the ride's road is used, marked for the reviewer), `unit`
+  (alley / lane / unit: "Hẻm 12", "Kiệt 5"), `photos`, `cover`, `sightings` (the plate's centre, 2–3 photos),
+  `confidence`, `placeRef` (the `name` of the place in `"places"` it is on, when there is one), `note`. Crop the
+  full-size photo to read a plate; a number only guessed is not written. `agentPin` with the facade snap works as for
+  places.
+- **signs** (the camera looked **forward**, along the road): every **traffic sign** in `"signs"`: `code` (QCVN
+  41:2019: `P.xxx` prohibitory, `W.xxx` danger, `R.xxx` mandatory, `I.xxx` indication, `S.xxx` supplementary plate,
+  e.g. P.131a, P.127, W.207a, R.302a, I.423b), `label` (its name in Vietnamese: "Cấm đỗ xe", "Tốc độ tối đa cho
+  phép"), `group` (prohibitory | danger | mandatory | indication | supplementary; from the code letter when left out),
+  `text` (words or numbers on the sign itself, e.g. "40"), `extra` (the plate under it: "6h-9h", "Trừ xe buýt"),
+  `side` (`left` | `right` | `over` a gantry), `photos`, `cover`, `sightings`: its centre `x` on 2–3 photos as the rider
+  approaches (it slides outwards and grows), `confidence`, `note`. `x` is measured from the forward view: the script
+  turns it into an angle off the travel bearing. A supplementary plate is the `extra` of its sign, not a sign of its
+  own. Shops are not required on a signs ride (the camera did not look at them).
+
+```json
+"addresses": [{"houseNumber": "106", "street": "Nguyễn Thanh Sơn", "unit": "", "photos": [33, 36], "cover": 34,
+               "sightings": [{"photo": 34, "x": 0.41}, {"photo": 36, "x": 0.12}], "confidence": "high",
+               "placeRef": "Bún Bò Huế Hương Cố Đô", "note": ""}],
+"signs": [{"code": "P.131a", "label": "Cấm đỗ xe", "group": "prohibitory", "extra": "6h-9h", "photos": [120, 123],
+           "cover": 122, "sightings": [{"photo": 120, "x": 0.66}, {"photo": 122, "x": 0.82}], "side": "right",
+           "confidence": "high", "note": ""}]
+```
+
+build.py makes a folder for each (`NN_addr_…`, `NN_sign_…`, numbered after the places) with its best photos, and
+result.json entries with `layer` `address` / `sign` (a sign: `sign {code, group, facingDeg, side}`, facing = the
+travel bearing at the cover; a sign with one sighting is put `"defaultSignDistanceM"` (default 15) ahead along it,
+so give two or three). The Google and website lookups skip them, and they get no visit tasks.
 
 ## 3. Build the place folders
 

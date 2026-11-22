@@ -11,7 +11,7 @@ const index = {
     { id: 'bbb222', size: 900, offset: 300, complete: false, createdAt: '2026-11-18T08:00:00.000Z',
       metadata: { type: 'processed-result', sessionId: 's2', filename: 's2.zip' } },
     { id: 'ccc333', size: 50, offset: 50, createdAt: '2026-11-18T09:00:00.000Z',
-      metadata: { type: 'raw-session', sessionId: 'raw1', filename: 'poi-capture_place_2026.zip' } },
+      metadata: { type: 'raw-session', sessionId: 'raw1', target: 'signs', filename: 'poi-capture_place_2026.zip' } },
     { id: '../etc/passwd', size: 1, offset: 1, metadata: {} },
     { size: 1 },
     { id: 'ddd444', size: 10, offset: 10, complete: true, metadata: { type: 'processed-result' } },
@@ -26,6 +26,9 @@ describe('cloud index', () => {
     expect(a).toMatchObject({ type: 'processed-result', sessionId: 's1', name: 'Nguyễn Thanh Sơn [261117]', kind: 'sweep', complete: true, size: 100 })
     // complete is derived when the server leaves it out
     expect(items.find((i) => i.id === 'ccc333')!.complete).toBe(true)
+    // the ride's target (docs/sweep-targets.md); none sent = null (shops)
+    expect(items.find((i) => i.id === 'ccc333')!.target).toBe('signs')
+    expect(a.target).toBeNull()
     // no filename: one from the id
     expect(items.find((i) => i.id === 'ddd444')!.filename).toBe('ddd444.zip')
   })
