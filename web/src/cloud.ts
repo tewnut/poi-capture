@@ -28,6 +28,8 @@ export type CloudItem = {
   createdAt: string | null
   type: string
   sessionId: string | null
+  /** A part of a split ride (process-sweep split.py): the raw ride's session id. */
+  parentId?: string | null
   name: string | null
   kind: string | null
   filename: string
@@ -234,7 +236,7 @@ export function parseIndex(json: unknown): CloudItem[] {
       id: u.id, size, offset,
       complete: u.complete === true || (size != null && offset === size),
       createdAt: str(u.createdAt) || str(m.createdAt),
-      type: str(m.type) || 'unknown', sessionId: str(m.sessionId), name: str(m.name), kind: str(m.kind),
+      type: str(m.type) || 'unknown', sessionId: str(m.sessionId), parentId: str(m.parentId), name: str(m.name), kind: str(m.kind),
       filename: str(m.filename) || `${u.id}.zip`, by, metadata, trip: parseTrip(metadata),
     })
   }

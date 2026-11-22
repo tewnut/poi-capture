@@ -401,7 +401,9 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
     # the ride for the map: every photo's camera position, in order
     shots = [[p['idx'], round(p['lat'], 6), round(p['lon'], 6),
               None if p.get('cameraBearing') is None else round(p['cameraBearing'], 1)] for p in photos if p.get('lat') is not None]
-    json.dump({'session': {k: session.get(k) for k in ('id', 'name', 'kind', 'holding', 'startedAt', 'endedAt')},
+    # parentId / part / parts: a part of a longer ride (split.py), reviewed on its own
+    json.dump({'session': {k: session.get(k) for k in ('id', 'name', 'kind', 'holding', 'startedAt', 'endedAt', 'parentId', 'part', 'parts')
+                           if k in ('id', 'name', 'kind') or session.get(k) is not None},
                'street': spec.get('street'), 'track': [[x[1], x[2]] for x in shots], 'photos': shots},
               open(os.path.join(out, 'sweep.json'), 'w', encoding='utf-8'), ensure_ascii=False)
     write_indexes(out, session)
