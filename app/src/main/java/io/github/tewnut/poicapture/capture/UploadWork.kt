@@ -15,6 +15,9 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import io.github.tewnut.poicapture.core.Exporter
+import io.github.tewnut.poicapture.core.SessionNaming
+import io.github.tewnut.poicapture.core.TrackStats
+import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.core.Tus
 import io.github.tewnut.poicapture.core.DirectUpload
 import io.github.tewnut.poicapture.core.UploadRecord
@@ -211,6 +214,13 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                 part.outputStream().use { Exporter.writeZip(store, sid, it) }
                 if (!part.renameTo(zip)) { zip.delete(); if (!part.renameTo(zip)) throw IOException("could not keep the zip") }
                 size = zip.length()
+                // the server shows this name: a session saved with an older naming ("Street [yymmdd]", or none) is
+                // named the current way first ("Street 2026-11-19 14h32", SessionNaming.STAMP)
+                if (session.name.let { it == null || SessionNaming.isOldStyle(it) }) runCatching {
+                    session.name = TrackStats.sessionName(store.items(sid), session.startedAt ?: session.createdAt,
+                        ctx.getString(R.string.session_no_street), ways = session.road.ways)
+                    store.save(session)
+                }
                 val metadata = sessionUploadMetadata(session, Exporter.fileName(session),
                     store.items(sid).count { it.optString("kind") == "photo" }, store.trackFile(sid))
                 val (opened, first) = client.directCreate(size, metadata)

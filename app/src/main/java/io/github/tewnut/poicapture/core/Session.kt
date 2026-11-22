@@ -104,7 +104,7 @@ class Session(
     val kind: SessionKind = SessionKind.SWEEP,
     val email: String = "",          // typed at onboarding, not verified; "" before app 0.8
     var photoRoles: PhotoRoles? = null,  // POI mode: the photo kinds offered (config at the start of the session)
-    var name: String? = null,        // "{street} [yymmdd]", given when the session is saved
+    var name: String? = null,        // "{street} {stamp}" ("Ngô Tất Tố 2026-11-19 14h32"), given when the session is saved
     val holding: Holding = Holding.MOUNT,   // street sweep: on a mount or in a passenger's hand ("mount" before 0.15)
 ) {
     fun toJson(): JSONObject = JSONObject()

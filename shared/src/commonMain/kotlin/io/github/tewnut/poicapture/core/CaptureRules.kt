@@ -44,16 +44,22 @@ object SessionNaming {
     /** How photos on a way without a name or ref are labelled (Road.kt `roadLabel`). */
     const val UNNAMED_PREFIX = "Unnamed road"
 
+    /** The start time in a session's name, local time: "2026-11-19 14h32" (no ':', the name may become a folder name). */
+    const val STAMP = "yyyy-MM-dd HH'h'mm"
+
+    /** Older names ended in " [yymmdd]": shown with the current naming instead. */
+    fun isOldStyle(name: String): Boolean = Regex(""" \[\d{6}]$""").containsMatchIn(name)
+
     fun isNamed(street: String): Boolean = street.isNotBlank() && street != "null" && !street.startsWith(UNNAMED_PREFIX)
 
     /**
-     * "{street} [yymmdd]": the named street most photos were taken on. Unnamed lanes never name a session (first
+     * "{street} {stamp}" ("Ngô Tất Tố 2026-11-19 14h32", SessionNaming.STAMP): the named street most photos were taken on. Unnamed lanes never name a session (first
      * Place capture: 3 photos in an unnamed lane, 2 on Mai Chí Thọ → "Unnamed road (residential)"); without any named
      * street, [nearby] (the nearest big named road), then [fallback].
      */
-    fun name(streets: List<String>, yymmdd: String?, fallback: String, nearby: String? = null): String {
+    fun name(streets: List<String>, stamp: String?, fallback: String, nearby: String? = null): String {
         val street = streets.map { it.trim() }.filter { isNamed(it) }
             .groupingBy { it }.eachCount().maxByOrNull { it.value }?.key ?: nearby?.takeIf { isNamed(it) } ?: fallback
-        return if (yymmdd.isNullOrBlank()) street else "$street [$yymmdd]"
+        return if (stamp.isNullOrBlank()) street else "$street $stamp"
     }
 }

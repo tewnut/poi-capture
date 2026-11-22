@@ -108,9 +108,10 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                 val items = store.items(s.id)
                 val pois = if (s.kind == SessionKind.POI) store.pois(s.id) else emptyList()
                 val names = pois.mapNotNull { it.optJSONObject("fields")?.optString("name")?.takeIf { n -> n.isNotBlank() } }
-                // saved sessions carry their name; older ones get the same "{street} [yymmdd]" from their photos
-                // (sessions saved as "Unnamed road …" before v0.14 are named again, after the nearest big road)
-                val title = s.name?.takeIf { !it.startsWith(io.github.tewnut.poicapture.core.SessionNaming.UNNAMED_PREFIX) }
+                // saved sessions carry their name; older ones get the same "{street} {stamp}" from their photos
+                // (sessions saved as "Unnamed road …" before v0.14, or with the older "{street} [yymmdd]", are named again)
+                val title = s.name?.takeIf { !it.startsWith(io.github.tewnut.poicapture.core.SessionNaming.UNNAMED_PREFIX) &&
+                    !io.github.tewnut.poicapture.core.SessionNaming.isOldStyle(it) }
                     ?: TrackStats.sessionName(items, s.startedAt ?: s.createdAt,
                         if (!s.road.auto && s.kind != SessionKind.POI) roadText(ctx, s.road) else ctx.getString(R.string.session_no_street),
                         ways = s.road.ways)

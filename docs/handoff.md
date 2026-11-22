@@ -202,7 +202,7 @@ photos and contributes them to the target map through that map's contribution to
     `sharpness` = variance of the Laplacian (scene dependent: compare within the session); `blurry` = too much motion
     or far less detail than the session's recent photos. Prefer non-blurry photos when reading signs.
     `session.camera.shutterGuard`: street sweep held the shutter at 1/500 s or faster (ISO raised instead), so photos
-    may be grainy rather than smeared. `session.name` = "{street} [yymmdd]".
+    may be grainy rather than smeared. `session.name` = "{street} {yyyy-MM-dd HHhmm}", local start time (e.g. "Ngô Tất Tố 2026-11-19 14h32").
   - Per item **estimated facade point**: `facadeLat`, `facadeLon`, `facadeDistanceM`, `facadeSource: "roadType"`
     (older sessions: `"profile"`) = camera position + `facadeDistanceM` along `cameraBearing`. A rough prior to put the place on the building, not on the
     road: snap it to the street-facing edge of the nearest building footprint, refine by triangulating the sign over

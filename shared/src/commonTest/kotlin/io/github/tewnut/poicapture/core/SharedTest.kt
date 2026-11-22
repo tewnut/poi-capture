@@ -6,6 +6,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class SharedTest {
@@ -18,15 +19,17 @@ class SharedTest {
 
     @Test fun unnamedLanesNeverNameASession() {
         val photos = listOf("Unnamed road (residential)", "Unnamed road (residential)", "Unnamed road (residential)", "Mai Chí Thọ", "Mai Chí Thọ")
-        assertEquals("Mai Chí Thọ [261111]", SessionNaming.name(photos, "261111", "No street name"))
-        assertEquals("Mai Chí Thọ [261111]", SessionNaming.name(listOf("Unnamed road (service)"), "261111", "No street name", nearby = "Mai Chí Thọ"))
+        assertEquals("Mai Chí Thọ 2026-11-11 09h05", SessionNaming.name(photos, "2026-11-11 09h05", "No street name"))
+        assertEquals("Mai Chí Thọ 2026-11-11 09h05", SessionNaming.name(listOf("Unnamed road (service)"), "2026-11-11 09h05", "No street name", nearby = "Mai Chí Thọ"))
         assertEquals("No street name", SessionNaming.name(listOf("Unnamed road (service)"), null, "No street name"))
+        assertTrue(SessionNaming.isOldStyle("Ngô Tất Tố [261119]"))
+        assertFalse(SessionNaming.isOldStyle("Ngô Tất Tố 2026-11-19 14h32"))
     }
 
     @Test fun sessionIsNamedAfterItsMostCommonStreet() {
-        assertEquals("Nguyễn Thanh Sơn [261110]",
-            SessionNaming.name(listOf("Nguyễn Thanh Sơn", "Đường số 6", "Nguyễn Thanh Sơn", ""), "261110", "?"))
-        assertEquals("No street [261110]", SessionNaming.name(listOf("null", " "), "261110", "No street"))
+        assertEquals("Nguyễn Thanh Sơn 2026-11-10 17h30",
+            SessionNaming.name(listOf("Nguyễn Thanh Sơn", "Đường số 6", "Nguyễn Thanh Sơn", ""), "2026-11-10 17h30", "?"))
+        assertEquals("No street 2026-11-10 17h30", SessionNaming.name(listOf("null", " "), "2026-11-10 17h30", "No street"))
     }
 
     @Test fun gpsFreshnessIsFiveSeconds() {
@@ -40,7 +43,7 @@ class SharedTest {
             roadName = "Nguyễn Thanh Sơn")
         val pl = PlaceRecord("q_1", 1_794_245_390_000, 10.78, 106.76, 6.0)
         val info = PlaceSessionInfo("s_1", 1_794_245_380_000, 1_794_245_380_000, 1_794_245_500_000, "lan", "lan@example.com",
-            "Nguyễn Thanh Sơn [261110]", mapOf("platform" to "ios", "model" to "iPhone15,2"))
+            "Nguyễn Thanh Sơn 2026-11-10 17h30", mapOf("platform" to "ios", "model" to "iPhone15,2"))
         val m = Json.parseToJsonElement(PlaceSession.manifest(info, listOf(ph), listOf(pl), 1_794_245_600_000)).jsonObject
         assertEquals(SCHEMA, m["schema"]!!.jsonPrimitive.content)
         assertEquals("poi", m["kind"]!!.jsonPrimitive.content)
