@@ -29,9 +29,10 @@ function storedView(s: Section): View {
 const view = computed<View>(() => (route.query.view === 'map' ? 'map' : route.query.view === 'list' ? 'list' : storedView(section.value)))
 function setView(v: View) {
   try { sessionStorage.setItem(`adminView:${section.value}`, v) } catch { /* storage blocked */ }
-  router.replace({ name: ROUTE[section.value], query: v === 'map' ? { view: 'map' } : {} })
+  // always in the address: the stored choice is not reactive, so an address without ?view would not redraw
+  router.replace({ name: ROUTE[section.value], query: { view: v } })
 }
-const linkTo = (s: Section) => ({ name: ROUTE[s], query: storedView(s) === 'map' ? { view: 'map' } : {} })
+const linkTo = (s: Section) => ({ name: ROUTE[s], query: { view: storedView(s) } })
 
 const pw = ref(loadAdminToken())
 const who = ref<Me | null>(null)

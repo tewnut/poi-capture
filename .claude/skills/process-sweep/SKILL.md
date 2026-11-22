@@ -103,7 +103,7 @@ The folder also gets `result.json` (schema `poi-result/1`: places with their fie
 algorithm / Google / agent, photos, and the task list: visits for Place capture, removals), `sweep.json` (the ride
 for the maps) and `removals.json`; `index.html` has a map, and the parent folder an `index.html` over all
 sessions. `--doors <place capture session>` adds the doors captured on site for comparison. The web app (`web/`,
-docs/pipeline.md) imports the folder or a zip of it for review and publishing.
+docs/pipeline.md) opens it from the server for review and publishing: push it with `cloud.py push` (below).
 
 ## 4. Enrich from Google Maps
 
@@ -171,7 +171,7 @@ python <skill>/scripts/cloud.py push <out folder | zip>      # after step 5: the
 ```
 
 `push` zips a folder and sends it as `type=processed-result` with its session id and name from result.json; the
-reviewer's web app lists those under *From server*. An interrupted push resumes when run again.
+reviewer's web app lists them in its session list (downloaded when opened). An interrupted push resumes when run again.
 
 ## Google data: merged, marked, kept out of OpenStreetMap
 

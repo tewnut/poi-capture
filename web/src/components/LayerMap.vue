@@ -11,7 +11,9 @@ export type MapMarker = { id: string; lat: number; lon: number; colour: string; 
 export type MapLine = { id: string; pts: [number, number][]; colour: string; popup: string }
 export type LegendItem = { label: string; colour: string; kind?: 'line' | 'dot' }
 
-const props = defineProps<{ markers?: MapMarker[]; lines?: MapLine[]; legend?: LegendItem[]; popupFooter?: string }>()
+const props = defineProps<{ markers?: MapMarker[]; lines?: MapLine[]; legend?: LegendItem[]; popupFooter?: string; pickable?: boolean }>()
+/** pickable: a click on a marker of one item picks it (no popup); a spot shared by several keeps its popup. */
+const emit = defineEmits<{ pick: [id: string] }>()
 
 /** Several markers on one spot: a neutral colour. */
 const SHARED = '#37474f'
@@ -38,10 +40,16 @@ function draw() {
   }
   for (const ms of at.values()) {
     const ll: [number, number] = [ms[0].lat, ms[0].lon]
-    L.circleMarker(ll, { radius: 8, color: '#fff', weight: 2, fillColor: ms.length === 1 ? ms[0].colour : SHARED, fillOpacity: 0.9 })
+    const mk = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 2, fillColor: ms.length === 1 ? ms[0].colour : SHARED, fillOpacity: 0.9 })
       .bindTooltip(ms.map((m) => esc(m.label)).join('<br>'), { permanent: true, direction: 'right', offset: [8, 0], className: 'devlabel' })
-      .bindPopup(ms.map((m) => m.popup).join('') + (props.popupFooter || ''), { maxWidth: 320 })
-      .addTo(layer)
+    if (props.pickable && ms.length === 1) mk.on('click', () => emit('pick', ms[0].id))
+    else if (props.pickable) {
+      // several at one spot: the popup lists them, each one a button that picks it
+      mk.bindPopup(ms.map((m) => `<button type="button" class="mpick" data-id="${esc(m.id)}">${esc(m.label)}</button>`).join(''), { maxWidth: 320 })
+      mk.on('popupopen', (e: L.PopupEvent) => e.popup.getElement()?.querySelectorAll<HTMLButtonElement>('.mpick')
+        .forEach((b) => { b.onclick = () => { map?.closePopup(); emit('pick', b.dataset.id!) } }))
+    } else mk.bindPopup(ms.map((m) => m.popup).join('') + (props.popupFooter || ''), { maxWidth: 320 })
+    mk.addTo(layer)
     bounds.push(ll)
   }
   if (bounds.length) map.fitBounds(L.latLngBounds(bounds), { padding: [40, 40], maxZoom: 15 })

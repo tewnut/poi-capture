@@ -1,5 +1,5 @@
 // Shareable addresses. Hash history (#/s/...): the app is static files (Cloudflare Pages), so every address must load
-// index.html. A link opens the session, place or task only in a browser where that session was imported.
+// index.html. A link to a session the server has opens it anywhere (downloaded on the way, connection.ts).
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const Empty = { render: () => null }   // the views are drawn by App.vue from the route; no routed component
@@ -18,6 +18,11 @@ export const router = createRouter({
     { path: '/admin', redirect: '/admin/keys' },
     { path: '/admin/keys', name: 'adminKeys', component: Empty },
     { path: '/admin/sessions', name: 'adminSessions', component: Empty },
+    // settings, a page like the admin page (SettingsPage.vue): connection, language, what this browser keeps
+    { path: '/settings', redirect: '/settings/connection' },
+    { path: '/settings/connection', name: 'settingsConnection', component: Empty },
+    { path: '/settings/language', name: 'settingsLanguage', component: Empty },
+    { path: '/settings/browser', name: 'settingsBrowser', component: Empty },
     { path: '/:rest(.*)*', redirect: '/' },
   ],
 })
@@ -29,4 +34,5 @@ export const to = {
   sessionTasks: (ds: string) => ({ name: 'sessionTasks', params: { ds } }),
   place: (ds: string, place: string) => ({ name: 'place', params: { ds, place } }),
   task: (ds: string, task: number) => ({ name: 'task', params: { ds, task: String(task) } }),
+  settings: () => ({ name: 'settingsConnection' }),
 }

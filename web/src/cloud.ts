@@ -10,7 +10,8 @@
 import type { Dataset } from './types'
 import { version } from '../package.json'
 
-export const DEFAULT_CLOUD_URL = 'https://poi-uploader.4hum.ai/files/'
+/** The project's server: set when the app is built (VITE_CLOUD_URL, e.g. in .env or the Pages build settings). */
+export const DEFAULT_CLOUD_URL: string = (import.meta.env?.VITE_CLOUD_URL as string | undefined)?.trim() || 'https://poi-uploader.4hum.ai/files/'
 
 export const INDEX_SCHEMA = 'poi-cloud-index/1'
 export const ME_SCHEMA = 'poi-cloud-me/1'
@@ -120,6 +121,24 @@ export function serverRoot(url: string): string | null {
 export function setupLink(url: string, secret: string, name: string): string {
   const base = (url || '').trim().replace(/\/+$/, '') + '/'
   return `${base}#token=${encodeURIComponent(secret.trim())}&name=${encodeURIComponent(name)}`
+}
+
+/**
+ * What a reviewer pastes in Settings: the bare access key, or the admin's whole setup link (setupLink) → the key and,
+ * from a link, the server address. null for nothing usable.
+ */
+export function parseKeyInput(text: string): { token: string; url: string | null } | null {
+  const t = (text || '').trim().replace(/^Bearer\s+/i, '')
+  if (!t) return null
+  const hash = t.indexOf('#')
+  if (/^https?:\/\//i.test(t) && hash > 0) {
+    const params = new URLSearchParams(t.slice(hash + 1))
+    const token = (params.get('token') || '').trim()
+    if (!token) return null
+    return { token, url: endpoint(t.slice(0, hash)) }
+  }
+  if (/\s/.test(t) || /^https?:/i.test(t)) return null
+  return { token: t, url: null }
 }
 
 const str = (v: unknown) => (typeof v === 'string' && v ? v : null)
@@ -415,22 +434,18 @@ const KEY_URL = 'cloudUrl'
 const KEY_TOKEN = 'cloudToken'
 const KEY_ADMIN = 'cloudAdminToken'
 
-/** The saved address, else the default one; an emptied field goes back to the default. */
+/** The server is the build's (DEFAULT_CLOUD_URL); only the access key is kept in this browser. */
 export function loadCloud(): CloudConfig {
   try {
-    const url = localStorage.getItem(KEY_URL) || DEFAULT_CLOUD_URL
-    // the same Worker's first address (workers.dev) reads as the project's domain
-    return { url: url.includes('poi-capture-cloud.4hum-ai.workers.dev') ? DEFAULT_CLOUD_URL : url, token: localStorage.getItem(KEY_TOKEN) || '' }
+    return { url: DEFAULT_CLOUD_URL, token: localStorage.getItem(KEY_TOKEN) || '' }
   } catch {
     return { url: DEFAULT_CLOUD_URL, token: '' }
   }
 }
 
-export function saveCloud(c: CloudConfig) {
+export function saveCloud(c: Pick<CloudConfig, 'token'>) {
   try {
-    const url = c.url.trim()
-    if (url && url !== DEFAULT_CLOUD_URL) localStorage.setItem(KEY_URL, url)
-    else localStorage.removeItem(KEY_URL)   // the default is not pinned: a later default change reaches this browser
+    localStorage.removeItem(KEY_URL)   // an address saved by an older version
     if (c.token.trim()) localStorage.setItem(KEY_TOKEN, c.token.trim())
     else localStorage.removeItem(KEY_TOKEN)
   } catch { /* storage blocked: kept for this page only */ }

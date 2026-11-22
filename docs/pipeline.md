@@ -17,8 +17,8 @@ They meet only in the web app's published data, and through the task list a swee
 
 ## Moving the files: by hand or through the cloud server
 
-By hand: the phone's Send / Save zip (or adb), the agent's output folder or zip imported into the web app. Or through
-a shared **tus server** (resumable uploads, tus.io 1.0; `server/`, see its README). The team's server is a
+By hand: the phone's Send / Save zip (or adb) to the agent. The web app takes sessions only from the server. The
+server: a shared **tus server** (resumable uploads, tus.io 1.0; `server/`, see its README). The team's server is a
 Cloudflare Worker storing uploads in R2 (`server/worker/`), at `https://poi-uploader.4hum.ai/files/`;
 every request needs its bearer token, which is not in the repository. A self-hosted Node version is in `server/` too.
 The phone sends its session zips straight to R2 (presigned parts, server/README.md "Direct uploads": tus through the
@@ -27,24 +27,23 @@ Worker is far too slow from Vietnam); the agent and the web app use tus.
 ```
 phone ── raw session zip, type=raw-session ──►  server  ──► agent: cloud.py list / pull <id>
                                                     ▲           ... process-sweep ...
-web app ◄── From server: type=processed-result ─────┴────────── agent: cloud.py push <result folder>
+web app ◄── session list: type=processed-result ─────┴────────── agent: cloud.py push <result folder>
 ```
 
-- **Phone** (Settings → Upload server, or the optional onboarding step): endpoint, optional token (Keystore-encrypted
-  on the phone, never in exports), Test connection (OPTIONS), upload each session when it ends (Wi-Fi only by
-  default). Each session card shows not uploaded / waiting / uploading n % / uploaded / failed with Upload or Retry.
-  The upload is the same zip as Send (`Exporter`), created with `Upload-Metadata` filename, filetype, type,
-  sessionId, name, kind, createdAt, startedAt, photoCount, then sent in 2 MB PATCHes (as POST +
-  `X-HTTP-Method-Override`); the upload URL and offset are kept per session, so it resumes after a dropped
-  connection or an app restart (HEAD). Background work: WorkManager (`capture/UploadWork.kt`); never while a session
-  is recording. Release builds need https.
+- **Phone** (Settings → Upload server, or the onboarding's last step: scan the admin's QR code or type the access
+  key; Keystore-encrypted on the phone, never in exports): Test connection (GET /me), upload each session when it
+  ends (Wi-Fi only by default), straight to R2 in 8 MiB parts, 4 at once (server/README.md "Direct uploads"), each
+  part's ETag kept so a restart sends only what is missing. A session the server confirms in full is then deleted from
+  the phone (setting, on by default). The session card has one Send to server control that shows progress, waiting,
+  failure or done (`capture/UploadWork.kt`); never while a session is recording.
 - **Agent**: `.claude/skills/process-sweep/scripts/cloud.py` (`list`, `pull <id> <dir>`, `push <zip|folder>`),
   `POI_CLOUD_URL` (e.g. the Worker URL above) / `POI_CLOUD_TOKEN`.
-- **Web app** (Settings → Cloud storage: server, preset to the Worker URL and changeable, + token, kept in this
-  browser's localStorage only): *From server*
-  lists the finished processed packages (`GET <endpoint>index.json`, the server's addition to tus), marks those
-  already imported (same session id) or newer than the imported copy, downloads the picked ones (`GET <endpoint><id>`)
-  and imports them like a dropped zip (`web/src/cloud.ts`).
+- **Web app**: works only from the server (no import by hand). The server is the build's (`VITE_CLOUD_URL`, default
+  the project server); the reviewer adds their access key in Settings (#/settings: Connection, Language, This browser),
+  kept in this browser only; the key's name is the name saved with each review. The session list is the server's
+  (`index.json`): processed sessions (downloaded into this browser the first time they are opened, or again when the
+  server has a newer one), rides still waiting for the agent, and sessions downloaded before that are gone from the
+  server (`web/src/connection.ts`, `sessions.ts`). Reviews stay in this browser until published.
 
 ## 1. Capture (phone app)
 
@@ -211,6 +210,6 @@ The comparison marks (`google`: `match` / `differs`, `googleValue`, `source`, `n
 | Result bundle | `result.json` (`poi-result/1`) + photo folders | every processed folder |
 | 3 web app (POI Capture Reviewer): import, sessions, map, review (fields, 3 pins, final pin, photos), tasks, shareable links, publish GeoJSON / CSV / .osm / photos / project package | yes | `web/`, Cloudflare Pages `poi-capture-reviewer` (`.github/workflows/web.yml`) |
 | Phone: import the task list as a map layer, close tasks by Place capture | yes (app 0.17, unreleased) | `core/FieldTasks.kt`, `ui/TasksUi.kt`; web `tasksGeojson` |
-| Cloud path: phone uploads (direct to R2), agent pull / push, web app *From server* | yes (app 0.17, unreleased); server deployed as a Cloudflare Worker + R2 | `server/worker/`, `server/`, `capture/UploadWork.kt`, `cloud.py`, `web/src/cloud.ts` |
+| Cloud path: phone uploads (direct to R2), agent pull / push, web app session list from the server | yes (app 0.17, unreleased); server deployed as a Cloudflare Worker + R2 | `server/worker/`, `server/`, `capture/UploadWork.kt`, `cloud.py`, `web/src/cloud.ts` |
 | 4 VMAP edit from a project package | tools take tasks.jsonl | poi-contribution (`tools/tasks.py`, `vmap_edit.py`, `vmap_create.py`) |
 | OSM building outlines for the agent pin | no | next |

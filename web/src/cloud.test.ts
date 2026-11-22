@@ -108,14 +108,13 @@ describe('cloud settings', () => {
     expect(loadCloud()).toEqual({ url: DEFAULT_CLOUD_URL, token: '' })
   })
 
-  it('keeps another server and the token; an emptied address goes back to the default', () => {
+  it('keeps only the key: the server comes from the build, an address saved by an older version is dropped', () => {
     const m = storage()
-    saveCloud({ url: ' http://localhost:1080/files/ ', token: ' t0k ' })
-    expect(loadCloud()).toEqual({ url: 'http://localhost:1080/files/', token: 't0k' })
-    saveCloud({ url: '', token: 't0k' })
-    expect(loadCloud().url).toBe(DEFAULT_CLOUD_URL)
-    saveCloud({ url: DEFAULT_CLOUD_URL, token: '' })
+    m.set('cloudUrl', 'http://localhost:1080/files/')
+    saveCloud({ token: ' t0k ' })
+    expect(loadCloud()).toEqual({ url: DEFAULT_CLOUD_URL, token: 't0k' })
     expect(m.has('cloudUrl')).toBe(false)
+    saveCloud({ token: '' })
     expect(m.has('cloudToken')).toBe(false)
   })
 
@@ -368,5 +367,22 @@ describe('seen, shown short', () => {
     expect(seenPlace(null)).toBe('')
     expect(seenPlace(parseSeen({ at: 'x', city: 'Thu Duc', region: 'HCM', country: 'VN' }))).toBe('Thu Duc, VN')
     expect(seenPlace(parseSeen({ at: 'x', region: 'HCM' }))).toBe('HCM')
+  })
+})
+
+describe('parseKeyInput', () => {
+  it('takes a bare key, a Bearer key or the admin setup link', async () => {
+    const { parseKeyInput, setupLink } = await import('./cloud')
+    expect(parseKeyInput('  pct_abc-DEF_1  ')).toEqual({ token: 'pct_abc-DEF_1', url: null })
+    expect(parseKeyInput('Bearer pct_x')).toEqual({ token: 'pct_x', url: null })
+    const link = setupLink('https://poi-uploader.4hum.ai/files/', 'pct_secret', 'Sơn – laptop')
+    expect(parseKeyInput(link)).toEqual({ token: 'pct_secret', url: 'https://poi-uploader.4hum.ai/files/' })
+  })
+  it('refuses what is not a key', async () => {
+    const { parseKeyInput } = await import('./cloud')
+    expect(parseKeyInput('')).toBeNull()
+    expect(parseKeyInput('two words')).toBeNull()
+    expect(parseKeyInput('https://poi-uploader.4hum.ai/files/')).toBeNull()
+    expect(parseKeyInput('https://poi-uploader.4hum.ai/files/#name=x')).toBeNull()
   })
 })

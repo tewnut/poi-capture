@@ -29,11 +29,6 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .sidehead { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 12px 6px; }
 .sidehead { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
 .gear { font-size: 18px; line-height: 1; padding: 4px 8px; }
-.settings { display: grid; gap: 8px; padding: 10px 12px; background: var(--canvas); border-bottom: 1px solid var(--line); }
-.settings label { display: grid; grid-template-columns: 90px 1fr; align-items: center; gap: 8px; font-size: 13px; }
-.settings input, .settings select { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 13px; background: #fff; }
-.settings p { margin: 0; }
-.settings .wipe { display: flex; gap: 8px; align-items: center; border-top: 1px solid var(--line); padding-top: 8px; }
 .seg { display: flex; gap: 4px; margin: 10px 12px 0; padding: 3px; background: var(--canvas); border-radius: 10px; }
 .seg button { flex: 1; border: 0; background: none; padding: 6px 4px; border-radius: 8px; color: var(--muted); font-weight: 600; }
 .seg button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.12); }
@@ -97,8 +92,6 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .mapwrap { position: relative; min-width: 0; }
 .detail { width: clamp(380px, 30vw, 520px); overflow: auto; background: var(--card); border-left: 1px solid var(--line); padding: 14px 16px; }
 
-.drop { position: fixed; inset: 0; background: rgba(31,122,82,.12); border: 3px dashed var(--accent); display: grid; place-items: center;
-  font-size: 20px; font-weight: 700; color: var(--accent); z-index: 2000; pointer-events: none; }
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: grid; place-items: center; z-index: 3000; }
 .dialog { background: #fff; border-radius: 16px; padding: 20px 22px; width: min(520px, 92vw); }
 .dialog h2 { margin: 0 0 6px; }
@@ -121,15 +114,7 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .dnav .dstep { min-width: 40px; font-size: 20px; line-height: 1; padding: 2px 12px; }
 }
 
-/* cloud storage: settings block and the "From server" list */
-.settings .cloudset { display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
 .err-text { color: #8a1c1c; margin: 0; }
-.cloud { display: grid; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--canvas); max-height: 45vh; overflow: auto; }
-.cloud p { margin: 0; }
-.cloud .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.cloud .citem { display: flex; gap: 8px; align-items: center; padding: 6px 8px; background: #fff; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
-.cloud .citem .body { display: grid; flex: 1; min-width: 0; }
-.cloud .citem .body b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* admin (AdminPanel.vue): tokens and uploads, on a card up to 1320 px wide */
 .adminpage { min-height: 100vh; display: grid; justify-items: center; align-content: start; padding: 24px 12px; background: #f4f5f7; }
@@ -145,9 +130,6 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .adminpane { display: grid; gap: 8px; container: apane / inline-size; }
 .adminpane > * { min-width: 0; }
 .issue { display: grid; gap: 6px; padding: 10px; background: var(--canvas); border-radius: 10px; }
-.issue > * { max-width: 760px; }
-.issuerow { display: flex; gap: 6px; flex-wrap: wrap; }
-.issuerow input { flex: 1; min-width: 180px; }
 .issued { display: grid; gap: 8px; padding: 12px; border: 2px solid var(--accent); border-radius: 12px; background: #f1faf5; }
 .issued .warn { color: #8a5a00; font-weight: 600; }
 .issued .secret { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -171,8 +153,6 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .atable tr.revoked td { color: var(--muted); }
 .atable tr.revoked b { text-decoration: line-through; }
 .atable .chip { white-space: nowrap; }
-.settings .cloudset .row button { white-space: nowrap; flex: none; }
-.settings .cloudset .row { justify-content: flex-start; }
 /* admin: last seen and the map (AdminPanel.vue, AdminMap.vue) */
 .atable td.seen { min-width: 200px; }
 .atable tr.open td { background: #f8faf9; }
@@ -181,7 +161,6 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .seenwrap .seenfull { margin: 0; flex: 1 1 320px; background: #fff; border: 1px solid var(--line); }
 .atable .seenfull.incell { display: none; }
 .atable td.seen .chip { margin-left: 4px; cursor: help; }
-.builtins { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
 /* permissions: chips (ScopeChips.vue), the checkboxes (ScopePicker.vue) and the editor of a token's permissions */
 .scopechips { display: inline-flex; flex-wrap: wrap; gap: 3px; align-items: center; vertical-align: middle; }
 .chip.scope { border: 0; font: inherit; font-size: 11px; font-weight: 600; cursor: help; line-height: 1.5; }
@@ -207,8 +186,6 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .atable .scopeedit.incell { display: none; }
 .atable td.perms { min-width: 120px; }
 .atable .act .btns { display: inline-flex; gap: 6px; }
-.builtins .scopechips { margin: 0 4px; }
-.builtins li { padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .adminfilters { justify-content: flex-start; flex-wrap: wrap; }
 .adminfilters label { display: inline-flex; gap: 6px; align-items: center; }
 .adminfilters select { max-width: 280px; text-overflow: ellipsis; }
@@ -251,7 +228,7 @@ button.small { padding: 4px 10px; font-size: 13px; }
    (max-width: 700px) = a phone (360-430 px portrait, and most phones in landscape), where the open place or task
    becomes a full-screen panel. 701-1099 px: the panel in the map's place (above). */
 .dnav { display: none; }
-.atable .more, .builtins .more { color: var(--accent); }
+.atable .more { color: var(--accent); }
 .seenfull { white-space: pre-line; margin-top: 4px; padding: 6px 8px; background: var(--canvas); border-radius: 8px; color: var(--ink);
   overflow-wrap: anywhere; font-size: 12px; }
 
@@ -260,11 +237,10 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .primary, .secondary, .danger, .ghost, button.small { min-height: 44px; }
   .ghost { min-width: 44px; }
   .seg button { min-height: 44px; }
-  .ses input[type=checkbox], .cloud .citem input[type=checkbox] { width: 22px; height: 22px; margin: 2px; flex: none; }
-  .cloud .citem { min-height: 48px; }
+  .ses input[type=checkbox] { width: 22px; height: 22px; margin: 2px; flex: none; }
   .prow { min-height: 64px; align-items: center; }
   .ghead { min-height: 44px; align-items: center; }
-  .filters select, .filters input, .settings input, .settings select, .dialog.admin input, .dialog.admin select { min-height: 44px; font-size: 16px; }
+  .filters select, .filters input, .dialog.admin input, .dialog.admin select { min-height: 44px; font-size: 16px; }
   .adminfilters select { min-height: 44px; }
   .dialog.admin > .row a { display: inline-flex; align-items: center; min-height: 44px; }
   .leaflet-touch .leaflet-bar a { width: 40px; height: 40px; line-height: 40px; }
@@ -279,8 +255,6 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .sidehead { padding-top: calc(10px + env(safe-area-inset-top)); }
   .importbar { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
   .importbar button { flex: 1 1 auto; }
-  .settings label { grid-template-columns: 80px minmax(0, 1fr); }
-  .settings .wipe { flex-wrap: wrap; }
   .sesshead h1 { overflow-wrap: anywhere; }
   .sesshead .row { flex-wrap: wrap; }
   .filters select, .filters input { min-width: 0; flex: 1 1 140px; }
@@ -318,11 +292,8 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .dialog.admin .seg button { padding: 6px 2px; }
   .adminauth label { grid-template-columns: 1fr; gap: 4px; }
   .adminauth button { justify-self: stretch; }
-  .issuerow { flex-direction: column; }
-  .issuerow input { min-width: 0; }
   .issued .qr { width: min(240px, 100%); height: auto; aspect-ratio: 1; }
   .issued .qrrow .small { min-width: 0; }
-  .builtins li { overflow-wrap: anywhere; }
   .scopebox input { width: 20px; height: 20px; margin-top: 0; }
   .chip.scope { padding: 3px 9px; font-size: 12px; }
   .amap { height: 60vh; height: 60dvh; min-height: 300px; }
@@ -345,6 +316,7 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .atable.ups td.name .sub { display: block; }
 }
 @container apane (max-width: 719px) {
+  .atable.cards tr.pick td.act { display: none; }
   .tablewrap { overflow: visible; border: 0; }
   .atable.cards, .atable.cards tbody { display: block; }
   .atable.cards thead { display: none; }
@@ -372,3 +344,51 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .atable.cards .act button { flex: 1 1 auto; }
   .atable.cards .act > button { width: 100%; }
 }
+
+/* settings page (SettingsPage.vue): the admin page's layout */
+.setmain { display: grid; gap: 12px; align-content: start; }
+.setmain h3 { margin: 0; }
+.setmain p { margin: 0; }
+.setblock { display: grid; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.setblock .row { display: flex; gap: 8px; align-items: center; justify-content: flex-start; flex-wrap: wrap; }
+.setblock > .row:first-of-type { justify-content: space-between; }
+.setform { display: grid; gap: 6px; max-width: 520px; }
+.setform input { width: 100%; box-sizing: border-box; }
+.setfacts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+.setfacts dt { color: var(--muted); }
+.setfacts dd { margin: 0; font-weight: 600; }
+.langseg { max-width: 320px; }
+.ok-text { color: var(--accent); font-weight: 600; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #c4ccc8; margin-left: 6px; vertical-align: middle; }
+.dot.ok { background: var(--accent); }
+.dot.error { background: #d92d20; }
+.dot.checking { background: #f79009; }
+a.gear { text-decoration: none; color: var(--muted); position: relative; }
+a.button { display: inline-block; text-decoration: none; border-radius: 10px; padding: 8px 14px; }
+/* session list: rows not downloaded yet, or still waiting for the agent */
+.ses .cbspace { width: 13px; flex: none; }
+.ses.remote .body b, .ses.waiting .body b { font-weight: 600; }
+.ses.waiting { background: var(--canvas); }
+.ses.waiting .body { cursor: default; }
+.ses.busy { opacity: .7; }
+
+/* admin: New key side panel (AdminKeys.vue); a full-height sheet on a phone */
+.drawerback { position: fixed; inset: 0; background: rgba(0,0,0,.3); z-index: 3000; display: flex; justify-content: flex-end; }
+.drawer { width: min(460px, 100vw); height: 100%; overflow-y: auto; background: #fff; padding: 16px 18px; display: grid; gap: 12px;
+  align-content: start; box-shadow: -6px 0 24px rgba(0,0,0,.18); box-sizing: border-box; }
+.drawer h3 { margin: 0; overflow-wrap: anywhere; }
+.drawer .issue { background: none; padding: 0; gap: 8px; }
+.drawer .namefield { display: grid; gap: 4px; }
+.drawer .namefield input { width: 100%; box-sizing: border-box; }
+.drawer .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.drawer form .row, .drawer .issued .row { justify-content: flex-start; }
+.atable tr.builtin td { background: #fafbfa; }
+.adminfilters .btns { display: inline-flex; gap: 6px; }
+.atable tr.pick { cursor: pointer; }
+.atable tr.pick:hover td, .atable tr.pick.on td { background: #eef6f1; }
+.atable tr.pick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.atable td.act { text-align: right; font-size: 18px; }
+.drawer .seenfull { margin: 0; background: var(--canvas); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.dangerzone { display: grid; gap: 6px; padding: 10px; border: 1px solid #f3c6cf; border-radius: 10px; background: #fff7f8; justify-items: start; }
+.dangerzone p { margin: 0; }
+.mpick { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 4px 2px; color: var(--accent); font-weight: 600; cursor: pointer; }
