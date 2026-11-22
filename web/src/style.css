@@ -401,4 +401,14 @@ a.button { display: inline-block; text-decoration: none; border-radius: 10px; pa
 .reviewbar .btns { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .reviewbar .confirm { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .reviewbar p { margin: 0; flex-basis: 100%; }
+.reviewbar.lost { background: #fdeeee; border-color: #ecc0c0; }
+.reviewbar .histtoggle { flex-basis: 100%; }
+.reviewbar .histtoggle button { padding-left: 0; }
+.reviewbar .history { flex-basis: 100%; max-height: 260px; overflow: auto; border-top: 1px solid var(--line); padding-top: 6px; }
+.reviewbar .history ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.reviewbar .history li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.reviewbar .history li > .muted { min-width: 7.5em; }
+.reviewbar .history li.current { font-weight: 600; }
+.reviewbar .history .chip { margin-left: 6px; }
+.reviewbar .history li button { margin-left: auto; }
 .rofoot { padding: 10px 0; }

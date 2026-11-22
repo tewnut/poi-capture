@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_CLOUD_URL, loadCloud, saveCloud, downloadItem, endpoint, fetchIndex, importState, parseIndex, processedItems, INDEX_SCHEMA, type CloudItem,
   serverRoot, setupLink, me, listTokens, issueToken, revokeToken, deleteUpload, CloudError, loadAdminToken, saveAdminToken,
-  adminTokens, updateToken, parseScopes, roleOf, SCOPES, PRESETS, decodePolyline, parseSeen, twoClients, browserSummary, clientName } from './cloud'
+  adminTokens, updateToken, parseScopes, roleOf, SCOPES, PRESETS, decodePolyline, parseSeen, twoClients, browserSummary, clientName, listReviews, reviewHistory, restoreReview } from './cloud'
 
 const index = {
   schema: INDEX_SCHEMA,
@@ -384,5 +384,43 @@ describe('parseKeyInput', () => {
     expect(parseKeyInput('two words')).toBeNull()
     expect(parseKeyInput('https://poi-uploader.4hum.ai/files/')).toBeNull()
     expect(parseKeyInput('https://poi-uploader.4hum.ai/files/#name=x')).toBeNull()
+  })
+})
+
+describe('review lifecycle', () => {
+  const cfg = { url: 'https://h/files/', token: 'k' }
+  const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } })
+
+  it('reads how the last checkout ended and the current version', async () => {
+    const f = (async () => json({ schema: 'poi-cloud-reviews/1', reviews: [
+      { sessionId: 's1', lock: null, saved: { by: { id: 'a', name: 'Admin' }, at: '2026-11-22T05:00:00Z', size: 5, done: 3, total: 9, version: 'v1-abcd1234' },
+        ended: { of: { id: 't1', name: 'Lan' }, by: 'Admin', at: '2026-11-22T04:00:00Z', reason: 'released' } },
+      { sessionId: 's2', lock: null, saved: null, ended: { of: { id: 't1', name: 'Lan' }, by: null, at: 'x', reason: 'stolen' } },
+    ] })) as unknown as typeof fetch
+    const [a, b] = await listReviews(cfg, f)
+    expect(a.ended).toEqual({ of: { id: 't1', name: 'Lan' }, by: 'Admin', at: '2026-11-22T04:00:00Z', reason: 'released' })
+    expect(a.saved!.version).toBe('v1-abcd1234')
+    expect(b.ended).toBeNull()   // an unknown reason is ignored
+  })
+
+  it('reads the history and restores a version', async () => {
+    const calls: [string, RequestInit | undefined][] = []
+    const f = (async (u: string, init?: RequestInit) => {
+      calls.push([u, init])
+      if (u.endsWith('/history')) return json({ schema: 'poi-cloud-review-history/1', sessionId: 's1', events: [
+        { at: '2026-11-22T05:00:00Z', action: 'checkin', by: { id: 't1', name: 'Lan' }, of: null, version: 'v2-00000000', done: 2, total: 9, note: null },
+        { at: '2026-11-22T04:00:00Z', action: 'released', by: { id: 'admin', name: 'Admin' }, of: 'Sơn', version: null },
+        { action: 'broken' },
+      ] })
+      return json({ schema: 'poi-cloud-review/1', sessionId: 's1', lock: null, saved: { by: { id: 'admin', name: 'Admin' }, at: '2026-11-22T06:00:00Z', size: 5 } })
+    }) as unknown as typeof fetch
+    const h = await reviewHistory(cfg, 's1', f)
+    expect(h.map((e) => e.action)).toEqual(['checkin', 'released'])
+    expect(h[0]).toMatchObject({ by: { name: 'Lan' }, version: 'v2-00000000', done: 2, total: 9 })
+    expect(h[1]).toMatchObject({ of: 'Sơn', version: null, done: null })
+    const info = await restoreReview(cfg, 's1', 'v1-abcd1234', f)
+    expect(info.saved!.by.name).toBe('Admin')
+    expect(calls[1][0]).toBe('https://h/reviews/s1/restore')
+    expect(calls[1][1]).toMatchObject({ method: 'POST', body: '{"version":"v1-abcd1234"}' })
   })
 })

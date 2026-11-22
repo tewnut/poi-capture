@@ -7,8 +7,7 @@ import { computed, reactive } from 'vue'
 import {
   loadCloud, saveCloud, me, fetchIndex, downloadItem, endpoint, CloudError,
   listReviews, checkout, releaseCheckout, getReview, putReviewPackage,
-  type CloudConfig, type CloudItem, type Me, type ReviewInfo,
-} from './cloud'
+  type CloudConfig, type CloudItem, type Me, type ReviewInfo, restoreReview } from './cloud'
 import { build, parse, collect, reviewFiles, progress, REVIEW_SCHEMA } from './reviewpkg'
 import type { Dataset } from './types'
 import { importFiles } from './importer'
@@ -99,9 +98,14 @@ export function signOut() {
 
 // ---- reviews: check out → edit in this browser → save / check in (server/README.md "Reviews")
 
-/** The server's saved review of [d] replaces this browser's, when it is newer than the one loaded here. */
+/**
+ * The server's saved review of [d] replaces this browser's, when it is newer than the one loaded here. Never over
+ * changes not saved to the server (state.dirty) unless [force]: a reviewer whose checkout ended keeps their work until
+ * they choose (ReviewBar: check out again and keep it, or discard it).
+ */
 export async function loadSaved(d: Dataset, force = false, f: typeof fetch = fetch) {
   const saved = conn.reviews[d.id]?.saved
+  if (!force && state.dirty.has(d.id)) return
   if (!saved || (!force && state.synced[d.id] && state.synced[d.id] >= saved.at)) return
   const zip = await getReview(conn.cfg, d.id, f)
   if (!zip) return
@@ -110,13 +114,16 @@ export async function loadSaved(d: Dataset, force = false, f: typeof fetch = fet
   await applyReview(d.id, doc.reviews, doc.removals, blobs, saved.at)
 }
 
-/** Take the session: the server's latest review comes into this browser first; then it can be edited. */
-export async function checkOut(d: Dataset, f: typeof fetch = fetch) {
+/**
+ * Take the session: the server's latest review comes into this browser first; then it can be edited. [keepMine]: this
+ * browser's unsaved changes (from a checkout that ended) are kept instead, and replace the server's on the next save.
+ */
+export async function checkOut(d: Dataset, keepMine = false, f: typeof fetch = fetch) {
   conn.reviewBusy = d.id
   try {
     const info = await checkout(conn.cfg, d.id, f)
     // a review saved on the server is the one to go on from; none yet: this browser's (older work) stays
-    await loadSaved(d, false, f)
+    if (!keepMine) { state.dirty.delete(d.id); await loadSaved(d, false, f) }
     setInfo(info)
   } finally {
     conn.reviewBusy = ''
@@ -155,6 +162,29 @@ export async function giveUp(d: Dataset, f: typeof fetch = fetch) {
     state.dirty.delete(d.id)
     await saveReviews()
     await loadSaved(d, true, f).catch(() => {})
+  } finally {
+    conn.reviewBusy = ''
+  }
+}
+
+/** Throw away this browser's unsaved changes of [d] (after its checkout ended): the server's review comes back. */
+export async function discardMine(d: Dataset, f: typeof fetch = fetch) {
+  conn.reviewBusy = d.id
+  try {
+    state.dirty.delete(d.id)
+    await saveReviews()
+    if (conn.reviews[d.id]?.saved) await loadSaved(d, true, f)
+  } finally {
+    conn.reviewBusy = ''
+  }
+}
+
+/** An admin makes an earlier version the review of [d]; this browser loads it at once. */
+export async function restoreVersion(d: Dataset, version: string, f: typeof fetch = fetch) {
+  conn.reviewBusy = d.id
+  try {
+    setInfo(await restoreReview(conn.cfg, d.id, version, f))
+    await loadSaved(d, true, f)
   } finally {
     conn.reviewBusy = ''
   }

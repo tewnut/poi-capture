@@ -139,6 +139,8 @@ onBeforeUnmount(() => clearInterval(autosave))
 /** The list's word on a session's review: who has it checked out, or how far the last saved review got. */
 function lockLabel(r: Row): { text: string; cls: string; title: string } | null {
   const i = conn.reviews[r.sessionId]
+  // checkout ended (released, expired) with changes still only in this browser: the reviewer must decide (ReviewBar)
+  if (state.dirty.has(r.sessionId) && !state.editable.has(r.sessionId)) return { text: t('lockLost'), cls: 'rm', title: t('lockLostTitle') }
   if (i?.lock) {
     const p = { name: i.lock.by.name, when: relTime(i.lock.at), until: relTime(i.lock.until) }
     return { text: i.lock.by.id === conn.me?.id ? t('lockYou', p) : t('lockOther', p), cls: i.lock.by.id === conn.me?.id ? 'ok' : 'visit', title: t('lockTitle', p) }

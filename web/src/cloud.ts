@@ -495,7 +495,18 @@ export const REVIEWS_SCHEMA = 'poi-cloud-reviews/1'
 export type ReviewInfo = {
   sessionId: string
   lock: { by: { id: string; name: string }; at: string; until: string } | null
-  saved: { by: { id: string; name: string }; at: string; size: number; done: number | null; total: number | null } | null
+  saved: { by: { id: string; name: string }; at: string; size: number; done: number | null; total: number | null; version?: string | null } | null
+  /** How the last checkout ended (null while checked out, or never): checked in, given up, released, revoked, expired. */
+  ended?: { of: { id: string; name: string }; by: string | null; at: string; reason: EndReason } | null
+}
+export type EndReason = 'checkin' | 'gaveup' | 'released' | 'revoked' | 'expired'
+const END_REASONS: EndReason[] = ['checkin', 'gaveup', 'released', 'revoked', 'expired']
+
+export type ReviewAction = 'checkout' | 'save' | 'checkin' | 'gaveup' | 'released' | 'revoked' | 'expired' | 'restored'
+/** One line of a session's review history; `version`: a save still kept on the server (an admin can restore it). */
+export type ReviewEvent = {
+  at: string; action: ReviewAction; by: { id: string; name: string } | null; of: string | null; version: string | null
+  done: number | null; total: number | null; note: string | null
 }
 
 function parseReviewInfo(v: any): ReviewInfo | null {
@@ -505,7 +516,9 @@ function parseReviewInfo(v: any): ReviewInfo | null {
   return {
     sessionId: v.sessionId,
     lock: lb && str(v.lock.at) && str(v.lock.until) ? { by: lb, at: v.lock.at, until: v.lock.until } : null,
-    saved: sb && str(v.saved.at) ? { by: sb, at: v.saved.at, size: num(v.saved.size) ?? 0, done: num(v.saved.done), total: num(v.saved.total) } : null,
+    saved: sb && str(v.saved.at) ? { by: sb, at: v.saved.at, size: num(v.saved.size) ?? 0, done: num(v.saved.done), total: num(v.saved.total), version: str(v.saved.version) } : null,
+    ended: by(v.ended?.of) && str(v.ended.at) && END_REASONS.includes(v.ended.reason)
+      ? { of: by(v.ended.of)!, by: str(v.ended.by), at: v.ended.at, reason: v.ended.reason } : null,
   }
 }
 
@@ -542,6 +555,25 @@ export async function releaseCheckout(cfg: CloudConfig, sessionId: string, f: ty
   const r = await f(`${root(cfg)}/reviews/${encodeURIComponent(sessionId)}/checkout`, { method: 'DELETE', headers: headers(cfg) })
   if (r.status === 404) return   // not checked out (any more)
   await check(r, 'release')
+}
+
+/** What happened to a session's review, newest first. */
+export async function reviewHistory(cfg: CloudConfig, sessionId: string, f: typeof fetch = fetch): Promise<ReviewEvent[]> {
+  const r = await f(`${root(cfg)}/reviews/${encodeURIComponent(sessionId)}/history`, { headers: headers(cfg), cache: 'no-store' })
+  await check(r, 'history')
+  const j = (await r.json()) as any
+  if (j?.schema !== 'poi-cloud-review-history/1' || !Array.isArray(j.events)) throw new Error('not a review history')
+  return j.events.filter((e: any) => e && str(e.at) && typeof e.action === 'string').map((e: any) => ({
+    at: e.at, action: e.action, by: e.by && typeof e.by.id === 'string' ? { id: e.by.id, name: str(e.by.name) || e.by.id } : null,
+    of: str(e.of), version: str(e.version), done: num(e.done), total: num(e.total), note: str(e.note),
+  }))
+}
+
+/** An admin makes an earlier saved version the session's review (409 while someone has it checked out). */
+export async function restoreReview(cfg: CloudConfig, sessionId: string, version: string, f: typeof fetch = fetch): Promise<ReviewInfo> {
+  return reviewAnswer(await f(`${root(cfg)}/reviews/${encodeURIComponent(sessionId)}/restore`, {
+    method: 'POST', headers: { ...headers(cfg), 'Content-Type': 'application/json' }, body: JSON.stringify({ version }),
+  }), 'restore')
 }
 
 /** The last saved review package; null when nothing was saved yet. */

@@ -508,4 +508,82 @@ describe('reviews (checkout / check-in)', () => {
     expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'DELETE', headers: lan })).status).toBe(204)
     expect((await SELF.fetch(`${ROOT}/reviews/${sid}`, { headers: lan })).status).toBe(404)
   })
+
+  const ADMIN = { Authorization: 'Bearer admin-token' }
+  const post = (h: Record<string, string>, path: string, body?: unknown) =>
+    SELF.fetch(ROOT + path, { method: 'POST', headers: { ...h, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
+  const info = async (h: Record<string, string>, sid: string) =>
+    (await (await SELF.fetch(`${ROOT}/reviews`, { headers: h })).json<any>()).reviews.find((r: any) => r.sessionId === sid)
+
+  it('says how the last checkout ended: released by the admin, given up, checked in', async () => {
+    const son = await key('Sơn', ['read'])
+    const sid = 's_review3'
+    await post(son, `/reviews/${sid}/checkout`)
+    expect((await info(son, sid)).ended).toBeNull()
+    await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'DELETE', headers: ADMIN })
+    expect((await info(son, sid)).ended).toMatchObject({ of: { name: 'Sơn' }, by: 'Admin', reason: 'released' })
+    await post(son, `/reviews/${sid}/checkout`)
+    await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'DELETE', headers: son })
+    expect((await info(son, sid)).ended).toMatchObject({ of: { name: 'Sơn' }, reason: 'gaveup' })
+    await post(son, `/reviews/${sid}/checkout`)
+    await put(son, sid, bytes(10), true)
+    expect((await info(son, sid)).ended).toMatchObject({ of: { name: 'Sơn' }, reason: 'checkin' })
+  })
+
+  it('a revoked key\'s checkout ends at once', async () => {
+    const r = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { ...ADMIN, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Gone', scopes: ['read'] }) })
+    const j = await r.json<{ token: { id: string }; secret: string }>()
+    const gone = { Authorization: `Bearer ${j.secret}` }
+    const lan = await key('Lan', ['read'])
+    const sid = 's_review4'
+    await post(gone, `/reviews/${sid}/checkout`)
+    expect((await post(lan, `/reviews/${sid}/checkout`)).status).toBe(409)
+    await SELF.fetch(`${ROOT}/admin/tokens/${j.token.id}`, { method: 'DELETE', headers: ADMIN })
+    expect((await info(lan, sid)).ended).toMatchObject({ of: { name: 'Gone' }, reason: 'revoked' })
+    expect((await post(lan, `/reviews/${sid}/checkout`)).status).toBe(200)
+  })
+
+  it('keeps a history and versions; an admin restores an earlier check-in', async () => {
+    const son = await key('Sơn', ['read'])
+    const lan = await key('Lan', ['read'])
+    const sid = 's_review5'
+    await post(son, `/reviews/${sid}/checkout`)
+    await put(son, sid, bytes(50, 1))
+    await put(son, sid, bytes(60, 2), true, '10', '10')        // Sơn's check-in: the good one
+    await post(lan, `/reviews/${sid}/checkout`)
+    await put(lan, sid, bytes(70, 3), true, '2', '10')          // Lan's check-in: the one to undo
+    const h = await (await SELF.fetch(`${ROOT}/reviews/${sid}/history`, { headers: lan })).json<any>()
+    expect(h.events.map((e: any) => e.action)).toEqual(['checkin', 'checkout', 'checkin', 'save', 'checkout'])
+    expect(h.events[0]).toMatchObject({ by: { name: 'Lan' }, done: 2, total: 10 })
+    const good = h.events[2]
+    expect(good).toMatchObject({ action: 'checkin', by: { name: 'Sơn' }, done: 10 })
+    expect(good.version).toMatch(/^[a-z0-9]+-[0-9a-f]{8}$/)
+    // only an admin restores; not while checked out
+    expect((await post(lan, `/reviews/${sid}/restore`, { version: good.version })).status).toBe(403)
+    await post(lan, `/reviews/${sid}/checkout`)
+    expect((await post(ADMIN, `/reviews/${sid}/restore`, { version: good.version })).status).toBe(409)
+    await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'DELETE', headers: lan })
+    expect((await post(ADMIN, `/reviews/${sid}/restore`, { version: 'nope' })).status).toBe(404)
+    const rr = await post(ADMIN, `/reviews/${sid}/restore`, { version: good.version })
+    expect(rr.status).toBe(200)
+    expect(await rr.json<any>()).toMatchObject({ saved: { by: { name: 'Admin' }, done: 10, total: 10, size: 60 } })
+    expect(new Uint8Array(await (await SELF.fetch(`${ROOT}/reviews/${sid}`, { headers: lan })).arrayBuffer())).toEqual(bytes(60, 2))
+    const h2 = await (await SELF.fetch(`${ROOT}/reviews/${sid}/history`, { headers: lan })).json<any>()
+    expect(h2.events[0]).toMatchObject({ action: 'restored', by: { name: 'Admin' }, of: 'Sơn', note: good.at })
+    // Lan's version is still there: the restore can be undone
+    expect(h2.events.find((e: any) => e.action === 'checkin' && e.by.name === 'Lan').version).not.toBeNull()
+  })
+
+  it('prunes old versions: the latest check-ins and saves stay', async () => {
+    const son = await key('Sơn', ['read'])
+    const sid = 's_review6'
+    await post(son, `/reviews/${sid}/checkout`)
+    for (let i = 0; i < 8; i++) await put(son, sid, bytes(10, i))
+    const h = await (await SELF.fetch(`${ROOT}/reviews/${sid}/history`, { headers: son })).json<any>()
+    const saves = h.events.filter((e: any) => e.action === 'save')
+    expect(saves.length).toBe(8)
+    expect(saves.filter((e: any) => e.version).length).toBe(6)   // the current one and the 5 before it
+    const objs = await env.BUCKET.list({ prefix: `reviews/${sid}/` })
+    expect(objs.objects.length).toBe(6)
+  })
 })

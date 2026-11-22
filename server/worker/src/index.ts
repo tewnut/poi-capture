@@ -43,6 +43,8 @@ export interface Env {
 
 const REVIEW_LOCK_MS = 24 * 3600 * 1000         // a checkout with no save for this long is free again
 const MAX_REVIEW = 100 * 1024 * 1024             // a review package (review.json + the reviewer's photos), bytes
+const KEEP_CHECKINS = 10                          // review versions kept per session: the latest check-ins ...
+const KEEP_SAVES = 5                              // ... and the latest plain saves (autosaves), besides the current one
 const DIRECT_PART = 8 * 1024 * 1024             // direct uploads: every part this size except the last (R2: >= 5 MiB, equal)
 const DIRECT_URL_S = 6 * 3600                   // a presigned part URL is valid this long; the client asks again after
 
@@ -123,19 +125,39 @@ function fromRow(r: Row): UploadState {
 
 const iso = (ms: unknown) => (ms ? new Date(Number(ms)).toISOString() : null)
 
-/** GET /reviews: a session's checkout (null when free or expired) and its last saved review. */
+/** How a checkout ended: checked in, given up, released by an admin, its key revoked, or no save for REVIEW_LOCK_MS. */
+type EndReason = 'checkin' | 'gaveup' | 'released' | 'revoked' | 'expired'
+type ReviewAction = 'checkout' | 'save' | 'checkin' | 'gaveup' | 'released' | 'revoked' | 'expired' | 'restored'
+const ADMIN_BY: By = { id: 'admin', name: 'Admin' }
+/** A version's id in the API: its R2 key's file name ("reviews/<sid>/<id>.zip"). */
+const versionId = (key: string) => key.slice(key.lastIndexOf('/') + 1).replace(/\.zip$/, '')
+
+/** GET /reviews/<sid>/history: one entry per checkout, save, check-in, give-up, release, expiry or restore. */
+export type ReviewEvent = {
+  at: string; action: ReviewAction; by: By | null; of: string | null; version: string | null
+  size: number | null; done: number | null; total: number | null; note: string | null
+}
+
+/** GET /reviews: a session's checkout (null when free or expired), its last saved review, how the last checkout ended. */
 export type ReviewInfo = {
   sessionId: string
   lock: { by: By; at: string; until: string } | null
-  saved: { by: By; at: string; size: number; done: number | null; total: number | null } | null
+  saved: { by: By; at: string; size: number; done: number | null; total: number | null; version: string | null } | null
+  ended: { of: By; by: string | null; at: string; reason: EndReason } | null
 }
 function reviewInfo(r: Row): ReviewInfo {
   const locked = !!r.lock_id && Number(r.lock_until) > Date.now()
+  const ended: ReviewInfo['ended'] = locked ? null
+    : r.lock_id ? { of: { id: String(r.lock_id), name: String(r.lock_name ?? '') }, by: null, at: iso(r.lock_until)!, reason: 'expired' }
+    : r.end_reason ? { of: { id: String(r.end_of_id ?? ''), name: String(r.end_of_name ?? '') }, by: r.end_by_name == null ? null : String(r.end_by_name),
+      at: iso(r.end_at)!, reason: String(r.end_reason) as EndReason } : null
   return {
     sessionId: String(r.session_id),
+    ended,
     lock: locked ? { by: { id: String(r.lock_id), name: String(r.lock_name ?? '') }, at: iso(r.lock_at)!, until: iso(r.lock_until)! } : null,
     saved: r.saved_at ? { by: { id: String(r.saved_id), name: String(r.saved_name ?? '') }, at: iso(r.saved_at)!, size: Number(r.size),
-      done: r.done == null ? null : Number(r.done), total: r.total == null ? null : Number(r.total) } : null,
+      done: r.done == null ? null : Number(r.done), total: r.total == null ? null : Number(r.total),
+      version: r.saved_key ? versionId(String(r.saved_key)) : null } : null,
   }
 }
 const strOrNull = (v: unknown) => (v == null ? null : String(v))
@@ -180,6 +202,15 @@ export class Uploads extends DurableObject<Env> {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS reviews (
       session_id TEXT PRIMARY KEY, lock_id TEXT, lock_name TEXT, lock_at INTEGER, lock_until INTEGER,
       saved_id TEXT, saved_name TEXT, saved_at INTEGER, size INTEGER, done INTEGER, total INTEGER)`)
+    // saved_key: the R2 object of the current review; end_*: how the last checkout ended (README "Reviews")
+    const rcols = this.sql.exec('PRAGMA table_info(reviews)').toArray().map((c) => String(c.name))
+    for (const [c, t] of [['saved_key', 'TEXT'], ['end_of_id', 'TEXT'], ['end_of_name', 'TEXT'], ['end_by_name', 'TEXT'],
+      ['end_at', 'INTEGER'], ['end_reason', 'TEXT']]) if (!rcols.includes(c)) this.sql.exec(`ALTER TABLE reviews ADD COLUMN ${c} ${t}`)
+    // what happened to a session's review; `version`: the R2 key of the package a save wrote, while it is kept
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS review_events (
+      n INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, at INTEGER NOT NULL, action TEXT NOT NULL,
+      by_id TEXT, by_name TEXT, of_name TEXT, version TEXT, size INTEGER, done INTEGER, total INTEGER, note TEXT)`)
+    this.sql.exec('CREATE INDEX IF NOT EXISTS review_events_sid ON review_events (session_id, n)')
   }
 
   // ---- reviews (README "Reviews"): a lock per session, and the last saved review's details
@@ -197,28 +228,49 @@ export class Uploads extends DurableObject<Env> {
     return r ? reviewInfo(r) : null
   }
 
+  private event(sid: string, action: ReviewAction, by: By | null, x: { of?: string | null; version?: string | null; size?: number | null;
+    done?: number | null; total?: number | null; note?: string | null; at?: number } = {}): void {
+    this.sql.exec(`INSERT INTO review_events (session_id, at, action, by_id, by_name, of_name, version, size, done, total, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, sid, x.at ?? Date.now(), action, by?.id ?? null, by?.name ?? null, x.of ?? null,
+    x.version ?? null, x.size ?? null, x.done ?? null, x.total ?? null, x.note ?? null)
+  }
+
+  /** The checkout of [r] ends: [reason], by [byName] (null: nobody, it expired), at [at]. */
+  private endLock(r: Row, reason: EndReason, byName: string | null, at = Date.now()): void {
+    this.sql.exec(`UPDATE reviews SET lock_id = NULL, lock_name = NULL, lock_at = NULL, lock_until = NULL,
+      end_of_id = ?, end_of_name = ?, end_by_name = ?, end_at = ?, end_reason = ? WHERE session_id = ?`,
+    r.lock_id, r.lock_name, byName, at, reason, r.session_id)
+  }
+
   /** Check out [sid] for [by]: free, expired, or already [by]'s (renewed) → 200; another reviewer's → 409. */
   checkout(sid: string, by: By): { status: 200 | 409; info: ReviewInfo } {
     const now = Date.now()
     const r = this.reviewRow(sid)
     if (r && r.lock_id && r.lock_id !== by.id && Number(r.lock_until) > now) return { status: 409, info: reviewInfo(r) }
+    const same = !!r && r.lock_id === by.id && Number(r.lock_until) > now
+    if (r && r.lock_id && !same) {   // an expired checkout: in the history before it is taken over
+      this.event(sid, 'expired', null, { of: String(r.lock_name ?? ''), at: Number(r.lock_until) })
+      this.endLock(r, 'expired', null, Number(r.lock_until))
+    }
     if (r) {
-      const same = r.lock_id === by.id && Number(r.lock_until) > now
       this.sql.exec('UPDATE reviews SET lock_id = ?, lock_name = ?, lock_at = ?, lock_until = ? WHERE session_id = ?',
         by.id, by.name, same ? Number(r.lock_at) : now, now + REVIEW_LOCK_MS, sid)
     } else {
       this.sql.exec('INSERT INTO reviews (session_id, lock_id, lock_name, lock_at, lock_until) VALUES (?, ?, ?, ?, ?)',
         sid, by.id, by.name, now, now + REVIEW_LOCK_MS)
     }
+    if (!same) this.event(sid, 'checkout', by)
     return { status: 200, info: reviewInfo(this.reviewRow(sid)!) }
   }
 
-  /** Give up the checkout: [by]'s own (null: an admin, anybody's). 404 none, 403 someone else's. */
-  releaseReview(sid: string, by: string | null): { status: 204 | 403 | 404 } {
+  /** End a checkout without saving: [by]'s own (gave up), or as an admin anybody's (released). 404 none, 403 not yours. */
+  releaseReview(sid: string, by: By, admin: boolean): { status: 204 | 403 | 404 } {
     const r = this.reviewRow(sid)
     if (!r || !r.lock_id || Number(r.lock_until) <= Date.now()) return { status: 404 }
-    if (by !== null && r.lock_id !== by) return { status: 403 }
-    this.sql.exec('UPDATE reviews SET lock_id = NULL, lock_name = NULL, lock_at = NULL, lock_until = NULL WHERE session_id = ?', sid)
+    const own = r.lock_id === by.id
+    if (!own && !admin) return { status: 403 }
+    this.endLock(r, own ? 'gaveup' : 'released', by.name)
+    this.event(sid, own ? 'gaveup' : 'released', by, { of: String(r.lock_name ?? '') })
     return { status: 204 }
   }
 
@@ -229,13 +281,71 @@ export class Uploads extends DurableObject<Env> {
     return { status: 200, info: reviewInfo(r) }
   }
 
-  /** The review package is in R2: record it, renew the lock, or release it on check-in. */
-  saved(sid: string, by: By, size: number, done: number | null, total: number | null, checkin: boolean): ReviewInfo {
+  /** The R2 object of [sid]'s current review (null: none saved). */
+  savedKey(sid: string): string | null {
+    const r = this.reviewRow(sid)
+    if (!r?.saved_at) return null
+    return r.saved_key ? String(r.saved_key) : `reviews/${sid}.zip`   // saved before versions existed
+  }
+
+  /**
+   * The review package is in R2 at [key]: record it, renew the lock, or end it on check-in. Returns the R2 objects of
+   * versions no longer kept, for the caller to delete: the current one, the latest KEEP_CHECKINS check-ins and the
+   * latest KEEP_SAVES saves stay.
+   */
+  saved(sid: string, by: By, key: string, size: number, done: number | null, total: number | null, checkin: boolean): { info: ReviewInfo; drop: string[] } {
     const now = Date.now()
-    this.sql.exec(`UPDATE reviews SET saved_id = ?, saved_name = ?, saved_at = ?, size = ?, done = ?, total = ?,
-      lock_until = ? WHERE session_id = ?`, by.id, by.name, now, size, done, total, now + REVIEW_LOCK_MS, sid)
-    if (checkin) this.sql.exec('UPDATE reviews SET lock_id = NULL, lock_name = NULL, lock_at = NULL, lock_until = NULL WHERE session_id = ?', sid)
-    return reviewInfo(this.reviewRow(sid)!)
+    this.sql.exec(`UPDATE reviews SET saved_id = ?, saved_name = ?, saved_at = ?, saved_key = ?, size = ?, done = ?, total = ?,
+      lock_until = ? WHERE session_id = ?`, by.id, by.name, now, key, size, done, total, now + REVIEW_LOCK_MS, sid)
+    this.event(sid, checkin ? 'checkin' : 'save', by, { version: key, size, done, total })
+    if (checkin) this.endLock(this.reviewRow(sid)!, 'checkin', by.name)
+    const kept = this.sql.exec('SELECT n, action, version FROM review_events WHERE session_id = ? AND version IS NOT NULL ORDER BY n DESC', sid).toArray()
+    const drop: string[] = []
+    let ci = 0, sv = 0
+    for (const e of kept) {
+      const v = String(e.version)
+      const keep = v === key || (e.action === 'checkin' ? ci++ < KEEP_CHECKINS : sv++ < KEEP_SAVES)
+      if (!keep) { drop.push(v); this.sql.exec('UPDATE review_events SET version = NULL WHERE n = ?', e.n) }
+    }
+    // the row's current review is never dropped (after a restore it may be an older version)
+    const cur = this.reviewRow(sid)!.saved_key
+    return { info: reviewInfo(this.reviewRow(sid)!), drop: drop.filter((d) => d !== cur) }
+  }
+
+  /** What happened to [sid]'s review, newest first; saves still kept carry their version id (restorable). */
+  history(sid: string): ReviewEvent[] {
+    return this.sql.exec('SELECT * FROM review_events WHERE session_id = ? ORDER BY n DESC LIMIT 200', sid).toArray().map((e) => ({
+      at: iso(e.at)!, action: String(e.action) as ReviewAction,
+      by: e.by_id ? { id: String(e.by_id), name: String(e.by_name ?? '') } : null, of: e.of_name == null ? null : String(e.of_name),
+      version: e.version ? versionId(String(e.version)) : null, size: e.size == null ? null : Number(e.size),
+      done: e.done == null ? null : Number(e.done), total: e.total == null ? null : Number(e.total), note: e.note == null ? null : String(e.note),
+    }))
+  }
+
+  /**
+   * An admin makes an earlier version the current review (undoes a check-in). Nothing is deleted, so it can be undone in
+   * turn. 409 while checked out, 404 no such version. Browsers load it as a new save (saved_at = now, by the admin).
+   */
+  restore(sid: string, version: string, by: By): { status: 200 | 404 | 409; info?: ReviewInfo } {
+    const r = this.reviewRow(sid)
+    if (!r) return { status: 404 }
+    if (r.lock_id && Number(r.lock_until) > Date.now()) return { status: 409, info: reviewInfo(r) }
+    const key = `reviews/${sid}/${version}.zip`
+    const e = this.sql.exec('SELECT * FROM review_events WHERE session_id = ? AND version = ? ORDER BY n DESC LIMIT 1', sid, key).toArray()[0]
+    if (!e) return { status: 404 }
+    const num = (v: unknown) => (v == null ? null : Number(v))
+    this.sql.exec(`UPDATE reviews SET saved_id = ?, saved_name = ?, saved_at = ?, saved_key = ?, size = ?, done = ?, total = ?
+      WHERE session_id = ?`, by.id, by.name, Date.now(), key, e.size, e.done, e.total, sid)
+    this.event(sid, 'restored', by, { of: String(e.by_name ?? ''), size: num(e.size), done: num(e.done), total: num(e.total), note: iso(e.at) })
+    return { status: 200, info: reviewInfo(this.reviewRow(sid)!) }
+  }
+
+  /** A revoked key's checkouts end at once (it cannot save any more anyway). */
+  private releaseHeldBy(id: string): void {
+    for (const r of this.sql.exec('SELECT * FROM reviews WHERE lock_id = ? AND lock_until > ?', id, Date.now()).toArray()) {
+      this.endLock(r, 'revoked', ADMIN_BY.name)
+      this.event(String(r.session_id), 'revoked', ADMIN_BY, { of: String(r.lock_name ?? '') })
+    }
   }
 
   // ---- last seen (one row per token id, overwritten)
@@ -301,6 +411,7 @@ export class Uploads extends DurableObject<Env> {
   revokeToken(id: string): boolean {
     if (!this.sql.exec('SELECT 1 FROM tokens WHERE id = ?', id).toArray().length) return false
     this.sql.exec('UPDATE tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?', Date.now(), id)
+    this.releaseHeldBy(id)
     return true
   }
 
@@ -860,7 +971,6 @@ async function direct(env: Env, req: Request, base: string, rest: string, p: Pri
 
 // ------------------------------------------------------------------------------------------------ reviews
 
-const reviewKey = (sid: string) => `reviews/${sid}.zip`
 const intHeader = (v: string | null) => (v != null && /^\d{1,7}$/.test(v) ? Number(v) : null)
 
 /**
@@ -874,17 +984,34 @@ async function reviews(env: Env, req: Request, rest: string, p: Principal): Prom
     if (req.method !== 'GET') return text(405, 'Method not allowed\n')
     return json(200, { schema: 'poi-cloud-reviews/1', reviews: await stub(env).reviewList() })
   }
-  const m = /^([A-Za-z0-9_-]{1,64})(\/checkout)?$/.exec(rest)
+  const m = /^([A-Za-z0-9_-]{1,64})(?:\/(checkout|history|restore))?$/.exec(rest)
   if (!m) return text(404, 'Not found\n')
-  const [, sid, co] = m
-  if (co) {
+  const [, sid, sub] = m
+  if (sub === 'history') {
+    if (req.method !== 'GET') return text(405, 'Method not allowed\n')
+    return json(200, { schema: 'poi-cloud-review-history/1', sessionId: sid, events: await stub(env).history(sid) })
+  }
+  if (sub === 'restore') {
+    if (req.method !== 'POST') return text(405, 'Method not allowed\n')
+    if (!p.admin) return text(403, 'Only an admin can restore a version\n')
+    let body: { version?: unknown }
+    try { body = await req.json() } catch { return text(400, 'JSON body required\n') }
+    const v = typeof body?.version === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(body.version) ? body.version : null
+    if (!v) return text(400, 'version required\n')
+    const r = await stub(env).restore(sid, v, by)
+    if (r.status === 404) return text(404, 'No such version\n')
+    if (r.status === 409) return json(409, { schema: 'poi-cloud-review/1', error: `checked out by ${r.info?.lock?.by.name}`, ...r.info })
+    console.log(`review ${sid} restored to ${v} by ${p.id}`)
+    return json(200, { schema: 'poi-cloud-review/1', ...r.info })
+  }
+  if (sub === 'checkout') {
     if (req.method === 'POST') {
       const r = await stub(env).checkout(sid, by)
       if (r.status === 409) return json(409, { schema: 'poi-cloud-review/1', error: `checked out by ${r.info.lock?.by.name}`, ...r.info })
       return json(200, { schema: 'poi-cloud-review/1', ...r.info })
     }
     if (req.method === 'DELETE') {
-      const r = await stub(env).releaseReview(sid, p.admin ? null : p.id)
+      const r = await stub(env).releaseReview(sid, by, p.admin)
       if (r.status === 403) return text(403, 'Checked out by someone else\n')
       if (r.status === 404) return text(404, 'Not checked out\n')
       return new Response(null, { status: 204 })
@@ -892,7 +1019,8 @@ async function reviews(env: Env, req: Request, rest: string, p: Principal): Prom
     return text(405, 'Method not allowed\n')
   }
   if (req.method === 'GET') {
-    const o = await env.BUCKET.get(reviewKey(sid))
+    const key = await stub(env).savedKey(sid)
+    const o = key ? await env.BUCKET.get(key) : null
     if (!o) return text(404, 'No review saved\n')
     return new Response(o.body, { headers: { 'Content-Type': 'application/zip', 'Content-Length': String(o.size), 'Cache-Control': 'no-store' } })
   }
@@ -906,9 +1034,12 @@ async function reviews(env: Env, req: Request, rest: string, p: Principal): Prom
     if (!Number.isFinite(len) || len < 1) return text(411, 'Content-Length required\n')
     if (len > MAX_REVIEW) return text(413, 'Review too large\n')
     if (!req.body) return text(400, 'Body required\n')
-    await env.BUCKET.put(reviewKey(sid), req.body, { httpMetadata: { contentType: 'application/zip' }, customMetadata: { by: p.id } })
+    // every save is a new object (a version); the row points at the current one, older ones are pruned
+    const key = `reviews/${sid}/${Date.now().toString(36)}-${crypto.randomUUID().slice(0, 8)}.zip`
+    await env.BUCKET.put(key, req.body, { httpMetadata: { contentType: 'application/zip' }, customMetadata: { by: p.id } })
     const checkin = new URL(req.url).searchParams.get('checkin') === '1'
-    const info = await stub(env).saved(sid, by, len, intHeader(req.headers.get('X-Review-Done')), intHeader(req.headers.get('X-Review-Total')), checkin)
+    const { info, drop } = await stub(env).saved(sid, by, key, len, intHeader(req.headers.get('X-Review-Done')), intHeader(req.headers.get('X-Review-Total')), checkin)
+    if (drop.length) await env.BUCKET.delete(drop)
     console.log(`review ${sid} saved by ${p.id}${checkin ? ', checked in' : ''}`)
     return json(200, { schema: 'poi-cloud-review/1', ...info })
   }
