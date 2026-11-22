@@ -25,18 +25,6 @@ with the latest GPS fix (up to ~1 s old, ~6 m at 25 km/h), so prepare.py places 
 `track.jsonl` (the phone's elapsed-time clock, which both carry; `positionFrom` and `fixLat`/`fixLon` in photos.json). `kind` must be `sweep`; for `poi` (Place capture) the places are
 already grouped: say so and stop unless the user wants the enrichment only.
 
-## 1b. Split a long ride (one part per street)
-
-```
-python <skill>/scripts/split.py <work> [--gap-min 3] [--min-photos 12]
-```
-
-Cuts the ride where it turns onto another street (the new street must hold for 12 photos; a photo or two snapped to
-a side street does not count) and at stops longer than 3 minutes. "no split": go on with `<work>`. Otherwise do
-steps 2–5 for **each** `<work>/parts/<k>/` as its own work folder (its own places.json, `<out>` and push): each part
-is a session of its own (`<ride id>-<k>`, named "<street> <date time>", `parentId` = the ride), so reviewers can
-check out different streets of one ride. The reviewer's list shows the parts and stops showing the ride as waiting.
-
 ## 2. Read the contact sheets
 
 Read every `<work>/sheets/sheet_NNN.jpg` (4 photos each, labelled `#idx`, in riding order). Do not skip sheets; a

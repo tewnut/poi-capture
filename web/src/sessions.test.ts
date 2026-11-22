@@ -28,13 +28,6 @@ describe('session rows', () => {
     expect(r[0].raw).toBe(raw)
   })
 
-  it('a ride processed in parts: one row per part, the raw ride no longer waiting', () => {
-    const raw = item({ type: 'raw-session', sessionId: 'ride', name: 'Ride' })
-    const p1 = item({ sessionId: 'ride-1', parentId: 'ride', name: 'Ngô Tất Tố 2026-11-19 14h32' })
-    const p2 = item({ sessionId: 'ride-2', parentId: 'ride', name: 'Trường Sa 2026-11-19 14h51' })
-    expect(rows([p1, p2, raw], []).map((x) => [x.sessionId, x.state])).toEqual([['ride-1', 'remote'], ['ride-2', 'remote']])
-  })
-
   it('a raw ride alone is waiting for the agent; unfinished uploads are left out', () => {
     const r = rows([item({ type: 'raw-session', sessionId: 's2', name: 'Ride 2' }), item({ sessionId: 's3', complete: false })], [])
     expect(r.map((x) => [x.sessionId, x.state])).toEqual([['s2', 'waiting']])

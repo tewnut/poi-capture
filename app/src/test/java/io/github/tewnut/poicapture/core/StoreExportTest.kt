@@ -132,3 +132,42 @@ class StoreExportTest {
         assertEquals("poi-capture_auto_right_202611080301.zip", Exporter.fileName(session(road = Road.auto())))
     }
 }
+
+class SessionSplitTest {
+    @get:Rule val tmp = TemporaryFolder()
+
+    @Test fun aRideOverTwoStreetsBecomesTwoSessionsWithTheirOwnPhotosAndLogs() {
+        val store = SessionStore(tmp.newFolder("sessions"))
+        val s = Session(id = "s_ride", createdAt = "2026-11-19T02:29:00Z", startedAt = "2026-11-19T02:29:00Z",
+            contributor = "tester", note = "", vehicle = Vehicle.UNSPECIFIED, mode = Mode.PHOTO_AUTO,
+            sideOfTravel = Side.RIGHT, road = Road.of(WAY, listOf(WAY)), settings = Settings(), name = "Trường Sa 2026-11-19 09h29")
+        store.create(s)
+        val t0 = java.time.Instant.parse("2026-11-19T02:29:00Z").toEpochMilli()   // 2026-11-19T02:29:00Z
+        for (i in 0 until 40) {
+            val t = t0 + i * 2000L
+            store.appendItem("s_ride", JSONObject().put("id", "p_$i").put("kind", "photo").put("tMs", t).put("t", iso(t))
+                .put("elapsedNanos", 5_000_000_000L + i * 2_000_000_000L).put("roadName", if (i < 15) "Nguyễn Văn Thủ" else "Trường Sa"))
+            store.photoFile("s_ride", "p_$i").writeText("jpeg $i")
+            store.trackFile("s_ride").appendText(JSONObject().put("t", t).put("lat", 10.0).put("lon", 106.0).toString() + "\n")
+        }
+        store.imuFile("s_ride").writeText("sensor,elapsedNanos,x,y,z,w\nacc,6000000000,0,0,0,\nacc,75000000000,0,0,0,\n")
+
+        val ids = SessionSplit.split(store, "s_ride", "No street", java.time.ZoneId.of("Asia/Ho_Chi_Minh"))
+
+        assertEquals(listOf("s_ride-1", "s_ride-2"), ids)
+        assertFalse(store.dir("s_ride").exists())
+        val a = store.load("s_ride-1")!!
+        val b = store.load("s_ride-2")!!
+        assertEquals("Nguyễn Văn Thủ 2026-11-19 09h29", a.name)
+        assertEquals("Trường Sa 2026-11-19 09h29", b.name)
+        assertEquals("s_ride", b.parentId); assertEquals(2, b.part); assertEquals(2, b.parts)
+        assertEquals(15, store.items("s_ride-1").size)
+        assertEquals(25, store.items("s_ride-2").size)
+        assertEquals("jpeg 20", store.photoFile("s_ride-2", "p_20").readText())
+        assertEquals(15, store.trackCount("s_ride-1"))
+        assertEquals(25, store.trackCount("s_ride-2"))
+        assertEquals(listOf("sensor,elapsedNanos,x,y,z,w", "acc,6000000000,0,0,0,"), store.imuFile("s_ride-1").readLines())
+        assertEquals(listOf("sensor,elapsedNanos,x,y,z,w", "acc,75000000000,0,0,0,"), store.imuFile("s_ride-2").readLines())
+        assertTrue(SessionSplit.split(store, "s_ride-2", "No street").isEmpty())   // a part is not cut again
+    }
+}

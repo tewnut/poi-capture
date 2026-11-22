@@ -28,11 +28,8 @@ export function rows(items: CloudItem[] | null, datasets: Dataset[]): Row[] {
     out.set(id, { key: id, sessionId: id, name: i.name || id, date: i.trip?.startedAt || i.createdAt, kind: i.kind, item: i, raw: null,
       state: s === 'imported' ? 'here' : s === 'updated' ? 'updated' : 'remote' })
   }
-  // a ride processed in parts (one per street, split.py): its parts are the rows; the raw ride is not waiting any more
-  const split = new Set(done.filter((x) => x.type === PROCESSED && x.parentId).map((x) => x.parentId!))
   for (const i of done.filter((x) => x.type === 'raw-session')) {
     const id = i.sessionId || i.id
-    if (split.has(id)) continue
     const r = out.get(id)
     if (r) { r.raw = r.raw || i; continue }
     out.set(id, { key: id, sessionId: id, name: i.name || id, date: i.trip?.startedAt || i.createdAt, kind: i.kind, item: null, raw: i, state: 'waiting' })

@@ -32,6 +32,8 @@ from paths import arg_path  # noqa: E402
 import zipfile
 from datetime import datetime, timezone
 
+sys.stdout.reconfigure(encoding="utf-8")
+
 TUS = '1.0.0'
 CHUNK = 8 * 1024 * 1024
 
@@ -171,7 +173,7 @@ def read_session(zip_path: str) -> dict:
                 base = n.rsplit('/', 1)[-1]
                 if base in ('result.json', 'manifest.json'):
                     s = json.loads(z.read(n)).get('session') or {}
-                    return {'sessionId': s.get('id'), 'name': s.get('name'), 'kind': s.get('kind'), 'parentId': s.get('parentId')}
+                    return {'sessionId': s.get('id'), 'name': s.get('name'), 'kind': s.get('kind')}
     except (zipfile.BadZipFile, ValueError, KeyError):
         pass
     return {}
@@ -192,8 +194,6 @@ def push(cloud: Cloud, path: str, type_: str, session_id: str | None, name: str 
         meta = {'filename': filename, 'filetype': 'application/zip', 'type': type_,
                 'sessionId': session_id or info.get('sessionId'), 'name': name or info.get('name'),
                 'kind': info.get('kind'), 'createdAt': datetime.now(timezone.utc).isoformat(timespec='seconds')}
-        if info.get('parentId'):   # a part of a split ride (split.py): the reviewer's list counts the ride as processed
-            meta['parentId'] = info['parentId']
         url, offset = None, 0
         if os.path.exists(state_file):
             st = json.load(open(state_file, encoding='utf-8'))

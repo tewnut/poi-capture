@@ -106,6 +106,10 @@ class Session(
     var photoRoles: PhotoRoles? = null,  // POI mode: the photo kinds offered (config at the start of the session)
     var name: String? = null,        // "{street} {stamp}" ("Ngô Tất Tố 2026-11-19 14h32"), given when the session is saved
     val holding: Holding = Holding.MOUNT,   // street sweep: on a mount or in a passenger's hand ("mount" before 0.15)
+    // a part of a longer ride, cut per street when it was uploaded (SessionSplit): the ride's id, this part, of how many
+    val parentId: String? = null,
+    val part: Int? = null,
+    val parts: Int? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("schema", SCHEMA).put("kind", kind.json).put("createdAt", createdAt)
@@ -131,6 +135,7 @@ class Session(
         .put("plan", plan.orNull())
         .put("mount", mount.orNull())
         .put("photoRoles", photoRoles?.toJson()?.getJSONArray("photoRoles").orNull())
+        .also { o -> if (parentId != null) o.put("parentId", parentId).put("part", part.orNull()).put("parts", parts.orNull()) }
 
     companion object {
         fun fromJson(o: JSONObject): Session = Session(
@@ -159,6 +164,9 @@ class Session(
             email = o.optString("email"),
             photoRoles = PhotoRoles.fromJson(o.optJSONArray("photoRoles"), "session"),
             holding = Holding.of(o.optStr("holding")),
+            parentId = o.optStr("parentId"),
+            part = o.optInt("part", 0).takeIf { it > 0 },
+            parts = o.optInt("parts", 0).takeIf { it > 0 },
         )
     }
 }

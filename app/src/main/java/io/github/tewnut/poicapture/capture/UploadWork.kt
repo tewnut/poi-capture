@@ -16,6 +16,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import io.github.tewnut.poicapture.core.Exporter
 import io.github.tewnut.poicapture.core.SessionNaming
+import io.github.tewnut.poicapture.core.SessionSplit
 import io.github.tewnut.poicapture.core.TrackStats
 import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.core.Tus
@@ -150,7 +151,7 @@ object Uploads {
         save(ctx, r.copy(status = UploadStatus.QUEUED, error = null))
         val anyNetwork = manual || !UploadServer.wifiOnly(ctx)
         val req = OneTimeWorkRequestBuilder<UploadWorker>()
-            .setInputData(workDataOf("sessionId" to sessionId))
+            .setInputData(workDataOf("sessionId" to sessionId, "manual" to manual))
             .setConstraints(Constraints.Builder()
                 .setRequiredNetworkType(if (anyNetwork) NetworkType.CONNECTED else NetworkType.UNMETERED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
@@ -170,6 +171,16 @@ object Uploads {
     /** The session is deleted: stop its upload and forget it (what is on the server stays). */
     fun forget(ctx: Context, sessionId: String) {
         WorkManager.getInstance(ctx).cancelUniqueWork(name(sessionId))
+        zipFile(ctx, sessionId).delete()
+        sp(ctx).edit().remove(sessionId).apply()
+        changed.value++
+    }
+
+    /**
+     * The session was cut into parts ([SessionSplit]) by its own upload work: its record goes (the parts have theirs);
+     * its work is not cancelled, it is the one running.
+     */
+    fun dropRecord(ctx: Context, sessionId: String) {
         zipFile(ctx, sessionId).delete()
         sp(ctx).edit().remove(sessionId).apply()
         changed.value++
@@ -197,6 +208,19 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         val store = CaptureService.store(ctx)
         val session = store.load(sid) ?: run { Uploads.forget(ctx, sid); return@withContext Result.failure() }
         var rec = Uploads.record(ctx, sid)
+        // a ride over several streets is cut into one session per street before anything is sent (not once an
+        // upload of it has started: that one goes on as it is); each part is then uploaded on its own
+        if (rec.direct == null && rec.url == null && !Uploads.zipFile(ctx, sid).exists() && SessionSplit.splittable(session)) {
+            val parts = runCatching { SessionSplit.split(store, sid, ctx.getString(R.string.session_no_street)) }
+                .getOrElse { e -> android.util.Log.w("UploadWorker", "split failed, uploading whole", e); emptyList() }
+            if (parts.isNotEmpty()) {
+                Uploads.dropRecord(ctx, sid)
+                val manual = inputData.getBoolean("manual", false)
+                for (p in parts) Uploads.enqueue(ctx, p, manual)
+                Uploads.finished.value++
+                return@withContext Result.success()
+            }
+        }
         val lock = Any()
         // parts upload concurrently: every change to the record goes through here
         fun update(f: (UploadRecord) -> UploadRecord) = synchronized(lock) { rec = f(rec); Uploads.save(ctx, rec) }

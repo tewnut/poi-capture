@@ -13,7 +13,6 @@ import enrich_web  # noqa: E402
 import paths  # noqa: E402
 import prepare  # noqa: E402
 import result  # noqa: E402
-import split  # noqa: E402
 
 
 def read(path, as_json=True):
@@ -24,39 +23,6 @@ def read(path, as_json=True):
 def write(path, data):
     with open(path, 'w', encoding='utf-8') as f:
         f.write(data if isinstance(data, str) else json.dumps(data, ensure_ascii=False))
-
-
-class Splitting(unittest.TestCase):
-    """split.py: a part per street, and at long stops; short runs and short parts join a neighbour."""
-
-    @staticmethod
-    def ride(spec):
-        """[(road, seconds since start)] -> photos"""
-        return [{'idx': i, 'roadName': r, 't': f"2026-11-19T07:{s // 60:02d}:{s % 60:02d}Z"} for i, (r, s) in enumerate(spec)]
-
-    def test_one_street_is_one_part(self):
-        self.assertEqual(split.split(self.ride([('A', i * 2) for i in range(40)])), [(0, 39)])
-
-    def test_street_change_and_flicker(self):
-        spec = [('A', i * 2) for i in range(20)] + [('X', 40), ('X', 41)] +                [('A', 42 + i) for i in range(5)] + [('B', 60 + i * 2) for i in range(20)]
-        # two photos snapped to side street X are not a part; A goes on, then B
-        self.assertEqual(split.split(self.ride(spec)), [(0, 26), (27, 46)])
-
-    def test_unnamed_photos_take_the_street_around_them(self):
-        spec = [('A', i) for i in range(15)] + [('Unnamed road (service)', 15 + i) for i in range(6)] + [(None, 21 + i) for i in range(3)] +                [('A', 30 + i) for i in range(15)]
-        self.assertEqual(split.split(self.ride(spec)), [(0, 38)])
-
-    def test_long_stop_cuts_the_same_street(self):
-        spec = [('A', i * 2) for i in range(15)] + [('A', 600 + i * 2) for i in range(15)]   # 9 minutes apart
-        self.assertEqual(split.split(self.ride(spec)), [(0, 14), (15, 29)])
-        self.assertEqual(split.split(self.ride(spec), gap_min=10), [(0, 29)])
-
-    def test_a_short_part_joins_the_one_before(self):
-        spec = [('A', i * 2) for i in range(15)] + [('A', 600 + i) for i in range(4)]
-        self.assertEqual(split.split(self.ride(spec)), [(0, 18)])
-
-    def test_parts_named_like_the_phone(self):
-        self.assertRegex(split.stamp('2026-11-19T07:32:00Z'), r'^2026-11-19 \d\dh32$')
 
 
 class AddressParsing(unittest.TestCase):
