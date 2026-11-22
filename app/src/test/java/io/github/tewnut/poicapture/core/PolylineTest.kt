@@ -70,9 +70,9 @@ class PolylineTest {
             val d = m["distanceM"]!!.toLong()
             assertTrue("distance $d", d in 260..285)        // 49 × ~5.5 m
             assertEquals(Polyline.encode(listOf(LatLon(10.0, 106.0), LatLon(10.0 + 49 * 5e-5, 106.0))), m["track"])
-            // nothing private, and it encodes as tus metadata
+            // nothing private, and it goes in the direct upload's JSON
             assertFalse(m.values.any { it?.contains("lan") == true })
-            Tus.encodeMetadata(m)
+            DirectUpload.createBody(10, m)
 
             f.writeText("""{"t":1000,"lat":10.0,"lon":106.0,"acc":5}""")
             assertNull(sessionUploadMetadata(session(), "x.zip", 0, f)["track"])

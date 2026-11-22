@@ -8,11 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Place
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Arrangement
@@ -40,7 +37,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -75,6 +71,12 @@ import io.github.tewnut.poicapture.core.SessionKind
 import io.github.tewnut.poicapture.core.Side
 import io.github.tewnut.poicapture.core.TrackStats
 import io.github.tewnut.poicapture.core.iso
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.work.NetworkType
+import androidx.work.WorkInfo
+import io.github.tewnut.poicapture.capture.Uploads
+import io.github.tewnut.poicapture.core.UploadRecord
+import io.github.tewnut.poicapture.core.UploadStatus
 import java.io.File
 import org.json.JSONObject
 import java.time.Instant
@@ -97,6 +99,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
     var busy by remember { mutableStateOf<String?>(null) }
     var confirmDel by remember { mutableStateOf<Session?>(null) }
     var saving by remember { mutableStateOf<Session?>(null) }
+    var setupFor by remember { mutableStateOf<Session?>(null) }   // Send to server tapped with no access key yet
     var reload by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(reload, active) {
@@ -169,6 +172,13 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
     // an upload finishing marks the session sent: read the list again
     val uploadFinished by io.github.tewnut.poicapture.capture.Uploads.finished.collectAsState()
     LaunchedEffect(uploadFinished) { if (uploadFinished > 0) reload++ }
+    val removed by io.github.tewnut.poicapture.capture.Uploads.removed.collectAsState()
+    LaunchedEffect(removed) {
+        if (removed.isNotEmpty()) {
+            msgError = false
+            msg = ctx.resources.getQuantityString(R.plurals.sessions_removed_after_upload, removed.size, removed.size, mb(removed.sumOf { it.second }))
+        }
+    }
     val list = rows
     Box(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
     Column(Modifier.fillMaxSize()) {
@@ -183,27 +193,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
     // room at the bottom so the floating "New session" button never hides the last card
     LazyColumn(Modifier.weight(1f).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 104.dp)) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (list != null) {
-                    val unsent = list.filter { it.s.exportedAt == null && it.photos + it.videos > 0 && active != it.s.id }
-                    val free = stringResource(R.string.sessions_local_only, mb(store.root.apply { mkdirs() }.usableSpace))
-                    if (unsent.isEmpty()) Hint(stringResource(R.string.sessions_none_unsent) + " " + free)
-                    else Row(Modifier.fillMaxWidth().background(Palette.AmberLight, RoundedCornerShape(16.dp)).padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Box(Modifier.size(36.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) {
-                            Icon(Icons.AutoMirrored.Filled.Send, null, Modifier.size(18.dp), tint = Palette.Amber)
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text(ctx.plural(R.plurals.sessions_unsent, unsent.size, unsent.size, km(unsent.sumOf { it.stats.distanceM }), mb(unsent.sumOf { it.bytes })),
-                                color = Palette.Amber, fontWeight = FontWeight.SemiBold)
-                            Text(free, fontSize = 13.sp, color = Palette.Amber.copy(alpha = 0.8f))
-                        }
-                    }
-                }
-                if (msg.isNotEmpty()) Hint(msg, color = if (msgError) Palette.Red else Palette.Green)
-            }
-        }
+        if (msg.isNotEmpty()) item { Hint(msg, color = if (msgError) Palette.Red else Palette.Green) }
         if (list == null) item {
             Row(Modifier.padding(vertical = 24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -212,7 +202,8 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
         }
         items(list ?: emptyList(), key = { it.s.id }) { r ->
             SessionCard(r, active == r.s.id, busy == r.s.id, uploads,
-                onSend = { send(r.s) },
+                onSend = { if (uploads) io.github.tewnut.poicapture.capture.Uploads.enqueue(ctx, r.s.id, manual = true) else setupFor = r.s },
+                onShare = { send(r.s) },
                 onMap = { onOpenMap(r.s.id, r.title) },
                 onSave = { saving = r.s; saveLauncher.launch(Exporter.fileName(r.s)) },
                 onDelete = { confirmDel = r.s })
@@ -224,6 +215,16 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
         containerColor = Palette.Green, contentColor = Color.White, shape = RoundedCornerShape(50),
         icon = { Icon(Icons.Filled.Add, null) },
         text = { Text(stringResource(R.string.home_new_session), fontSize = 18.sp, fontWeight = FontWeight.Bold) })
+    }
+
+    setupFor?.let { s ->
+        AlertDialog(
+            onDismissRequest = { setupFor = null },
+            title = { Text(stringResource(R.string.sessions_setup_title)) },
+            text = { Text(stringResource(R.string.sessions_setup_text)) },
+            confirmButton = { TextButton(onClick = { setupFor = null; onOpenSettings() }) { Text(stringResource(R.string.sessions_setup_open)) } },
+            dismissButton = { TextButton(onClick = { setupFor = null; send(s) }) { Text(stringResource(R.string.sessions_share_file)) } },
+        )
     }
 
     confirmDel?.let { s ->
@@ -252,18 +253,22 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
 
 /**
  * One session: its own photos on top (Place capture: one per place, with the name; street sweep: a strip from along the
- * ride), then the name, what was recorded and the actions. Tapping the photos opens the map.
+ * ride), then the name, what was recorded (with its size) and one send control. Tapping the card opens the map; share
+ * as a file, save the zip and delete are in the ⋮ menu.
  */
 @Composable
 private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, uploads: Boolean,
-                        onSend: () -> Unit, onMap: () -> Unit, onSave: () -> Unit, onDelete: () -> Unit) {
+                        onSend: () -> Unit, onShare: () -> Unit, onMap: () -> Unit, onSave: () -> Unit, onDelete: () -> Unit) {
     val ctx = LocalContext.current
     val s = r.s
     val empty = r.photos + r.videos == 0
+    val up = rememberUpload(s.id, uploads)
     var menu by remember { mutableStateOf(false) }
-    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White),
+    val open = r.photos > 0 && !recording
+    Card(onClick = onMap, enabled = open, shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = Color.White, disabledContainerColor = Color.White),
         border = BorderStroke(1.dp, Palette.Line), elevation = CardDefaults.cardElevation(0.dp)) {
-        Hero(r, recording, empty, onClick = if (r.photos > 0 && !recording) onMap else null)
+        Hero(r, recording, empty, up)
         Column(Modifier.padding(start = 16.dp, top = 10.dp, bottom = 14.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(r.title, fontWeight = FontWeight.Bold, fontSize = 18.sp, letterSpacing = (-0.2).sp, color = Palette.Ink, maxLines = 2,
@@ -273,17 +278,19 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                         Icon(Icons.Filled.MoreVert, stringResource(R.string.sessions_more), tint = Palette.Muted)
                     }
                     DropdownMenu(menu, { menu = false }) {
+                        if (!empty) DropdownMenuItem({ Text(stringResource(R.string.sessions_share_file)) }, { menu = false; onShare() })
                         if (!empty) DropdownMenuItem({ Text(stringResource(R.string.sessions_save_zip)) }, { menu = false; onSave() })
                         DropdownMenuItem({ Text(stringResource(R.string.sessions_delete_session), color = Palette.Red) }, { menu = false; onDelete() })
                     }
                 }
             }
-            // what was recorded, the numbers that matter first
+            // what was recorded, the numbers that matter first, and how much there is to send
             Text(listOfNotNull(
                 if (s.kind == SessionKind.POI) ctx.plural(R.plurals.sessions_places, r.pois) else null,
                 if (s.mode == Mode.VIDEO) ctx.plural(R.plurals.sessions_videos, r.videos) else ctx.plural(R.plurals.sessions_photos, r.photos),
                 km(r.stats.distanceM).takeIf { r.stats.distanceM > 0 },
                 if (r.marks > 0) ctx.plural(R.plurals.sessions_marks, r.marks) else null,
+                mb(r.bytes).takeIf { !empty },
             ).joinToString("  ·  "), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink.copy(alpha = 0.8f))
             Hint(listOfNotNull(
                 fmt(s.startedAt ?: s.createdAt),
@@ -295,23 +302,61 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                 if (r.relocated > 0) ctx.plural(R.plurals.sessions_relocated, r.relocated) else null,
             ).joinToString(" · "))
             if (s.endedAt == null && !recording) Hint(ctx.getString(R.string.sessions_interrupted), color = Palette.Amber)
-            if (uploads && !empty && !recording) UploadLine(s.id)
-            if (!empty && !recording) {
-                Row(Modifier.padding(top = 8.dp, end = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val sendText = stringResource(if (busy) R.string.sessions_packing else if (s.exportedAt == null) R.string.sessions_send else R.string.sessions_send_again)
-                    if (s.exportedAt == null) {
-                        Button(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f).height(44.dp)) { SendLabel(sendText) }
-                    } else {
-                        OutlinedButton(onClick = onSend, enabled = !busy, modifier = Modifier.weight(1f).height(44.dp)) { SendLabel(sendText) }
-                    }
-                    if (r.photos > 0) FilledTonalButton(onClick = onMap, modifier = Modifier.weight(1f).height(44.dp)) {
-                        Icon(Icons.Filled.Place, null, Modifier.size(18.dp))
-                        Box(Modifier.size(8.dp))
-                        Text(stringResource(R.string.sessions_map), maxLines = 1)
-                    }
-                }
-            }
+            if (!empty && !recording) Box(Modifier.padding(top = 8.dp, end = 12.dp)) { SendControl(up, busy, onSend) }
         }
+    }
+}
+
+/** Where a session's upload is: the record kept across restarts, and the background work if any. */
+private data class UploadState(val rec: UploadRecord, val running: Boolean, val queued: Boolean, val wifiWait: Boolean,
+                               val done: Long, val total: Long) {
+    val pct get() = if (total > 0) ((done * 100) / total).toInt().coerceIn(0, 100) else 0
+    val sent get() = rec.status == UploadStatus.DONE
+}
+
+@Composable
+private fun rememberUpload(sessionId: String, uploads: Boolean): UploadState? {
+    if (!uploads) return null
+    val ctx = LocalContext.current
+    val changed by Uploads.changed.collectAsState()
+    val rec = remember(sessionId, changed) { Uploads.record(ctx, sessionId) }
+    val infos by remember(sessionId) { Uploads.flow(ctx, sessionId) }.collectAsState(initial = emptyList())
+    val work = infos.firstOrNull { !it.state.isFinished }
+    return UploadState(rec, work?.state == WorkInfo.State.RUNNING, work != null,
+        work != null && work.state != WorkInfo.State.RUNNING && work.constraints.requiredNetworkType == NetworkType.UNMETERED,
+        work?.progress?.getLong("done", -1L)?.takeIf { it >= 0 } ?: rec.offset,
+        work?.progress?.getLong("total", 0L)?.takeIf { it > 0 } ?: rec.size)
+}
+
+/**
+ * The card's one action. Not sent: "Send to server" (no access key yet: a dialog to set it up, or share the file).
+ * Sending: a progress bar with the MB sent; waiting (Wi-Fi, retry): why, and Send now; failed: why, and Try again;
+ * on the server: when. Shared by hand (no server): Sent, and Send to server stays.
+ */
+@Composable
+private fun SendControl(up: UploadState?, busy: Boolean, onSend: () -> Unit) {
+    val status: @Composable (String, Color, Int?) -> Unit = { text, color, action ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text, fontSize = 13.sp, color = color, modifier = Modifier.weight(1f), maxLines = 2)
+            if (action != null) TextButton(onClick = onSend, modifier = Modifier.height(36.dp)) { Text(stringResource(action)) }
+        }
+    }
+    when {
+        up == null || (!up.queued && up.rec.status != UploadStatus.DONE && up.rec.status != UploadStatus.FAILED) ->
+            Button(onClick = onSend, enabled = !busy, modifier = Modifier.fillMaxWidth().height(46.dp)) {
+                SendLabel(stringResource(if (busy) R.string.sessions_packing else R.string.sessions_send_server))
+            }
+        up.running -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            status(if (up.total > 0) stringResource(R.string.sessions_sending, up.pct, mb(up.done), mb(up.total))
+                else stringResource(R.string.sessions_preparing), Palette.Blue, null)
+            if (up.total > 0) LinearProgressIndicator(progress = { up.pct / 100f }, modifier = Modifier.fillMaxWidth())
+            else LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        up.queued && up.rec.error != null -> status(stringResource(R.string.upload_status_retrying, up.rec.error), Palette.Amber, R.string.sessions_send_now)
+        up.wifiWait -> status(stringResource(R.string.upload_status_wifi), Palette.Muted, R.string.sessions_send_now)
+        up.queued -> status(stringResource(R.string.upload_status_waiting), Palette.Muted, null)
+        up.sent -> status("✓ " + stringResource(R.string.sessions_on_server, fmt(up.rec.uploadedAt)), Palette.Green, null)
+        else -> status(stringResource(R.string.upload_status_failed, up.rec.error ?: ""), Palette.Red, R.string.upload_retry)
     }
 }
 
@@ -328,11 +373,10 @@ private fun SendLabel(text: String) {
  * symbol. The kind and the sent state sit on top.
  */
 @Composable
-private fun Hero(r: SessionRow, recording: Boolean, empty: Boolean, onClick: (() -> Unit)?) {
+private fun Hero(r: SessionRow, recording: Boolean, empty: Boolean, up: UploadState?) {
     val poi = r.s.kind == SessionKind.POI
     val shown = r.previews.take(if (poi) 3 else 4)
-    Box(Modifier.fillMaxWidth().height(if (shown.isEmpty()) 96.dp else 152.dp).background(Palette.House)
-        .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)) {
+    Box(Modifier.fillMaxWidth().height(if (shown.isEmpty()) 96.dp else 152.dp).background(Palette.House)) {
         if (shown.isEmpty()) {
             Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Palette.GreenLight, Palette.Canvas))),
                 contentAlignment = Alignment.Center) {
@@ -353,7 +397,8 @@ private fun Hero(r: SessionRow, recording: Boolean, empty: Boolean, onClick: (()
             when {
                 recording -> Pill(stringResource(R.string.sessions_badge_recording), dot = Palette.Red, bg = Color(0xF2FFFFFF), fg = Palette.Blue, size = 12.sp, bold = true)
                 empty -> Pill(stringResource(R.string.sessions_badge_empty), bg = Color(0xF2FFFFFF), fg = Palette.Muted, size = 12.sp, bold = true)
-                r.s.exportedAt != null -> Pill("✓ " + stringResource(R.string.sessions_badge_sent), bg = Palette.GreenLight, fg = Palette.Green, size = 12.sp, bold = true)
+                up?.running == true -> Pill(stringResource(R.string.sessions_badge_sending, up.pct), bg = Color(0xF2FFFFFF), fg = Palette.Blue, size = 12.sp, bold = true)
+                up?.sent == true || r.s.exportedAt != null -> Pill("✓ " + stringResource(R.string.sessions_badge_sent), bg = Palette.GreenLight, fg = Palette.Green, size = 12.sp, bold = true)
                 else -> Pill(stringResource(R.string.sessions_badge_not_sent), dot = Color(0xFFF79009), bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp, bold = true)
             }
         }

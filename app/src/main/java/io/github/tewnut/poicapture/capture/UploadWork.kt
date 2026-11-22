@@ -14,10 +14,9 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
-import io.github.tewnut.poicapture.core.ChunkSizer
 import io.github.tewnut.poicapture.core.Exporter
 import io.github.tewnut.poicapture.core.Tus
-import io.github.tewnut.poicapture.core.UploadPart
+import io.github.tewnut.poicapture.core.DirectUpload
 import io.github.tewnut.poicapture.core.UploadRecord
 import io.github.tewnut.poicapture.core.UploadStatus
 import io.github.tewnut.poicapture.core.iso
@@ -40,6 +39,8 @@ import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.security.KeyStore
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicLongArray
@@ -57,10 +58,13 @@ object UploadServer {
     private fun sp(ctx: Context) = ctx.getSharedPreferences("upload-server", Context.MODE_PRIVATE)
 
     /** The project's server (Cloudflare Worker + R2, server/worker); the web reviewer pulls from it by default too. */
-    const val DEFAULT_URL = "https://poi-capture-cloud.4hum-ai.workers.dev/files/"
+    const val DEFAULT_URL = "https://poi-uploader.4hum.ai/files/"
+    /** The same Worker's first address (workers.dev): read as [DEFAULT_URL]. */
+    private const val OLD_URL = "https://poi-capture-cloud.4hum-ai.workers.dev/files/"
 
     /** The address as typed; [DEFAULT_URL] until one is typed (a cleared field stays empty: no uploads). */
-    fun url(ctx: Context): String = sp(ctx).getString("url", DEFAULT_URL) ?: ""
+    fun url(ctx: Context): String = (sp(ctx).getString("url", DEFAULT_URL) ?: "").let {
+        if (it.isNotBlank() && Tus.endpoint(it) == Tus.endpoint(OLD_URL)) DEFAULT_URL else it }
     fun setUrl(ctx: Context, v: String) = sp(ctx).edit().putString("url", v.trim()).apply()
     /** A usable endpoint is set; the default server also needs its token (it answers 401 without one). */
     fun configured(ctx: Context): Boolean {
@@ -74,6 +78,9 @@ object UploadServer {
     /** Automatic uploads wait for Wi-Fi (or any unmetered network). */
     fun wifiOnly(ctx: Context): Boolean = sp(ctx).getBoolean("wifiOnly", true)
     fun setWifiOnly(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("wifiOnly", v).apply()
+    /** A session the server holds in full is deleted from the phone, to keep room for the next rides. */
+    fun removeAfter(ctx: Context): Boolean = sp(ctx).getBoolean("removeAfter", true)
+    fun setRemoveAfter(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("removeAfter", v).apply()
 
     fun token(ctx: Context): String = sp(ctx).getString("token", null)?.let { runCatching { Secret.decrypt(it) }.getOrNull() } ?: ""
     fun setToken(ctx: Context, v: String) {
@@ -115,6 +122,8 @@ object Uploads {
     val changed = MutableStateFlow(0)
     /** Bumped when an upload finishes (the session is then marked sent). */
     val finished = MutableStateFlow(0)
+    /** Sessions deleted from the phone after their upload ([UploadServer.removeAfter]), as (name, bytes freed). */
+    val removed = MutableStateFlow<List<Pair<String, Long>>>(emptyList())
 
     fun zipFile(ctx: Context, sessionId: String) = File(ctx.filesDir, "uploads/$sessionId.zip")
 
@@ -171,13 +180,10 @@ object Uploads {
 private class CaptureStarted : Exception()
 
 /**
- * Uploads one session's zip (the same zip as Save / Send, Exporter) to the tus server, the progress saved after each
- * PATCH so a dropped connection or an app restart continues where the server is (HEAD). The zip is kept until the
- * upload is done, so the bytes stay the same across attempts. Never while recording.
- *
- * A zip over [Tus.PARALLEL_ABOVE] goes to a server with `concatenation` as up to [Tus.MAX_PARTS] partial uploads sent
- * at once (Cloudflare throttles each connection), then one final request joins them (server/README.md, "Parallel
- * uploads"); otherwise as one upload. Each connection sizes its PATCHes from its measured speed ([ChunkSizer]).
+ * Uploads one session's zip (the same zip as Save / Send, Exporter) straight to R2 (server/README.md, "Direct uploads",
+ * [DirectUpload]): the server opens the upload and hands out presigned part URLs, [DIRECT_CONNECTIONS] parts go at
+ * once, each part's ETag is saved as it lands (a restart sends only the parts still missing), then the server joins
+ * them. The zip is kept until the upload is done, so the bytes stay the same across attempts. Never while recording.
  */
 class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -194,84 +200,54 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         try {
             val client = UploadServer.client(ctx)
             val zip = Uploads.zipFile(ctx, sid)
-            fun metadata() = sessionUploadMetadata(session, Exporter.fileName(session),
-                store.items(sid).count { it.optString("kind") == "photo" }, store.trackFile(sid))
-            fun parallel(size: Long): Boolean = size > Tus.PARALLEL_ABOVE && try { client.options().canConcat } catch (e: TusClient.HttpError) {
-                if (e.code == 401 || e.code == 403) throw e
-                false                                   // no usable OPTIONS: upload in one part
-            }
-
-            // what an earlier attempt left: the same zip and the server still has it
             var size = if (zip.exists()) zip.length() else -1L
-            val sameZip = size >= 0 && size == rec.size
-            var single: Pair<String, Long>? = null      // url, offset
-            var parts: List<UploadPart>? = null
-            var finished = false
-            if (sameZip && Tus.partsFit(rec.parts, size)) {
-                val fin = rec.url                       // the final upload, when it was created already
-                if (fin != null && client.offset(fin) == size) finished = true else parts = rec.parts
-            } else if (sameZip && rec.url != null) {
-                when (val s = Tus.start(rec, size, client.offset(rec.url!!))) {
-                    is Tus.Start.Finished -> finished = true
-                    is Tus.Start.Continue ->
-                        if (parallel(size) && !Tus.keepSingle(s.offset, size)) runCatching { client.delete(s.url) }   // faster in parts
-                        else single = s.url to s.offset
-                    Tus.Start.Create -> {}
-                }
-            }
-            if (!finished && single == null && parts == null) {
-                // a new upload: build the zip, then one upload or partials
+
+            // go on with the upload an earlier attempt opened for this very zip, or build the zip and open one
+            var d = rec.direct?.takeIf { size >= 0 && it.size == size && size == rec.size }
+            var urls: Map<Int, String> = emptyMap()
+            if (d == null) {
+                rec.url?.let { u -> runCatching { client.delete(u) } }   // an unfinished tus upload of an older version
                 val part = File(zip.parentFile!!.apply { mkdirs() }, "$sid.zip.part")
                 part.outputStream().use { Exporter.writeZip(store, sid, it) }
                 if (!part.renameTo(zip)) { zip.delete(); if (!part.renameTo(zip)) throw IOException("could not keep the zip") }
                 size = zip.length()
-                if (parallel(size)) {
-                    val fresh = Tus.splitRanges(size)
-                    parts = fresh
-                    update { it.copy(url = null, size = size).withParts(fresh) }
-                } else {
-                    val u = client.create(size, metadata())
-                    single = u to 0L
-                    update { it.copy(url = u, size = size, offset = 0, parts = emptyList()) }
-                }
+                val metadata = sessionUploadMetadata(session, Exporter.fileName(session),
+                    store.items(sid).count { it.optString("kind") == "photo" }, store.trackFile(sid))
+                val (opened, first) = client.directCreate(size, metadata)
+                d = opened
+                urls = first
+                update { it.copy(url = null, size = size, offset = 0, direct = opened) }
             }
-            update { it.copy(status = UploadStatus.UPLOADING, size = size, error = null) }
-
-            if (!finished) {
-                val progress = Progress(this@UploadWorker, size, parts?.size ?: 1)
-                val one = single
-                if (one != null) {
-                    update { it.copy(url = one.first, offset = one.second, parts = emptyList()) }
-                    abortOnCancel(client) {
-                        pump(client, one.first, zip, 0, size, one.second, { progress.sent(0, it, rec.offset) }) { off ->
-                            update { it.copy(offset = off) }
-                            progress.landed(0, rec.offset)
-                        }
+            val d0 = d
+            val progress = Progress(this@UploadWorker, size, DIRECT_CONNECTIONS)
+            fun onServer() = rec.direct?.sent ?: 0L
+            progress.landed(0, onServer())
+            if (!d0.done) abortOnCancel(client) {
+                val queue = ConcurrentLinkedQueue(d0.pending)
+                val known = ConcurrentHashMap(urls)
+                (0 until DIRECT_CONNECTIONS).map { slot -> async {
+                    while (true) {
+                        val n = queue.poll() ?: break
+                        val etag = putPart(client, zip, d0, n, known) { progress.sent(slot, it, onServer()) }
+                        update { r -> (r.direct ?: d0).with(n, etag).let { x -> r.copy(direct = x, offset = x.sent) } }
+                        progress.landed(slot, onServer())
                     }
-                } else {
-                    abortOnCancel(client) {
-                        parts!!.indices.map { i -> async { uploadPart(client, zip, i, { synchronized(lock) { rec.parts[i] } }, progress,
-                            { rec.offset }) { p -> update { r -> r.withParts(r.parts.toMutableList().also { it[i] = p }) } } } }.awaitAll()
-                    }
-                    // every partial complete: join them
-                    val urls = rec.parts.map { it.url!! }
-                    val fin = try { client.createFinal(urls, metadata()) } catch (e: TusClient.HttpError) {
-                        if (e.code != 409) throw e
-                        // the partials are taken: done only if our own final upload is there, else start again
-                        val stored = rec.url
-                        if (stored != null && client.offset(stored) == size) stored
-                        else {
-                            update { it.copy(url = null).withParts(emptyList()) }
-                            throw IOException("the parts were already joined; starting again")
-                        }
-                    }
-                    update { it.copy(url = fin, offset = size) }
-                }
+                } }.awaitAll()
             }
-            update { it.copy(status = UploadStatus.DONE, offset = size, error = null, uploadedAt = iso(System.currentTimeMillis())) }
+            client.directComplete(rec.direct!!)
+            update { it.copy(status = UploadStatus.DONE, url = d0.location, offset = size, error = null, uploadedAt = iso(System.currentTimeMillis())) }
             zip.delete()
             // uploaded = sent: the sessions list stops counting it as not sent
             store.load(sid)?.let { it.exportedAt = iso(System.currentTimeMillis()); store.save(it) }
+            // free the phone: only once the server says it holds every byte, and never the session being recorded
+            if (UploadServer.removeAfter(ctx) && CaptureService.activeSession.value != sid &&
+                runCatching { client.offset(d0.location) }.getOrNull() == size) {
+                val name = store.load(sid)?.name ?: sid
+                val bytes = store.dir(sid).walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                store.delete(sid)
+                Uploads.forget(ctx, sid)
+                Uploads.removed.value = Uploads.removed.value + (name to bytes)
+            }
             Uploads.finished.value++
             Result.success()
         } catch (e: CancellationException) {
@@ -279,10 +255,9 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         } catch (e: CaptureStarted) {
             Result.retry()
         } catch (e: Exception) {
-            // the server no longer knows this (single) upload (expired, cleaned up): start a new one next time
-            if (e is TusClient.HttpError && (e.code == 404 || e.code == 410) && rec.parts.isEmpty())
-                synchronized(lock) { rec = rec.copy(url = null, offset = 0) }
-            val permanent = (e as? TusClient.HttpError)?.permanent == true || e is IllegalArgumentException
+            // the server (or R2) no longer knows the upload, or could not join it: a new one next time
+            if (e is TusClient.HttpError && (e.code == 404 || e.code == 409)) update { it.copy(direct = null, offset = 0) }
+            val permanent = (e as? TusClient.HttpError)?.let { it.permanent && it.code != 409 } == true || e is IllegalArgumentException
             val msg = e.message ?: e.javaClass.simpleName
             if (permanent || runAttemptCount >= 6) {
                 update { it.copy(status = UploadStatus.FAILED, error = msg) }
@@ -295,8 +270,8 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
     }
 
     /**
-     * Live progress for the sessions list: bytes on the server (the record's offset) plus what each connection has
-     * sent in its current PATCH; reported every 256 KiB.
+     * Live progress for the sessions list: the parts R2 has plus what each connection has sent of its current part;
+     * reported every 256 KiB.
      */
     private class Progress(val worker: CoroutineWorker, val total: Long, n: Int) {
         private val inFlight = AtomicLongArray(n)
@@ -316,66 +291,29 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
     }
 
     /**
-     * One partial: HEAD it (or create it, also when the server forgot it), then send its range. [get] / [set] read and
-     * store the part in the record; [onServer] the record's total offset (for progress).
+     * PUT part [n] of [d] to R2; a failed PUT is tried again (with a new URL after 403: it expired), up to
+     * [MAX_FAILURES] in a row. [urls]: the presigned URLs known so far, asked for in batches as needed. Returns the ETag.
      */
-    private suspend fun uploadPart(client: TusClient, zip: File, i: Int, get: () -> UploadPart, progress: Progress,
-                                   onServer: () -> Long, set: (UploadPart) -> Unit) {
-        var recreated = 0
-        while (true) {
-            var p = get()
-            if (p.url != null) {
-                val off = client.offset(p.url!!)
-                p = if (off == null || off > p.length) p.copy(url = null, offset = 0) else p.copy(offset = off)
-            }
-            if (p.url == null) p = p.copy(url = client.createPartial(p.length), offset = 0)
-            set(p)
-            progress.landed(i, onServer())
-            if (p.done) return
-            val url = p.url!!
-            try {
-                pump(client, url, zip, p.start, p.length, p.offset, { progress.sent(i, it, onServer()) }) { off ->
-                    set(get().copy(offset = off))
-                    progress.landed(i, onServer())
-                }
-                return
-            } catch (e: TusClient.HttpError) {
-                // the partial expired meanwhile: a new one for this range (once or twice), else let the worker retry
-                if ((e.code != 404 && e.code != 410) || ++recreated > 2) throw e
-                set(get().copy(url = null, offset = 0))
-            }
-        }
-    }
-
-    /**
-     * PATCH bytes [base] + [from] until [base] + [length] of [zip] to [url] (upload offsets count from 0), sized by a
-     * [ChunkSizer]. A PATCH that times out or fails asks the server where it is (HEAD), shrinks the next one and goes on;
-     * after [MAX_FAILURES] failures in a row the error goes to the worker (which retries later). 404 / 410 / permanent
-     * errors are thrown at once. [onOffset] gets the server's offset after each PATCH.
-     */
-    private suspend fun pump(client: TusClient, url: String, zip: File, base: Long, length: Long, from: Long,
-                             onSent: (Long) -> Unit, onOffset: (Long) -> Unit) {
-        val sizer = ChunkSizer()
-        var offset = from
+    private suspend fun putPart(client: TusClient, zip: File, d: DirectUpload, n: Int, urls: ConcurrentHashMap<Int, String>,
+                                onSent: (Long) -> Unit): String {
         var failures = 0
-        while (offset < length) {
+        while (true) {
             currentCoroutineContext().ensureActive()
             if (CaptureService.activeSession.value != null) throw CaptureStarted()
-            val len = sizer.next(length - offset)
-            val t0 = System.nanoTime()
-            val next = try {
-                client.patch(url, zip, offset, len, fileOffset = base + offset, timeoutMs = sizer.timeoutMs(len), onSent = onSent)
-                    .also { sizer.sent(it - offset, (System.nanoTime() - t0) / 1_000_000); failures = 0 }
-            } catch (e: IOException) {
-                currentCoroutineContext().ensureActive()            // cut off because the work is stopping
-                if (e is TusClient.HttpError && (e.permanent || e.code == 404 || e.code == 410)) throw e
-                if (++failures > MAX_FAILURES) throw e
-                if (!(e is TusClient.HttpError && e.code == 409)) sizer.failed()   // 409: offsets disagree, not slow
-                client.offset(url) ?: throw TusClient.HttpError(404, "HEAD")
+            val url = urls[n] ?: run {
+                val ask = (listOf(n) + d.pending.filter { it != n && !urls.containsKey(it) }).take(200)
+                urls.putAll(client.directUrls(d.id, ask))
+                urls[n] ?: throw IOException("no URL for part $n")
             }
-            if (next < 0 || next > length) throw IOException("the server's offset is out of range")
-            offset = next
-            onOffset(offset)
+            try {
+                // up to 8 MiB a part; the timeout is the wait for R2's answer once the body is sent
+                return client.putPart(url, zip, d.start(n), d.length(n), timeoutMs = 120_000, onSent = onSent)
+            } catch (e: IOException) {
+                currentCoroutineContext().ensureActive()
+                if (e is TusClient.HttpError && e.code == 404) throw e       // R2 forgot the upload: start again
+                if (e is TusClient.HttpError && e.code == 403) urls.remove(n)
+                if (++failures > MAX_FAILURES) throw e
+            }
         }
     }
 
@@ -387,5 +325,7 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
 
     private companion object {
         const val MAX_FAILURES = 4
+        /** Parts sent at once to R2 (measured: 4 connections ~3x one). */
+        const val DIRECT_CONNECTIONS = 4
     }
 }

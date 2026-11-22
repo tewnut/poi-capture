@@ -309,6 +309,16 @@
     <string name="sessions_interrupted">bị gián đoạn (vẫn gửi được)</string>
     <string name="sessions_send">Gửi</string>
     <string name="sessions_send_again">Gửi lại</string>
+    <string name="sessions_send_server">Gửi lên máy chủ</string>
+    <string name="sessions_share_file">Chia sẻ tệp zip qua ứng dụng khác</string>
+    <string name="sessions_sending">Đang gửi %1$d%% · %2$s / %3$s</string>
+    <string name="sessions_preparing">Đang chuẩn bị gửi…</string>
+    <string name="sessions_on_server">Đã lên máy chủ · %1$s</string>
+    <string name="sessions_send_now">Gửi ngay</string>
+    <string name="sessions_badge_sending">Đang gửi %d%%</string>
+    <string name="sessions_setup_title">Thêm mã truy cập</string>
+    <string name="sessions_setup_text">Để gửi chuyến đi lên máy chủ, hãy quét mã QR hoặc nhập mã truy cập quản trị viên đưa cho bạn (Cài đặt → Máy chủ tải lên). Hoặc chia sẻ tệp zip qua ứng dụng khác.</string>
+    <string name="sessions_setup_open">Mở cài đặt</string>
     <string name="sessions_map">Bản đồ</string>
     <string name="sessions_duration_s">%1$d giây</string>
     <string name="sessions_duration_min">%1$d phút</string>
@@ -567,6 +577,7 @@
     <string name="upload_scan_unavailable">Trình quét QR chưa sẵn sàng: Dịch vụ Google Play vẫn đang tải xuống. Hãy thử lại sau một phút.</string>
     <string name="upload_scan_failed">Không mở được trình quét QR: %s</string>
     <string name="upload_test_me">Đã kết nối với tên %1$s · có quyền: %2$s</string>
+    <string name="upload_test_not_server">Địa chỉ này có phản hồi, nhưng không phải máy chủ POI Capture</string>
     <string name="upload_scope_upload">Gửi chuyến đi</string>
     <string name="upload_scope_read">Xem và tải về</string>
     <string name="upload_scope_process">Xử lý chuyến đi</string>
@@ -584,14 +595,15 @@
     <string name="upload_token_hide">Ẩn</string>
     <string name="upload_test">Kiểm tra kết nối</string>
     <string name="upload_testing">Đang kiểm tra…</string>
-    <string name="upload_test_ok">Đã kết nối: tus %1$s (%2$s)</string>
-    <string name="upload_test_no_create">Máy chủ có trả lời (tus %1$s) nhưng không nhận tải lên mới</string>
-    <string name="upload_test_not_tus">Địa chỉ này có trả lời, nhưng không phải máy chủ tus</string>
     <string name="upload_test_token">Máy chủ từ chối mã truy cập (HTTP %d)</string>
     <string name="upload_test_http">Máy chủ trả lời HTTP %d</string>
     <string name="upload_test_failed">Không kết nối được máy chủ: %s</string>
     <string name="upload_auto">Tự tải lên mỗi phiên khi kết thúc</string>
     <string name="upload_wifi">Chỉ khi có Wi-Fi</string>
+    <string name="upload_remove_after">Xoá khỏi điện thoại khi đã lên máy chủ</string>
+    <plurals name="sessions_removed_after_upload">
+        <item quantity="other">%1$d chuyến đi đã lên máy chủ và được xoá khỏi điện thoại (giải phóng %2$s).</item>
+    </plurals>
     <string name="upload_never_recording">Không tải lên khi đang ghi phiên. Lần tải bị gián đoạn sẽ tiếp tục từ chỗ đã dừng.</string>
     <string name="upload_status_none">Chưa tải lên</string>
     <string name="upload_status_waiting">Đang chờ tải lên</string>

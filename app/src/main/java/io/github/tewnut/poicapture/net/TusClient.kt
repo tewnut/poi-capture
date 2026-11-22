@@ -3,6 +3,7 @@ package io.github.tewnut.poicapture.net
 import android.os.Build
 import io.github.tewnut.poicapture.BuildConfig
 import io.github.tewnut.poicapture.core.CloudMe
+import io.github.tewnut.poicapture.core.DirectUpload
 import io.github.tewnut.poicapture.core.Tus
 import java.io.File
 import java.io.IOException
@@ -13,10 +14,10 @@ import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * A small tus 1.0 client on HttpURLConnection (the app's only HTTP stack): OPTIONS, creation (POST), HEAD, PATCH,
- * termination (DELETE) and concatenation (partial and final uploads).
- * HttpURLConnection has no PATCH, so PATCH goes as POST with `X-HTTP-Method-Override: PATCH` (tusd and server/ accept
- * it). The token goes in the Authorization header only; it is never logged or put in an exception message.
+ * The phone's client for the project's server (server/README.md) on HttpURLConnection (the app's only HTTP stack):
+ * who the token is (GET /me), direct uploads (POST /direct…, the parts PUT straight to R2), and an upload's state at
+ * the tus endpoint (HEAD, DELETE). The token goes in the Authorization header only; it is never logged or put in an
+ * exception message.
  */
 class TusClient(endpoint: String, token: String?) {
     val endpoint: String = Tus.endpoint(endpoint) ?: throw IllegalArgumentException("not an http(s) URL")
@@ -24,8 +25,8 @@ class TusClient(endpoint: String, token: String?) {
 
     /** A non-2xx answer; [code] tells the worker whether trying again can help. */
     class HttpError(val code: Int, what: String) : IOException("$what: HTTP $code") {
-        /** 401 / 403: the token; 413: too large for the server; 400 / 412: the server does not speak this. */
-        val permanent get() = code in setOf(400, 401, 403, 412, 413)
+        /** 401 / 403: the token; 413: too large for the server; 400 / 405 / 501: the server does not do this. */
+        val permanent get() = code in setOf(400, 401, 403, 405, 413, 501)
     }
 
     companion object {
@@ -47,24 +48,11 @@ class TusClient(endpoint: String, token: String?) {
             readTimeout = timeoutMs
             instanceFollowRedirects = false
             useCaches = false
-            if (method == "PATCH") {
-                requestMethod = "POST"
-                setRequestProperty("X-HTTP-Method-Override", "PATCH")
-            } else requestMethod = method
+            requestMethod = method
             setRequestProperty("Tus-Resumable", Tus.VERSION)
             auth?.let { setRequestProperty("Authorization", it) }
             setRequestProperty("X-Client", CLIENT)
         }
-
-    /** OPTIONS on the endpoint: what the server supports (the test in Settings). Checks the token too (server/). */
-    fun options(): Tus.ServerInfo {
-        val c = open(endpoint, "OPTIONS")
-        try {
-            val code = c.responseCode
-            if (code !in 200..299) throw HttpError(code, "OPTIONS")
-            return Tus.serverInfo(c.getHeaderField("Tus-Version"), c.getHeaderField("Tus-Extension"), c.getHeaderField("Tus-Max-Size"))
-        } finally { close(c) }
-    }
 
     /**
      * `GET <origin>/me`: who the token belongs to (server/README.md). null when the server has no /me (a plain tus
@@ -88,63 +76,50 @@ class TusClient(endpoint: String, token: String?) {
         } finally { close(c) }
     }
 
-    /** POST with Upload-Length and Upload-Metadata; returns the new upload's URL. */
-    fun create(size: Long, metadata: Map<String, String?>): String = post(size, metadata, null)
+    // ---- direct uploads (server/README.md "Direct uploads"): JSON to the Worker, the bytes straight to R2
 
-    /** A partial upload of [size] bytes (tus concatenation, `Upload-Concat: partial`); returns its URL. */
-    fun createPartial(size: Long): String = post(size, null, "partial")
-
-    /**
-     * The final upload joining [partUrls] (complete partials, in file order) with the file's [metadata]; returns its
-     * URL. 409: a partial is already used by another final upload.
-     */
-    fun createFinal(partUrls: List<String>, metadata: Map<String, String?>): String = post(null, metadata, Tus.finalConcat(partUrls))
-
-    private fun post(size: Long?, metadata: Map<String, String?>?, concat: String?): String {
-        val c = open(endpoint, "POST")
+    private fun postJson(path: String, body: String, what: String): String? {
+        val url = DirectUpload.url(endpoint, path) ?: return null
+        val c = open(url, "POST", timeoutMs = 30_000)
         try {
-            size?.let { c.setRequestProperty("Upload-Length", it.toString()) }
-            metadata?.let { c.setRequestProperty("Upload-Metadata", Tus.encodeMetadata(it)) }
-            concat?.let { c.setRequestProperty("Upload-Concat", it) }
+            c.setRequestProperty("Content-Type", "application/json")
+            c.setRequestProperty("Accept", "application/json")
+            val b = body.toByteArray(Charsets.UTF_8)
             c.doOutput = true
-            c.setFixedLengthStreamingMode(0)
-            c.outputStream.close()
+            c.setFixedLengthStreamingMode(b.size)
+            c.outputStream.use { it.write(b) }
             val code = c.responseCode
-            if (code != 201) throw HttpError(code, "create")
-            val loc = c.getHeaderField("Location") ?: throw IOException("create: no Location from the server")
-            return Tus.resolve(endpoint, loc)
+            if (code == 404) return null
+            if (code !in 200..299) throw HttpError(code, what)
+            return c.inputStream.use { it.readBytes().toString(Charsets.UTF_8) }
         } finally { close(c) }
     }
 
-    /** HEAD: the server's offset for this upload; null when the server does not know it (any more). */
-    fun offset(url: String): Long? {
-        val c = open(url, "HEAD")
-        try {
-            val code = c.responseCode
-            if (code == 404 || code == 410) return null
-            if (code !in 200..299) throw HttpError(code, "HEAD")
-            return c.getHeaderField("Upload-Offset")?.toLongOrNull() ?: throw IOException("HEAD: no Upload-Offset")
-        } finally { close(c) }
-    }
+    /** Opens a direct upload: the upload and its first part URLs. 501: the server has no R2 keys set. */
+    fun directCreate(size: Long, metadata: Map<String, String?>): Pair<DirectUpload, Map<Int, String>> =
+        DirectUpload.parseCreate(postJson("", DirectUpload.createBody(size, metadata), "direct") ?: throw HttpError(501, "direct"))
 
-    /** tus termination of an unfinished upload of ours (best effort: false when the server said no). */
-    fun delete(url: String): Boolean {
-        val c = open(url, "DELETE")
-        try { return c.responseCode in 200..299 } finally { close(c) }
+    /** Fresh presigned URLs for [parts] (they last 6 h). 404: the server forgot the upload. */
+    fun directUrls(id: String, parts: List<Int>): Map<Int, String> =
+        DirectUpload.parseUrls(postJson("/$id/urls", DirectUpload.urlsBody(parts), "direct urls") ?: throw HttpError(404, "direct urls"))
+
+    /** Every part is in R2: the server joins them. 409: R2 does not have them all (start again). */
+    fun directComplete(d: DirectUpload) {
+        postJson("/${d.id}/complete", d.completeBody(), "direct complete") ?: throw HttpError(404, "direct complete")
     }
 
     /**
-     * PATCH [length] bytes of [file] at upload offset [offset], read from [fileOffset] of the file (a partial's
-     * offsets count from its own start); returns the server's new offset. [timeoutMs]: the read timeout (ChunkSizer).
-     * [onSent] gets the bytes sent so far in this request (for progress). 409: the offsets disagree, the caller asks
-     * again with HEAD.
+     * PUT one part to its presigned R2 [url] (no Authorization, no tus headers: the URL is the permission); returns R2's
+     * ETag. 403: the URL expired (ask for a new one).
      */
-    fun patch(url: String, file: File, offset: Long, length: Long, fileOffset: Long = offset, timeoutMs: Int = 120_000,
-              onSent: (Long) -> Unit = {}): Long {
-        val c = open(url, "PATCH", timeoutMs = timeoutMs)
+    fun putPart(url: String, file: File, fileOffset: Long, length: Long, timeoutMs: Int, onSent: (Long) -> Unit): String {
+        val c = (URL(url).openConnection() as HttpURLConnection).also { live.add(it) }
         try {
-            c.setRequestProperty("Upload-Offset", offset.toString())
-            c.setRequestProperty("Content-Type", "application/offset+octet-stream")
+            c.connectTimeout = 15_000
+            c.readTimeout = timeoutMs
+            c.instanceFollowRedirects = false
+            c.useCaches = false
+            c.requestMethod = "PUT"
             c.doOutput = true
             c.setFixedLengthStreamingMode(length)
             RandomAccessFile(file, "r").use { raf ->
@@ -164,8 +139,25 @@ class TusClient(endpoint: String, token: String?) {
                 }
             }
             val code = c.responseCode
-            if (code !in 200..299) throw HttpError(code, "PATCH")
-            return c.getHeaderField("Upload-Offset")?.toLongOrNull() ?: throw IOException("PATCH: no Upload-Offset")
+            if (code !in 200..299) throw HttpError(code, "part")
+            return c.getHeaderField("ETag")?.takeIf { it.isNotBlank() } ?: throw IOException("part: no ETag from R2")
         } finally { close(c) }
+    }
+
+    /** HEAD: the server's offset for this upload; null when the server does not know it (any more). */
+    fun offset(url: String): Long? {
+        val c = open(url, "HEAD")
+        try {
+            val code = c.responseCode
+            if (code == 404 || code == 410) return null
+            if (code !in 200..299) throw HttpError(code, "HEAD")
+            return c.getHeaderField("Upload-Offset")?.toLongOrNull() ?: throw IOException("HEAD: no Upload-Offset")
+        } finally { close(c) }
+    }
+
+    /** tus termination of an unfinished upload of ours (best effort: false when the server said no). */
+    fun delete(url: String): Boolean {
+        val c = open(url, "DELETE")
+        try { return c.responseCode in 200..299 } finally { close(c) }
     }
 }

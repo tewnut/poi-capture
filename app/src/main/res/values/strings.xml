@@ -323,6 +323,16 @@
     <string name="sessions_interrupted">interrupted (can still be sent)</string>
     <string name="sessions_send">Send</string>
     <string name="sessions_send_again">Send again</string>
+    <string name="sessions_send_server">Send to server</string>
+    <string name="sessions_share_file">Share zip with another app</string>
+    <string name="sessions_sending">Sending %1$d%% · %2$s of %3$s</string>
+    <string name="sessions_preparing">Preparing to send…</string>
+    <string name="sessions_on_server">On the server · %1$s</string>
+    <string name="sessions_send_now">Send now</string>
+    <string name="sessions_badge_sending">Sending %d%%</string>
+    <string name="sessions_setup_title">Add your access key</string>
+    <string name="sessions_setup_text">To send rides to the server, scan the QR code or type the access key from your admin (Settings → Upload server). Or share the zip with another app.</string>
+    <string name="sessions_setup_open">Open settings</string>
     <string name="sessions_map">Map</string>
     <string name="sessions_duration_s">%1$d s</string>
     <string name="sessions_duration_min">%1$d min</string>
@@ -586,6 +596,7 @@
     <string name="upload_scan_unavailable">The QR scanner is not ready yet: Google Play services is still downloading it. Try again in a minute.</string>
     <string name="upload_scan_failed">Could not open the QR scanner: %s</string>
     <string name="upload_test_me">Connected as %1$s · can: %2$s</string>
+    <string name="upload_test_not_server">This address answers, but not as a POI Capture server</string>
     <string name="upload_scope_upload">Send rides</string>
     <string name="upload_scope_read">View &amp; download</string>
     <string name="upload_scope_process">Process rides</string>
@@ -603,14 +614,16 @@
     <string name="upload_token_hide">Hide</string>
     <string name="upload_test">Test connection</string>
     <string name="upload_testing">Checking…</string>
-    <string name="upload_test_ok">Connected: tus %1$s (%2$s)</string>
-    <string name="upload_test_no_create">The server answers (tus %1$s) but does not accept new uploads</string>
-    <string name="upload_test_not_tus">This address answers, but not as a tus server</string>
     <string name="upload_test_token">The server refused the token (HTTP %d)</string>
     <string name="upload_test_http">The server answered HTTP %d</string>
     <string name="upload_test_failed">Could not reach the server: %s</string>
     <string name="upload_auto">Upload each session when it ends</string>
     <string name="upload_wifi">Only on Wi-Fi</string>
+    <string name="upload_remove_after">Remove from the phone once on the server</string>
+    <plurals name="sessions_removed_after_upload">
+        <item quantity="one">%1$d ride is on the server and was removed from the phone (%2$s freed).</item>
+        <item quantity="other">%1$d rides are on the server and were removed from the phone (%2$s freed).</item>
+    </plurals>
     <string name="upload_never_recording">Nothing is uploaded while a session is recording. An interrupted upload continues where it stopped.</string>
     <string name="upload_status_none">Not uploaded</string>
     <string name="upload_status_waiting">Waiting to upload</string>

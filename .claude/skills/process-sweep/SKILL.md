@@ -161,7 +161,7 @@ valuable), positions triangulated vs single-photo, and the link to `index.html`.
 ## Cloud server (when the session came from it)
 
 When the team uses the upload server (`server/README.md`), sessions arrive there instead of by adb. With
-`POI_CLOUD_URL` (the tus endpoint; the team's is `https://poi-capture-cloud.4hum-ai.workers.dev/files/`) and, if the server has one, `POI_CLOUD_TOKEN` set in
+`POI_CLOUD_URL` (the tus endpoint; the team's is `https://poi-uploader.4hum.ai/files/`) and, if the server has one, `POI_CLOUD_TOKEN` set in
 the environment (never pass or print the token):
 
 ```

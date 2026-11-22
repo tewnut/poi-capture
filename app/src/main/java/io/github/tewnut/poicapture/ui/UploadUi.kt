@@ -70,6 +70,7 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
     var showToken by remember { mutableStateOf(false) }
     var auto by remember { mutableStateOf(UploadServer.auto(ctx)) }
     var wifi by remember { mutableStateOf(UploadServer.wifiOnly(ctx)) }
+    var removeAfter by remember { mutableStateOf(UploadServer.removeAfter(ctx)) }
     var testing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Pair<String, Boolean>?>(null) }   // text, ok
     var noUpload by remember { mutableStateOf(false) }   // the tested token lacks the upload scope
@@ -85,20 +86,12 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
         scope.launch {
             result = try {
                 val client = TusClient(url, token)
-                val info = withContext(Dispatchers.IO) { client.options() }
-                when {
-                    info.versions.isEmpty() -> ctx.getString(R.string.upload_test_not_tus) to false
-                    !info.supports100 || !info.canCreate -> ctx.getString(R.string.upload_test_no_create, info.versions.joinToString()) to false
-                    else -> {
-                        val ok = ctx.getString(R.string.upload_test_ok, info.versions.joinToString(), info.extensions.joinToString(", "))
-                        // who the token is from; a server without /me (plain tus) is skipped silently
-                        val me = withContext(Dispatchers.IO) {
-                            try { client.me() } catch (e: TusClient.HttpError) { throw e } catch (_: Exception) { null }
-                        }
-                        val who = me?.let { ctx.getString(R.string.upload_test_me, it.name, scopesLabel(ctx, it)) }
-                        noUpload = me != null && !me.canUpload
-                        listOfNotNull(ok, who).joinToString("\n") to true
-                    }
+                // who the token is from and what it may do; no /me: not the project's kind of server
+                val me = withContext(Dispatchers.IO) { client.me() }
+                if (me == null) ctx.getString(R.string.upload_test_not_server) to false
+                else {
+                    noUpload = !me.canUpload
+                    ctx.getString(R.string.upload_test_me, me.name, scopesLabel(ctx, me)) to true
                 }
             } catch (e: TusClient.HttpError) {
                 ctx.getString(if (e.code == 401 || e.code == 403) R.string.upload_test_token else R.string.upload_test_http, e.code) to false
@@ -171,6 +164,10 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
         Text(stringResource(R.string.upload_wifi), modifier = Modifier.weight(1f), color = Palette.Ink)
         Switch(wifi, { wifi = it; UploadServer.setWifiOnly(ctx, it) })
     }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(stringResource(R.string.upload_remove_after), modifier = Modifier.weight(1f), color = Palette.Ink)
+        Switch(removeAfter, { removeAfter = it; UploadServer.setRemoveAfter(ctx, it) })
+    }
     Hint(stringResource(R.string.upload_never_recording))
 }
 
@@ -206,49 +203,6 @@ private fun scopesLabel(ctx: Context, me: CloudMe): String {
         }
     } + listOfNotNull(if (me.admin) ctx.getString(R.string.upload_scope_admin) else null)
     return labels.ifEmpty { listOf("–") }.joinToString(", ")
-}
-
-/**
- * One session's upload on its card: not uploaded / waiting / uploading n % / uploaded / failed, with Upload or Retry.
- * Shown only when an upload server is set.
- */
-@Composable
-fun UploadLine(sessionId: String) {
-    val ctx = LocalContext.current
-    val changed by Uploads.changed.collectAsState()
-    val rec = remember(sessionId, changed) { Uploads.record(ctx, sessionId) }
-    val infos by remember(sessionId) { Uploads.flow(ctx, sessionId) }.collectAsState(initial = emptyList())
-    val work = infos.firstOrNull { !it.state.isFinished }
-    val running = work?.state == WorkInfo.State.RUNNING
-    val done = work?.progress?.getLong("done", -1L)?.takeIf { it >= 0 } ?: rec.offset
-    val total = work?.progress?.getLong("total", 0L)?.takeIf { it > 0 } ?: rec.size
-    val pct = if (total > 0) ((done * 100) / total).toInt().coerceIn(0, 100) else 0
-
-    val (text, color) = when {
-        running -> stringResource(R.string.upload_status_uploading, pct) to Palette.Blue
-        work != null && rec.error != null -> stringResource(R.string.upload_status_retrying, rec.error) to Palette.Amber
-        work != null && work.constraints.requiredNetworkType == NetworkType.UNMETERED ->
-            stringResource(R.string.upload_status_wifi) to Palette.Muted
-        work != null -> stringResource(R.string.upload_status_waiting) to Palette.Muted
-        rec.status == UploadStatus.DONE -> stringResource(R.string.upload_status_done, shortTime(rec.uploadedAt)) to Palette.Green
-        rec.status == UploadStatus.FAILED -> stringResource(R.string.upload_status_failed, rec.error ?: "") to Palette.Red
-        else -> stringResource(R.string.upload_status_none) to Palette.Muted
-    }
-    Column(Modifier.padding(top = 6.dp, end = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("☁ $text", fontSize = 13.sp, color = color, modifier = Modifier.weight(1f), maxLines = 2)
-            val action = when {
-                running -> null
-                work != null -> R.string.upload_now          // waiting for Wi-Fi or a retry: go now, any network
-                rec.status == UploadStatus.FAILED -> R.string.upload_retry
-                rec.status == UploadStatus.DONE -> null
-                else -> R.string.upload_action
-            }
-            if (action != null) TextButton(onClick = { Uploads.enqueue(ctx, sessionId, manual = true) },
-                modifier = Modifier.height(36.dp)) { Text(stringResource(action)) }
-        }
-        if (running) LinearProgressIndicator(progress = { pct / 100f }, modifier = Modifier.fillMaxWidth())
-    }
 }
 
 private fun shortTime(isoTime: String?): String = isoTime?.let {

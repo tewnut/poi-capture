@@ -10,7 +10,7 @@
 import type { Dataset } from './types'
 import { version } from '../package.json'
 
-export const DEFAULT_CLOUD_URL = 'https://poi-capture-cloud.4hum-ai.workers.dev/files/'
+export const DEFAULT_CLOUD_URL = 'https://poi-uploader.4hum.ai/files/'
 
 export const INDEX_SCHEMA = 'poi-cloud-index/1'
 export const ME_SCHEMA = 'poi-cloud-me/1'
@@ -418,7 +418,9 @@ const KEY_ADMIN = 'cloudAdminToken'
 /** The saved address, else the default one; an emptied field goes back to the default. */
 export function loadCloud(): CloudConfig {
   try {
-    return { url: localStorage.getItem(KEY_URL) || DEFAULT_CLOUD_URL, token: localStorage.getItem(KEY_TOKEN) || '' }
+    const url = localStorage.getItem(KEY_URL) || DEFAULT_CLOUD_URL
+    // the same Worker's first address (workers.dev) reads as the project's domain
+    return { url: url.includes('poi-capture-cloud.4hum-ai.workers.dev') ? DEFAULT_CLOUD_URL : url, token: localStorage.getItem(KEY_TOKEN) || '' }
   } catch {
     return { url: DEFAULT_CLOUD_URL, token: '' }
   }
