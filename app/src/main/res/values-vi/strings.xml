@@ -196,6 +196,11 @@
     </plurals>
     <string name="capture_end_body">Phiên được lưu trong máy, bạn xem lại vị trí ảnh và gửi ở mục “Đã ghi”.</string>
     <string name="capture_end_save">Kết thúc và lưu</string>
+    <string name="capture_discard">Bỏ chuyến</string>
+    <string name="capture_discard_title">Bỏ chuyến đi này?</string>
+    <string name="capture_discard_body">Chúng sẽ bị xoá khỏi điện thoại và không được gửi đi. Không thể hoàn tác.</string>
+    <string name="capture_discard_confirm">Bỏ chuyến</string>
+    <string name="cancel_back">Quay lại</string>
     <string name="capture_keep_going">Ghi tiếp</string>
     <string name="capture_gps_good">● GPS ±%1$s m</string>
     <string name="capture_gps_weak">● GPS yếu ±%1$s m</string>

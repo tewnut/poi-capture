@@ -88,6 +88,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     val activity = ctx as Activity
     var service by remember { mutableStateOf<CaptureService?>(null) }
     var confirmEnd by remember { mutableStateOf(false) }
+    var confirmDiscard by remember { mutableStateOf(false) }
     var endAfterCheck by remember { mutableStateOf(false) }   // End was pressed on an unsure place: check its pin first
     val previewView = remember { PreviewView(ctx) }
 
@@ -154,6 +155,18 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
         thumb = withContext(Dispatchers.IO) {
             BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = 16 })?.asImageBitmap()
         }
+    }
+
+    /** Throw the ride away (the end dialog's Discard, confirmed): ended without sending, then deleted from the phone. */
+    fun discard() {
+        val s = svc ?: run { onCancel(); return }
+        val id = runCatching { s.session.id }.getOrNull()
+        s.finishSession(discard = true)
+        if (id != null) {
+            CaptureService.store(ctx).delete(id)
+            io.github.tewnut.poicapture.capture.Uploads.forget(ctx, id)
+        }
+        onCancel()
     }
 
     fun end(discardIfEmpty: Boolean) {
@@ -360,11 +373,13 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 .padding(horizontal = 16.dp, vertical = 10.dp))
     }
 
-    if (confirmEnd) EndDialog(ui, video, { confirmEnd = false }, { confirmEnd = false; end(discardIfEmpty = false) })
+    if (confirmEnd) EndDialog(ui, video, { confirmEnd = false }, { confirmEnd = false; end(discardIfEmpty = false) },
+        onDiscard = { confirmEnd = false; confirmDiscard = true })
+    if (confirmDiscard) DiscardDialog(ui, video, { confirmDiscard = false }, { confirmDiscard = false; discard() })
 }
 
 @Composable
-private fun EndDialog(ui: CaptureUi, video: Boolean, onDismiss: () -> Unit, onEnd: () -> Unit) {
+private fun EndDialog(ui: CaptureUi, video: Boolean, onDismiss: () -> Unit, onEnd: () -> Unit, onDiscard: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.capture_end_title)) },
@@ -375,7 +390,29 @@ private fun EndDialog(ui: CaptureUi, video: Boolean, onDismiss: () -> Unit, onEn
             Text(count + " " + stringResource(R.string.capture_end_body))
         },
         confirmButton = { TextButton(onClick = onEnd) { Text(stringResource(R.string.capture_end_save)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.capture_keep_going)) } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDiscard) { Text(stringResource(R.string.capture_discard), color = Palette.Red) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.capture_keep_going)) }
+            }
+        },
+    )
+}
+
+/** Second step of Discard: says what is lost, then the ride is deleted from the phone and never sent. */
+@Composable
+private fun DiscardDialog(ui: CaptureUi, video: Boolean, onDismiss: () -> Unit, onDiscard: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.capture_discard_title)) },
+        text = {
+            val clips = ui.videos + if (ui.recording) 1 else 0
+            val count = if (video) pluralStringResource(R.plurals.capture_end_videos, clips, clips)
+                else pluralStringResource(R.plurals.capture_end_photos, ui.photos, ui.photos)
+            Text(count + " " + stringResource(R.string.capture_discard_body))
+        },
+        confirmButton = { TextButton(onClick = onDiscard) { Text(stringResource(R.string.capture_discard_confirm), color = Palette.Red) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel_back)) } },
     )
 }
 

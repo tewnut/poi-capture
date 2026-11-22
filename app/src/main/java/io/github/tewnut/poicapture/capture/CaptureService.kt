@@ -1035,8 +1035,11 @@ class CaptureService : LifecycleService() {
         _state.update { it.copy(running = false) }
     }
 
-    /** End the session: stop everything, write the summary, leave the foreground. */
-    fun finishSession() {
+    /**
+     * End the session: stop everything, write the summary, leave the foreground. [discard]: the contributor throws the
+     * ride away (the caller deletes it): nothing is sent to the server and no coverage is computed.
+     */
+    fun finishSession(discard: Boolean = false) {
         if (activeSession.value == null) return
         pause()
         lm?.removeUpdates(locationListener)
@@ -1057,10 +1060,10 @@ class CaptureService : LifecycleService() {
         session.counts = JSONObject().put("photos", ui.photos).put("videos", ui.videos).put("trackPoints", ui.trackPoints)
         store.save(session)
         val sid = session.id
-        io.execute { runCatching { Coverage.forSession(store, sid) } }   // (a full package name here would hit the `io` executor)
+        if (!discard) io.execute { runCatching { Coverage.forSession(store, sid) } }   // (a full package name here would hit the `io` executor)
         runCatching { wake?.release() }
         activeSession.value = null
-        runCatching { Uploads.onSessionEnded(this, sid) }   // to the upload server, if set to upload automatically
+        if (!discard) runCatching { Uploads.onSessionEnded(this, sid) }   // to the upload server, if set to upload automatically
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

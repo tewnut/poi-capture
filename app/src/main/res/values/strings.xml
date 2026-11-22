@@ -203,6 +203,11 @@
     </plurals>
     <string name="capture_end_body">The session stays on the phone; check the photo locations and send it from “Sessions”.</string>
     <string name="capture_end_save">End and save</string>
+    <string name="capture_discard">Discard</string>
+    <string name="capture_discard_title">Discard this ride?</string>
+    <string name="capture_discard_body">They are deleted from the phone and never sent. This cannot be undone.</string>
+    <string name="capture_discard_confirm">Discard ride</string>
+    <string name="cancel_back">Back</string>
     <string name="capture_keep_going">Keep recording</string>
     <string name="capture_gps_good">● GPS ±%1$s m</string>
     <string name="capture_gps_weak">● Weak GPS ±%1$s m</string>
