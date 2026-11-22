@@ -22,7 +22,7 @@ import { geojson, csv, osm, tasksGeojson, download, type Published, type Removed
 import { buildProject, projectName } from './project'
 import { missingStreet, pendingSuggestions } from './fields'
 import { humanSize, type CloudItem } from './cloud'
-import { conn, connected, canRead, connect, refresh, rows, pull, loadSaved, saveToServer, type Row } from './connection'
+import { conn, connected, canRead, canRelease, stopProcessing, connect, refresh, rows, pull, loadSaved, saveToServer, type Row } from './connection'
 import { swipeStep, neighbour, blocksSwipe, type Step } from './swipe'
 import { LAYERS, layerOf, type Dataset, type Layer, type Place } from './types'
 
@@ -138,10 +138,19 @@ let autosave: ReturnType<typeof setInterval> | undefined
 onMounted(() => { autosave = setInterval(() => {
   for (const id of [...state.dirty]) {
     const d = state.datasets.find((x) => x.id === id)
-    if (d && state.editable.has(id) && !conn.reviewBusy) saveToServer(d, false).catch(() => {})
+    if (d && state.editable.has(id) && !conn.reviewBusy && !state.conflicts[id]?.length) saveToServer(d, false).catch(() => {})
   }
 }, AUTOSAVE_MS) })
 onBeforeUnmount(() => clearInterval(autosave))
+/** Free a ride being processed (its agent, or a key with the release scope), after asking. */
+function stopProc(r: Row) {
+  if (window.confirm(t('stopProcessingConfirm', procParams(r)))) stopProcessing(r.sessionId).catch((e) => window.alert(e?.message || String(e)))
+}
+/** A ride being processed: who and since when (GET /processing). */
+function procParams(r: Row) {
+  const p = conn.processing[r.sessionId]
+  return { name: p?.by.name ?? '', when: p ? relTime(p.at) : '', until: p ? relTime(p.until) : '' }
+}
 /** The list's word on a session's review: who has it checked out, or how far the last saved review got. */
 function lockLabel(r: Row): { text: string; cls: string; title: string } | null {
   const i = conn.reviews[r.sessionId]
@@ -410,6 +419,10 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
                 </template>
                 <div v-else class="stats">
                   <span v-if="conn.pulling === r.sessionId" class="chip">{{ t('downloadingShort') }}</span>
+                  <span v-else-if="r.state === 'waiting' && conn.processing[r.sessionId]" class="chip visit"
+                    :title="t('processingTitle', procParams(r))">{{ t('processingBy', procParams(r)) }}</span>
+                  <button v-if="r.state === 'waiting' && conn.processing[r.sessionId] && (canRelease || conn.processing[r.sessionId].by.id === conn.me?.id)"
+                    class="ghost small" :title="t('stopProcessingTitle', procParams(r))" @click.stop="stopProc(r)">{{ t('stopProcessing') }}</button>
                   <span v-else-if="r.state === 'waiting'" class="chip">{{ t('waitingAgent') }}</span>
                   <span v-else class="chip ok">{{ t('onServer', { size: humanSize(r.item?.size ?? null) }) }}</span>
                   <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]" :title="lockLabel(r)!.title">{{ lockLabel(r)!.text }}</span>

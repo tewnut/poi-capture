@@ -1,13 +1,15 @@
 <script setup lang="ts">
 // The open session's checkout (server/README.md "Reviews"): free → Check out; checked out by this reviewer → Save to
-// server, Check in, Give up; by someone else → who and since when (read-only here; an admin may release it). A
+// server, Check in, Give up; by someone else → who and since when (read-only here; an admin or a key with the release scope may release it). A
 // checkout that ended while this browser had unsaved changes (released by an admin, expired) keeps them until the
 // reviewer chooses: check out again and keep them, or discard them. History: every checkout, save, check-in, release;
 // an admin can make an earlier version the review again (undo a check-in).
 import { computed, ref, watch } from 'vue'
 import { t, relTime } from '../i18n'
 import { state } from '../store'
-import { conn, connected, checkOut, saveToServer, giveUp, forceRelease, discardMine, restoreVersion } from '../connection'
+import { conn, connected, canRelease, checkOut, saveToServer, giveUp, forceRelease, discardMine, restoreVersion, decideConflict } from '../connection'
+import type { Conflict } from '../merge'
+import type { Review, RemovalReview } from '../types'
 import { CheckedOut, reviewHistory, type ReviewEvent } from '../cloud'
 import type { Dataset } from '../types'
 
@@ -48,6 +50,29 @@ const takeKeep = () => {
   if (n && !window.confirm(t('keepMineConfirm', { name: n.by.name, when: relTime(n.at) }))) return
   run(() => checkOut(props.ds, true))
 }
+// ---- conflicts: places this reviewer and somebody else both changed differently (merge.ts), decided one by one
+const conflicts = computed(() => state.conflicts[props.ds.id] || [])
+function cName(c: Conflict): string {
+  if (c.kind === 'removal') return props.ds.tasks[Number(c.key)]?.name || `#${c.key}`
+  return props.ds.places.find((p) => p.id === c.key)?.name || c.key
+}
+/** One side of a conflict in a few words: the decision, what was edited, the comment, and who. */
+function side(v: Review | RemovalReview | null): string {
+  if (!v) return t('conflictNone')
+  const dec = t('dec' + v.decision.charAt(0).toUpperCase() + v.decision.slice(1))
+  const parts = [dec]
+  if ('fields' in v) {
+    const edited = Object.values(v.fields || {}).filter((x) => x && x.state !== 'ok').length
+    if (edited) parts.push(t('conflictEdited', { n: edited }))
+    if (v.pin?.source === 'manual') parts.push(t('conflictPin'))   // moved by hand (a confirm records the chosen pin too)
+    if (v.comment) parts.push(`“${v.comment.slice(0, 40)}”`)
+  }
+  if (v.reviewer) parts.push(t('conflictBy', { name: v.reviewer }))
+  return parts.join(' · ')
+}
+const decide = (choice: 'mine' | 'theirs', c?: Conflict) => run(() => decideConflict(props.ds.id, choice, c && { kind: c.kind, key: c.key }))
+const goTo = (c: Conflict) => { if (c.kind === 'place') state.place = c.key }
+
 const discard = () => { if (window.confirm(t('discardConfirm'))) run(() => discardMine(props.ds)) }
 const save = () => run(() => saveToServer(props.ds, false))
 const checkin = () => run(() => saveToServer(props.ds, true))
@@ -84,12 +109,32 @@ function restore(e: ReviewEvent) {
       <div class="small"><b>{{ t('checkedOutYou') }}</b>
         <span class="muted"> · {{ dirty ? t('unsaved') : info?.saved ? t('savedWhen', { when: relTime(info.saved.at) }) : t('notSavedYet') }}</span></div>
       <div class="btns">
-        <button class="secondary small" :disabled="busy || !dirty" @click="save">{{ t('saveToServer') }}</button>
-        <button class="primary small" :disabled="busy" :title="t('checkInTitle')" @click="checkin">{{ busy ? t('working') : t('checkIn') }}</button>
+        <button class="secondary small" :disabled="busy || !dirty || !!conflicts.length" @click="save">{{ t('saveToServer') }}</button>
+        <button class="primary small" :disabled="busy || !!conflicts.length" :title="t('checkInTitle')" @click="checkin">{{ busy ? t('working') : t('checkIn') }}</button>
         <span v-if="confirmGiveUp" class="confirm small">{{ t('giveUpConfirm') }}
           <button class="danger small" @click="drop">{{ t('giveUp') }}</button>
           <button class="ghost small" @click="confirmGiveUp = false">{{ t('cancel') }}</button></span>
         <button v-else class="ghost small" :disabled="busy" @click="confirmGiveUp = true">{{ t('giveUp') }}</button>
+      </div>
+      <div v-if="conflicts.length" class="conflicts small">
+        <p><b>⚠ {{ t('conflictsTitle', { n: conflicts.length }) }}</b> <span class="muted">{{ t('conflictsHelp') }}</span></p>
+        <ul>
+          <li v-for="c in conflicts" :key="c.kind + c.key">
+            <button class="link" @click="goTo(c)">{{ cName(c) }}</button>
+            <div class="sides">
+              <span><b>{{ t('conflictMine') }}:</b> {{ side(c.mine) }}</span>
+              <span><b>{{ t('conflictTheirs') }}:</b> {{ side(c.theirs) }}</span>
+            </div>
+            <div class="btns">
+              <button class="secondary small" :disabled="busy" @click="decide('mine', c)">{{ t('keepMine') }}</button>
+              <button class="secondary small" :disabled="busy" @click="decide('theirs', c)">{{ t('takeTheirs') }}</button>
+            </div>
+          </li>
+        </ul>
+        <div v-if="conflicts.length > 1" class="btns">
+          <button class="ghost small" :disabled="busy" @click="decide('mine')">{{ t('keepAllMine') }}</button>
+          <button class="ghost small" :disabled="busy" @click="decide('theirs')">{{ t('takeAllTheirs') }}</button>
+        </div>
       </div>
     </template>
     <template v-else-if="lost">
@@ -104,7 +149,7 @@ function restore(e: ReviewEvent) {
     <template v-else-if="other">
       <div class="small">🔒 <b>{{ t('checkedOutBy', { name: other.by.name, when: relTime(other.at) }) }}</b>
         <span class="muted"> · {{ t('readOnly') }}</span></div>
-      <div class="btns"><button v-if="conn.me?.admin" class="ghost small" @click="release">{{ t('releaseLock') }}</button></div>
+      <div class="btns"><button v-if="canRelease" class="ghost small" @click="release">{{ t('releaseLock') }}</button></div>
     </template>
     <template v-else>
       <div class="small"><span class="muted">{{ info?.saved ? t('lastSavedBy', { name: info.saved.by.name, when: relTime(info.saved.at) }) : t('notReviewedYet') }}</span>

@@ -208,8 +208,10 @@ admin page; the shared token is gone) set in the environment (never pass or prin
 
 ```
 python <skill>/scripts/cloud.py list                         # raw sessions from phones (type raw-session)
-python <skill>/scripts/cloud.py pull <id> <work>             # the session zip, for step 1
+python <skill>/scripts/cloud.py pull <id> <work>             # the session zip, for step 1; marks it "being processed by you"
 python <skill>/scripts/cloud.py push <out folder | zip>      # after step 5: the processed result (result.json + photos)
+python <skill>/scripts/cloud.py processing                   # who is processing which ride
+python <skill>/scripts/cloud.py release <session id>         # giving up without a result (frees it for another agent)
 ```
 
 `push` zips a folder and sends it as `type=processed-result` with its session id and name from result.json; the

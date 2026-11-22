@@ -360,7 +360,7 @@ describe('permissions (scopes)', () => {
     // /me
     const m = await (await SELF.fetch(ROOT + '/me', { headers: T(agent.secret) })).json()
     expect(m).toMatchObject({ scopes: ['process'], admin: false, role: 'agent' })
-    expect(await (await SELF.fetch(ROOT + '/me', { headers: ADMIN })).json()).toMatchObject({ admin: true, scopes: ['upload', 'read', 'process', 'delete'] })
+    expect(await (await SELF.fetch(ROOT + '/me', { headers: ADMIN })).json()).toMatchObject({ admin: true, scopes: ['upload', 'read', 'process', 'delete', 'release'] })
   })
 
   it('changes a token\'s scopes and name; refuses bad changes', async () => {
@@ -384,7 +384,7 @@ describe('permissions (scopes)', () => {
   it('lists built-ins with their scopes', async () => {
     const l = await (await SELF.fetch(ROOT + '/admin/tokens', { headers: ADMIN })).json<{ builtins: { id: string; scopes: string[] }[] }>()
     expect(l.builtins.map((b) => b.id)).toEqual(['admin'])
-    expect(l.builtins.find((b) => b.id === 'admin')!.scopes).toEqual(['upload', 'read', 'process', 'delete'])
+    expect(l.builtins.find((b) => b.id === 'admin')!.scopes).toEqual(['upload', 'read', 'process', 'delete', 'release'])
   })
 })
 
@@ -509,6 +509,22 @@ describe('reviews (checkout / check-in)', () => {
     expect((await SELF.fetch(`${ROOT}/reviews/${sid}`, { headers: lan })).status).toBe(404)
   })
 
+  it('a key with the release scope ends another reviewer’s checkout and processing, without being admin', async () => {
+    const son = await key('Sơn', ['read'])
+    const lead = await key('Lead', ['read', 'release'])
+    const agent = await key('Agent', ['read', 'process'])
+    const sid = 's_review_lead'
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'POST', headers: son })).status).toBe(200)
+    expect((await SELF.fetch(`${ROOT}/reviews/${sid}/checkout`, { method: 'DELETE', headers: lead })).status).toBe(204)
+    const r = (await (await SELF.fetch(`${ROOT}/reviews`, { headers: lead })).json<any>()).reviews.find((x: any) => x.sessionId === sid)
+    expect(r).toMatchObject({ lock: null, ended: { of: { name: 'Sơn' }, by: 'Lead', reason: 'released' } })
+    expect((await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'POST', headers: agent })).status).toBe(200)
+    expect((await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'DELETE', headers: son })).status).toBe(403)
+    expect((await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'DELETE', headers: lead })).status).toBe(204)
+    // the scope alone does not give admin rights
+    expect((await SELF.fetch(`${ROOT}/admin/tokens`, { headers: lead })).status).toBe(403)
+  })
+
   const ADMIN = { Authorization: 'Bearer admin-token' }
   const post = (h: Record<string, string>, path: string, body?: unknown) =>
     SELF.fetch(ROOT + path, { method: 'POST', headers: { ...h, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })
@@ -585,5 +601,43 @@ describe('reviews (checkout / check-in)', () => {
     expect(saves.filter((e: any) => e.version).length).toBe(6)   // the current one and the 5 before it
     const objs = await env.BUCKET.list({ prefix: `reviews/${sid}/` })
     expect(objs.objects.length).toBe(6)
+  })
+})
+
+describe('processing (who is working on a raw ride)', () => {
+  const ROOT = 'https://cloud.test'
+  async function key(name: string, scopes: string[]) {
+    const r = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, scopes }) })
+    return { Authorization: `Bearer ${(await r.json<{ secret: string }>()).secret}` }
+  }
+  const list = async (h: Record<string, string>) => (await (await SELF.fetch(ROOT + '/processing', { headers: h })).json<any>()).processing
+
+  it('one agent at a time; the reviewers see who; the result ends it', async () => {
+    const agent = await key('Agent Phong', ['read', 'process'])
+    const other = await key('Agent 2', ['read', 'process'])
+    const reviewer = await key('Lan', ['read'])
+    const sid = 's_proc1'
+    const a = await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'POST', headers: agent })
+    expect(a.status).toBe(200)
+    expect((await a.json<any>()).by.name).toBe('Agent Phong')
+    expect((await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'POST', headers: other })).status).toBe(409)
+    expect((await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'POST', headers: reviewer })).status).toBe(403)
+    expect((await list(reviewer)).find((x: any) => x.sessionId === sid)).toMatchObject({ by: { name: 'Agent Phong' } })
+    // the processed result of the ride is uploaded: nobody is processing it any more
+    const url = await create(4, { filename: 'r.zip', type: 'processed-result', sessionId: sid })
+    expect((await patch(url, 0, bytes(4))).status).toBe(204)
+    expect((await list(reviewer)).find((x: any) => x.sessionId === sid)).toBeUndefined()
+  })
+
+  it('released by its agent or an admin, not by another', async () => {
+    const agent = await key('Agent Phong', ['read', 'process'])
+    const other = await key('Agent 2', ['read', 'process'])
+    const sid = 's_proc2'
+    await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'POST', headers: agent })
+    expect((await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'DELETE', headers: other })).status).toBe(403)
+    expect((await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'DELETE', headers: { Authorization: 'Bearer admin-token' } })).status).toBe(204)
+    expect((await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'DELETE', headers: agent })).status).toBe(404)
+    expect((await SELF.fetch(`${ROOT}/processing/${sid}`, { method: 'POST', headers: other })).status).toBe(200)
   })
 })

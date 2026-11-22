@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_CLOUD_URL, loadCloud, saveCloud, downloadItem, endpoint, fetchIndex, importState, parseIndex, processedItems, INDEX_SCHEMA, type CloudItem,
   serverRoot, setupLink, me, listTokens, issueToken, revokeToken, deleteUpload, CloudError, loadAdminToken, saveAdminToken,
-  adminTokens, updateToken, parseScopes, roleOf, SCOPES, PRESETS, decodePolyline, parseSeen, twoClients, browserSummary, clientName, listReviews, reviewHistory, restoreReview } from './cloud'
+  adminTokens, updateToken, parseScopes, roleOf, SCOPES, PRESETS, decodePolyline, parseSeen, twoClients, browserSummary, clientName, listReviews, listProcessing, reviewHistory, restoreReview } from './cloud'
 
 const index = {
   schema: INDEX_SCHEMA,
@@ -404,6 +404,17 @@ describe('review lifecycle', () => {
     expect(a.ended).toEqual({ of: { id: 't1', name: 'Lan' }, by: 'Admin', at: '2026-11-22T04:00:00Z', reason: 'released' })
     expect(a.saved!.version).toBe('v1-abcd1234')
     expect(b.ended).toBeNull()   // an unknown reason is ignored
+  })
+
+  it('reads who is processing which ride', async () => {
+    const urls: string[] = []
+    const f = (async (u: string) => { urls.push(u); return json({ schema: 'poi-cloud-processing/1', processing: [
+      { sessionId: 's_ride', by: { id: 't9', name: 'Agent Phong' }, at: '2026-11-22T09:00:00Z', until: '2026-11-22T21:00:00Z' },
+      { sessionId: 's_bad' },
+    ] }) }) as unknown as typeof fetch
+    expect(await listProcessing(cfg, f)).toEqual([{ sessionId: 's_ride', by: { id: 't9', name: 'Agent Phong' },
+      at: '2026-11-22T09:00:00Z', until: '2026-11-22T21:00:00Z' }])
+    expect(urls[0]).toMatch(/\/processing$/)
   })
 
   it('reads the history and restores a version', async () => {

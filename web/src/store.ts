@@ -5,6 +5,7 @@ import { createStore, get, set, del, keys, getMany, clear } from 'idb-keyval'
 import type { Dataset, Review, RemovalReview, Place, Decision, Layer } from './types'
 import type { Imported } from './importer'
 import { googleMergeable } from './fields'
+import type { Conflict, ReviewSet } from './merge'
 
 const meta = createStore('poi-capture-reviewer', 'meta')      // dataset json, reviews
 const blobs = createStore('poi-capture-reviewer-files', 'files') // photos: `${datasetId}/${path}`
@@ -26,6 +27,13 @@ export const state = reactive({
   dirty: new Set<string>(),
   /** Per session, the server review (its savedAt) last loaded into this browser. */
   synced: {} as Record<string, string>,
+  /**
+   * Per session, the server review this browser's work started from (loaded or last saved) and its version: the base
+   * of the three-way merge when somebody else saved meanwhile (merge.ts).
+   */
+  base: {} as Record<string, ReviewSet & { version: string | null }>,
+  /** Per session, places both this reviewer and somebody else changed differently, to decide before saving. */
+  conflicts: {} as Record<string, Conflict[]>,
   loading: true,
   error: '' as string,
 })
@@ -41,6 +49,8 @@ export async function load() {
     state.removals = (await get('removals', meta)) || {}
     state.synced = (await get('synced', meta)) || {}
     state.dirty = new Set((await get('dirty', meta)) || [])
+    state.base = (await get('base', meta)) || {}
+    state.conflicts = (await get('conflicts', meta)) || {}
     state.shown = new Set(state.datasets.map((d) => d.id))
   } catch (e: any) {
     state.error = `Could not open the browser storage: ${e.message}`
@@ -131,6 +141,21 @@ export async function saveReviews() {
   await set('reviews', JSON.parse(JSON.stringify(state.reviews)), meta)
   await set('removals', JSON.parse(JSON.stringify(state.removals)), meta)
   await set('dirty', [...state.dirty], meta)
+  await set('conflicts', JSON.parse(JSON.stringify(state.conflicts)), meta)
+}
+
+/** What this browser's work on [ds] now starts from: the server review [s] (version [version]). */
+export async function setBase(ds: string, s: ReviewSet, version: string | null) {
+  state.base[ds] = JSON.parse(JSON.stringify({ ...s, version }))
+  await set('base', JSON.parse(JSON.stringify(state.base)), meta)
+}
+
+/** Replace this session's reviews and removals in this browser with [s]. */
+export function replaceSet(ds: string, s: ReviewSet) {
+  for (const k of Object.keys(state.reviews)) if (k.startsWith(ds + '|')) delete state.reviews[k]
+  for (const k of Object.keys(state.removals)) if (k.startsWith(ds + '|')) delete state.removals[k]
+  for (const [id, r] of Object.entries(s.reviews)) state.reviews[rkey(ds, id)] = r
+  for (const [i, r] of Object.entries(s.removals)) state.removals[`${ds}|${i}`] = r
 }
 
 export async function setSynced(ds: string, at: string | null) {
@@ -141,15 +166,14 @@ export async function setSynced(ds: string, at: string | null) {
 
 /** A review loaded from the server replaces this session's reviews, removals and reviewer photos in this browser. */
 export async function applyReview(ds: string, reviews: Record<string, Review>, removals: Record<string, RemovalReview>,
-  files: Map<string, Blob>, savedAt: string | null) {
-  for (const k of Object.keys(state.reviews)) if (k.startsWith(ds + '|')) delete state.reviews[k]
-  for (const k of Object.keys(state.removals)) if (k.startsWith(ds + '|')) delete state.removals[k]
-  for (const [id, r] of Object.entries(reviews)) state.reviews[rkey(ds, id)] = r
-  for (const [i, r] of Object.entries(removals)) state.removals[`${ds}|${i}`] = r
+  files: Map<string, Blob>, savedAt: string | null, version: string | null = null) {
+  replaceSet(ds, { reviews, removals })
   for (const [path, b] of files) await putPhoto(ds, path, b)
   state.dirty.delete(ds)
+  delete state.conflicts[ds]
   await saveReviews()
   await setSynced(ds, savedAt)
+  await setBase(ds, { reviews, removals }, version)
 }
 
 export function setReviewer(name: string) {

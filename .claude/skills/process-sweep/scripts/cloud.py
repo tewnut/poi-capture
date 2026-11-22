@@ -4,6 +4,12 @@
     python cloud.py pull <id> <dir> [--extract]       download one upload into <dir> (and unzip it next to it)
     python cloud.py push <zip-or-folder> [--type processed-result] [--session-id ID] [--name NAME]
     python cloud.py delete <id> [<id> ...]           remove uploads, finished ones too (needs the admin token)
+    python cloud.py processing                       who is processing which ride
+    python cloud.py claim <session-id>               say you are processing it (pull does it), renew it
+    python cloud.py release <session-id>             stop processing it without a result (push ends it too)
+
+`pull` of a raw ride marks it as being processed by this key (the reviewers' list shows who, server/README.md
+"Processing"); another agent's claim stops the pull unless --force. Uploading its processed result ends the claim.
 
 The server is the tus endpoint the phone uploads to, e.g. https://host/files/ : --url, or the POI_CLOUD_URL environment
 variable. The token (optional, sent as "Authorization: Bearer ...") comes only from POI_CLOUD_TOKEN or --token-file,
@@ -110,6 +116,34 @@ class Cloud:
                 return False
             if e.code == 400:
                 raise SystemExit(f'{upload_id}: finished uploads can only be deleted with the admin token')
+            raise
+
+    def _root(self) -> str:
+        """The server's root (the tus endpoint lives under it, e.g. /files/): /processing is there."""
+        u = urllib.parse.urlsplit(self.base)
+        return f'{u.scheme}://{u.netloc}'
+
+    def processing(self) -> list[dict]:
+        with self._req('GET', self._root() + '/processing') as r:
+            return json.load(r).get('processing', [])
+
+    def claim(self, session_id: str) -> tuple[bool, dict]:
+        """Mark [session_id] as being processed by this key: (True, claim), or (False, the other agent's claim)."""
+        try:
+            with self._req('POST', self._root() + '/processing/' + urllib.parse.quote(session_id)) as r:
+                return True, json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                return False, json.load(e)
+            raise
+
+    def release(self, session_id: str) -> bool:
+        try:
+            with self._req('DELETE', self._root() + '/processing/' + urllib.parse.quote(session_id)):
+                return True
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return False
             raise
 
     def index(self, type_: str | None = None) -> list[dict]:
@@ -244,6 +278,13 @@ def main(argv=None) -> int:
     p.add_argument('id')
     p.add_argument('dir')
     p.add_argument('--extract', action='store_true', help='also unzip into <dir>/<file name without .zip>/')
+    p.add_argument('--force', action='store_true', help='pull even when another agent is processing it')
+    p.add_argument('--no-claim', action='store_true', help='only download (a look, not processing it)')
+    sub.add_parser('processing')
+    p = sub.add_parser('claim')
+    p.add_argument('session_id')
+    p = sub.add_parser('release')
+    p.add_argument('session_id')
     p = sub.add_parser('push')
     p.add_argument('path', help='a zip, or a folder to zip (processed place folder with result.json)')
     p.add_argument('--type', default='processed-result')
@@ -280,7 +321,15 @@ def main(argv=None) -> int:
             raise SystemExit(f'{a.id}: not on the server')
         if not u.get('complete'):
             raise SystemExit(f'{a.id}: upload not finished yet ({human(u.get("offset"))} of {human(u.get("size"))})')
-        name = os.path.basename((u.get('metadata') or {}).get('filename') or a.id) or a.id
+        meta = u.get('metadata') or {}
+        sid = meta.get('sessionId')
+        if sid and meta.get('type') == 'raw-session' and not a.no_claim:
+            ok, c = cloud.claim(sid)
+            if not ok and not a.force:
+                raise SystemExit(f"{sid}: {c['by']['name']} is processing it since {c['at'][:16]} (--force to pull anyway)")
+            print(f"{sid}: processing by {c['by']['name']} (until {c['until'][:16]} UTC, renewed by claim)" if ok
+                  else f"{sid}: pulled anyway, {c['by']['name']} is processing it")
+        name = os.path.basename(meta.get('filename') or a.id) or a.id
         os.makedirs(a.dir, exist_ok=True)
         out = os.path.join(a.dir, name)
         n = cloud.download(a.id, out)
@@ -295,6 +344,19 @@ def main(argv=None) -> int:
                         raise SystemExit(f'unsafe path in zip: {m}')
                 z.extractall(dest)
             print(dest)
+    elif a.cmd == 'processing':
+        rows = cloud.processing()
+        for c in rows:
+            print(f"{c['sessionId']}  {c['by']['name']}  since {c['at'][:16]}  until {c['until'][:16]} UTC")
+        if not rows:
+            print('nobody is processing a ride')
+    elif a.cmd == 'claim':
+        ok, c = cloud.claim(a.session_id)
+        print(f"{a.session_id}: " + (f"processing by {c['by']['name']} until {c['until'][:16]} UTC" if ok
+              else f"{c['by']['name']} is processing it since {c['at'][:16]}"))
+        return 0 if ok else 1
+    elif a.cmd == 'release':
+        print(f"{a.session_id}: " + ('released' if cloud.release(a.session_id) else 'nobody was processing it'))
     elif a.cmd == 'delete':
         for i in a.ids:
             print(f"{i}  {'deleted' if cloud.delete(i) else 'not on the server'}")

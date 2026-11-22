@@ -42,6 +42,7 @@ export interface Env {
 }
 
 const REVIEW_LOCK_MS = 24 * 3600 * 1000         // a checkout with no save for this long is free again
+const PROCESS_LOCK_MS = 12 * 3600 * 1000        // a ride being processed, not renewed for this long, is waiting again
 const MAX_REVIEW = 100 * 1024 * 1024             // a review package (review.json + the reviewer's photos), bytes
 const KEEP_CHECKINS = 10                          // review versions kept per session: the latest check-ins ...
 const KEEP_SAVES = 5                              // ... and the latest plain saves (autosaves), besides the current one
@@ -76,8 +77,9 @@ export type UploadState = {
   direct?: boolean           // written by the client straight to R2 (POST /direct): no PATCH, no carry
 }
 export type By = { id: string; name: string }
-export type Scope = 'upload' | 'read' | 'process' | 'delete'
-const SCOPES: Scope[] = ['upload', 'read', 'process', 'delete']
+// release: end somebody else's review checkout or processing claim (a lead reviewer; before, only the admin could)
+export type Scope = 'upload' | 'read' | 'process' | 'delete' | 'release'
+const SCOPES: Scope[] = ['upload', 'read', 'process', 'delete', 'release']
 /** A summary of the scopes for older clients (README, GET /me). */
 export type Role = 'admin' | 'uploader' | 'reviewer' | 'agent' | 'custom'
 export type Principal = { id: string; name: string; scopes: Scope[]; admin: boolean }
@@ -137,6 +139,12 @@ export type ReviewEvent = {
   at: string; action: ReviewAction; by: By | null; of: string | null; version: string | null
   size: number | null; done: number | null; total: number | null; note: string | null
 }
+
+/**
+ * GET /processing: who is processing a raw ride (README "Processing"), until its result is uploaded, it is released,
+ * or PROCESS_LOCK_MS pass without a renewal.
+ */
+export type ProcessingInfo = { sessionId: string; by: By; at: string; until: string }
 
 /** GET /reviews: a session's checkout (null when free or expired), its last saved review, how the last checkout ended. */
 export type ReviewInfo = {
@@ -211,6 +219,43 @@ export class Uploads extends DurableObject<Env> {
       n INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, at INTEGER NOT NULL, action TEXT NOT NULL,
       by_id TEXT, by_name TEXT, of_name TEXT, version TEXT, size INTEGER, done INTEGER, total INTEGER, note TEXT)`)
     this.sql.exec('CREATE INDEX IF NOT EXISTS review_events_sid ON review_events (session_id, n)')
+    // a raw ride someone is processing (agent): one row per ride, the latest claim
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS processing (
+      session_id TEXT PRIMARY KEY, by_id TEXT NOT NULL, by_name TEXT NOT NULL, at INTEGER NOT NULL, until INTEGER NOT NULL)`)
+  }
+
+  // ---- processing (README "Processing"): who is working on a raw ride
+
+  /** Claims still on: not expired, and no processed result of the ride uploaded since the claim (that ends it). */
+  processingList(): ProcessingInfo[] {
+    const now = Date.now()
+    const rows = this.sql.exec('SELECT * FROM processing WHERE until > ?', now).toArray()
+    if (!rows.length) return []
+    const results = this.list('processed-result').filter((u) => u.complete)
+    return rows.filter((r) => !results.some((u) => (u.metadata.sessionId === r.session_id || u.metadata.parentId === r.session_id)
+      && Date.parse(u.createdAt) >= Number(r.at)))
+      .map((r) => ({ sessionId: String(r.session_id), by: { id: String(r.by_id), name: String(r.by_name) }, at: iso(r.at)!, until: iso(r.until)! }))
+  }
+
+  /** [by] processes [sid]: free, expired, finished or already [by]'s (renewed) → 200; somebody else's → 409. */
+  claimProcessing(sid: string, by: By): { status: 200 | 409; info: ProcessingInfo } {
+    const now = Date.now()
+    const cur = this.processingList().find((x) => x.sessionId === sid)
+    if (cur && cur.by.id !== by.id) return { status: 409, info: cur }
+    const at = cur ? Date.parse(cur.at) : now
+    this.sql.exec(`INSERT INTO processing (session_id, by_id, by_name, at, until) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET by_id = excluded.by_id, by_name = excluded.by_name, at = excluded.at, until = excluded.until`,
+    sid, by.id, by.name, at, now + PROCESS_LOCK_MS)
+    return { status: 200, info: { sessionId: sid, by, at: iso(at)!, until: iso(now + PROCESS_LOCK_MS)! } }
+  }
+
+  /** Stop processing [sid]: [by]'s own, or as an admin anybody's. 404 none, 403 somebody else's. */
+  releaseProcessing(sid: string, by: By, admin: boolean): { status: 204 | 403 | 404 } {
+    const cur = this.processingList().find((x) => x.sessionId === sid)
+    if (!cur) return { status: 404 }
+    if (cur.by.id !== by.id && !admin) return { status: 403 }
+    this.sql.exec('DELETE FROM processing WHERE session_id = ?', sid)
+    return { status: 204 }
   }
 
   // ---- reviews (README "Reviews"): a lock per session, and the last saved review's details
@@ -969,6 +1014,34 @@ async function direct(env: Env, req: Request, base: string, rest: string, p: Pri
   return json(200, { schema: 'poi-cloud-direct/1', id, location: `${origin}${base}/${id}`, size: s.size, complete: true })
 }
 
+// ------------------------------------------------------------------------------------------------ processing
+
+/**
+ * README "Processing". GET /processing (read or process): the rides being processed. POST /processing/<session>
+ * (process): claim or renew; 409 with the holder when somebody else has it. DELETE: release (own, or with the release
+ * scope / as an admin anybody's).
+ */
+async function processing(env: Env, req: Request, rest: string, p: Principal): Promise<Response> {
+  if (!canRead(p)) return text(403, 'Forbidden\n')
+  const by: By = { id: p.id, name: p.name }
+  if (!rest) {
+    if (req.method !== 'GET') return text(405, 'Method not allowed\n')
+    return json(200, { schema: 'poi-cloud-processing/1', processing: await stub(env).processingList() })
+  }
+  const m = /^([A-Za-z0-9_-]{1,64})$/.exec(rest)
+  if (!m) return text(404, 'Not found\n')
+  if (req.method === 'POST') {
+    if (!has(p, 'process')) return text(403, 'Processing needs a key with Process rides\n')
+    const r = await stub(env).claimProcessing(m[1], by)
+    return json(r.status, r.info)
+  }
+  if (req.method === 'DELETE') {
+    const r = await stub(env).releaseProcessing(m[1], by, has(p, 'release'))
+    return r.status === 204 ? new Response(null, { status: 204 }) : text(r.status, r.status === 404 ? 'Not being processed\n' : 'Forbidden\n')
+  }
+  return text(405, 'Method not allowed\n')
+}
+
 // ------------------------------------------------------------------------------------------------ reviews
 
 const intHeader = (v: string | null) => (v != null && /^\d{1,7}$/.test(v) ? Number(v) : null)
@@ -1011,7 +1084,7 @@ async function reviews(env: Env, req: Request, rest: string, p: Principal): Prom
       return json(200, { schema: 'poi-cloud-review/1', ...r.info })
     }
     if (req.method === 'DELETE') {
-      const r = await stub(env).releaseReview(sid, by, p.admin)
+      const r = await stub(env).releaseReview(sid, by, has(p, 'release'))
       if (r.status === 403) return text(403, 'Checked out by someone else\n')
       if (r.status === 404) return text(404, 'Not checked out\n')
       return new Response(null, { status: 204 })
@@ -1065,7 +1138,8 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   const isAdmin = url.pathname.startsWith('/admin/')
   const isDirect = url.pathname === '/direct' || url.pathname.startsWith('/direct/')
   const isReviews = url.pathname === '/reviews' || url.pathname.startsWith('/reviews/')
-  if (!isMe && !isAdmin && !isDirect && !isReviews && url.pathname !== base && !url.pathname.startsWith(base + '/')) return text(404, 'Not found\n')
+  const isProcessing = url.pathname === '/processing' || url.pathname.startsWith('/processing/')
+  if (!isMe && !isAdmin && !isDirect && !isReviews && !isProcessing && url.pathname !== base && !url.pathname.startsWith(base + '/')) return text(404, 'Not found\n')
   const p = await principal(env, req)
   if (!p) return text(401, 'Unauthorized\n', { 'WWW-Authenticate': 'Bearer' })
   if (p.id !== 'open') ctx.waitUntil(stub(env).touchSeen(p.id, seenInput(req)).catch(() => {}))
@@ -1074,6 +1148,7 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (isAdmin) return p.admin ? admin(env, req, url.pathname.slice('/admin/'.length)) : forbidden()
   if (isDirect) return direct(env, req, base, url.pathname.slice('/direct'.length).replace(/^\/+/, ''), p)
   if (isReviews) return reviews(env, req, url.pathname.slice('/reviews'.length).replace(/^\/+/, ''), p)
+  if (isProcessing) return processing(env, req, url.pathname.slice('/processing'.length).replace(/^\/+/, ''), p)
 
   const rest = url.pathname.slice(base.length).replace(/^\/+/, '')
   let method = req.method

@@ -6,12 +6,14 @@
 import { computed, reactive } from 'vue'
 import {
   loadCloud, saveCloud, me, fetchIndex, downloadItem, endpoint, CloudError,
-  listReviews, checkout, releaseCheckout, getReview, putReviewPackage, CheckedOut,
+  listReviews, listProcessing, releaseProcessing, type ProcessingInfo, checkout, releaseCheckout, getReview, putReviewPackage, CheckedOut,
   type CloudConfig, type CloudItem, type Me, type ReviewInfo, restoreReview } from './cloud'
 import { build, parse, collect, reviewFiles, progress, REVIEW_SCHEMA } from './reviewpkg'
 import type { Dataset } from './types'
 import { importFiles } from './importer'
-import { state, add, setReviewer, applyReview, photoBlob, saveReviews, setSynced } from './store'
+import { state, add, setReviewer, applyReview, photoBlob, putPhoto, saveReviews, setSynced, setBase, replaceSet } from './store'
+import { merge3, type Conflict } from './merge'
+import { t } from './i18n'
 export { rows, type Row } from './sessions'
 
 export type Status = 'none' | 'checking' | 'ok' | 'error'
@@ -29,6 +31,8 @@ export const conn = reactive({
   pulling: '' as string,               // the session id being downloaded
   /** Per session: who has it checked out, and the last review saved on the server (GET /reviews). */
   reviews: {} as Record<string, ReviewInfo>,
+  /** raw rides an agent is processing, by session id (an older server without /processing: none) */
+  processing: {} as Record<string, ProcessingInfo>,
   reviewBusy: '' as string,            // the session whose review is being checked out / saved / checked in
 })
 
@@ -46,6 +50,8 @@ function setInfo(info: ReviewInfo) {
 
 export const connected = computed(() => conn.status === 'ok' && !!conn.me)
 /** The key may list and download (View & download, or Process rides). */
+/** May end somebody else's checkout or processing claim (the release scope, or the admin). */
+export const canRelease = computed(() => !!conn.me && (conn.me.admin || conn.me.scopes.includes('release')))
 export const canRead = computed(() => !!conn.me && (conn.me.admin || conn.me.scopes.includes('read') || conn.me.scopes.includes('process')))
 
 /** Ask the server who the key is, then list its sessions. Without a key: 'none'. */
@@ -71,8 +77,10 @@ export async function refresh(f: typeof fetch = fetch) {
   if (!connected.value || !canRead.value) { conn.items = null; return }
   conn.listing = true; conn.listError = ''
   try {
-    const [items, reviews] = await Promise.all([fetchIndex(conn.cfg, f, ''), listReviews(conn.cfg, f).catch(() => null)])
+    const [items, reviews, processing] = await Promise.all([fetchIndex(conn.cfg, f, ''), listReviews(conn.cfg, f).catch(() => null),
+      listProcessing(conn.cfg, f).catch(() => [])])
     conn.items = items
+    conn.processing = Object.fromEntries(processing.map((p) => [p.sessionId, p]))
     if (reviews) { conn.reviews = Object.fromEntries(reviews.map((r) => [r.sessionId, r])); syncEditable() }
   } catch (e: any) {
     conn.listError = e?.message || String(e)
@@ -107,11 +115,63 @@ export async function loadSaved(d: Dataset, force = false, f: typeof fetch = fet
   const saved = conn.reviews[d.id]?.saved
   if (!force && state.dirty.has(d.id)) return
   if (!saved || (!force && state.synced[d.id] && state.synced[d.id] >= saved.at)) return
+  const theirs = await fetchSaved(d, f)
+  if (!theirs) return
+  await applyReview(d.id, theirs.doc.reviews, theirs.doc.removals, theirs.blobs, saved.at, saved.version ?? null)
+}
+
+/** The server's saved review of [d]: its document and its photo files. */
+async function fetchSaved(d: Dataset, f: typeof fetch) {
   const zip = await getReview(conn.cfg, d.id, f)
-  if (!zip) return
+  if (!zip) return null
   const { doc, files } = parse(zip, d.id)
   const blobs = new Map([...files].map(([p, b]) => [p, new Blob([b as BlobPart], { type: p.endsWith('.png') ? 'image/png' : p.endsWith('.webp') ? 'image/webp' : 'image/jpeg' })]))
-  await applyReview(d.id, doc.reviews, doc.removals, blobs, saved.at)
+  return { doc, blobs }
+}
+
+/**
+ * Keep this browser's changes over a newer save by somebody else: merge them place by place (merge.ts) against the
+ * review this work started from. Places changed on one side only take that change; places both changed differently
+ * are left as conflicts (state.conflicts) the reviewer decides before saving. Returns the number of conflicts.
+ */
+async function mergeNewer(d: Dataset, f: typeof fetch): Promise<number> {
+  const saved = conn.reviews[d.id]?.saved
+  const base = state.base[d.id] ?? null
+  // nothing newer on the server than what this work started from: mine simply goes on
+  if (!saved || (base && base.version != null && base.version === saved.version)) return 0
+  const theirs = await fetchSaved(d, f)
+  if (!theirs) return 0
+  for (const [p, b] of theirs.blobs) await putPhoto(d.id, p, b)
+  const mine = collect(d.id, state.reviews, state.removals)
+  const { merged, conflicts } = merge3(base && base.version != null ? base : null, mine,
+    { reviews: theirs.doc.reviews, removals: theirs.doc.removals })
+  replaceSet(d.id, merged)
+  if (conflicts.length) state.conflicts[d.id] = conflicts
+  else delete state.conflicts[d.id]
+  state.dirty.add(d.id)
+  await saveReviews()
+  await setSynced(d.id, saved.at)
+  // the merged work now builds on their save: the next merge (if any) starts from it
+  await setBase(d.id, { reviews: theirs.doc.reviews, removals: theirs.doc.removals }, saved.version ?? null)
+  return conflicts.length
+}
+
+/** The reviewer decides a conflict of [ds]: their own change or the other reviewer's ([key] undefined: all of them). */
+export async function decideConflict(ds: string, choice: 'mine' | 'theirs', key?: { kind: Conflict['kind']; key: string }) {
+  const list = state.conflicts[ds] || []
+  const keep: Conflict[] = []
+  for (const c of list) {
+    if (key && (c.kind !== key.kind || c.key !== key.key)) { keep.push(c); continue }
+    const v = choice === 'theirs' ? c.theirs : c.mine
+    const k = `${ds}|${c.key}`
+    const m = (c.kind === 'place' ? state.reviews : state.removals) as Record<string, unknown>
+    if (v == null) delete m[k]
+    else m[k] = v
+  }
+  if (keep.length) state.conflicts[ds] = keep
+  else delete state.conflicts[ds]
+  state.dirty.add(ds)
+  await saveReviews()
 }
 
 /**
@@ -122,9 +182,11 @@ export async function checkOut(d: Dataset, keepMine = false, f: typeof fetch = f
   conn.reviewBusy = d.id
   try {
     const info = await checkout(conn.cfg, d.id, f)
-    // a review saved on the server is the one to go on from; none yet: this browser's (older work) stays
-    if (!keepMine) { state.dirty.delete(d.id); await loadSaved(d, false, f) }
     setInfo(info)
+    // a review saved on the server is the one to go on from; none yet: this browser's (older work) stays. Keeping
+    // mine over a newer save: merged with it, the places both changed left for the reviewer to decide
+    if (!keepMine) { state.dirty.delete(d.id); delete state.conflicts[d.id]; await loadSaved(d, false, f) }
+    else await mergeNewer(d, f)
   } finally {
     conn.reviewBusy = ''
   }
@@ -132,6 +194,8 @@ export async function checkOut(d: Dataset, keepMine = false, f: typeof fetch = f
 
 /** Upload this browser's review of [d]; [checkin] hands the session back so another reviewer can take it. */
 export async function saveToServer(d: Dataset, checkin: boolean, f: typeof fetch = fetch) {
+  // a merge left places both reviewers changed: they are decided first (ReviewBar), never saved over blindly
+  if (state.conflicts[d.id]?.length) throw new Error(t('conflictsOpen', { n: state.conflicts[d.id].length }))
   conn.reviewBusy = d.id
   try {
     const { reviews, removals } = collect(d.id, state.reviews, state.removals)
@@ -153,6 +217,8 @@ export async function saveToServer(d: Dataset, checkin: boolean, f: typeof fetch
     state.dirty.delete(d.id)
     await saveReviews()
     if (info.saved) await setSynced(d.id, info.saved.at)
+    // what is on the server now is what this browser holds: the base of any later merge
+    if (info.saved) await setBase(d.id, { reviews, removals }, info.saved.version ?? null)
     setInfo(info)
   } finally {
     conn.reviewBusy = ''
@@ -167,6 +233,7 @@ export async function giveUp(d: Dataset, f: typeof fetch = fetch) {
     const cur = conn.reviews[d.id]
     setInfo({ sessionId: d.id, lock: null, saved: cur?.saved ?? null })
     state.dirty.delete(d.id)
+    delete state.conflicts[d.id]
     await saveReviews()
     await loadSaved(d, true, f).catch(() => {})
   } finally {
@@ -179,6 +246,7 @@ export async function discardMine(d: Dataset, f: typeof fetch = fetch) {
   conn.reviewBusy = d.id
   try {
     state.dirty.delete(d.id)
+    delete state.conflicts[d.id]
     await saveReviews()
     if (conn.reviews[d.id]?.saved) await loadSaved(d, true, f)
   } finally {
@@ -197,7 +265,13 @@ export async function restoreVersion(d: Dataset, version: string, f: typeof fetc
   }
 }
 
-/** An admin frees another reviewer's checkout. */
+/** A ride's processing claim ends (its agent stopped, or a lead frees it): the list shows it waiting again. */
+export async function stopProcessing(sessionId: string, f: typeof fetch = fetch) {
+  await releaseProcessing(conn.cfg, sessionId, f)
+  delete conn.processing[sessionId]
+}
+
+/** An admin, or a key with the release scope, frees another reviewer's checkout. */
 export async function forceRelease(sessionId: string, f: typeof fetch = fetch) {
   await releaseCheckout(conn.cfg, sessionId, f)
   const cur = conn.reviews[sessionId]

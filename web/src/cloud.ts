@@ -62,9 +62,9 @@ export type Seen = {
 }
 
 /** A token's permissions (server/README.md): independent, ticked by the admin. */
-export type Scope = 'upload' | 'read' | 'process' | 'delete'
+export type Scope = 'upload' | 'read' | 'process' | 'delete' | 'release'
 /** Every scope, in display order. */
-export const SCOPES: readonly Scope[] = ['upload', 'read', 'process', 'delete']
+export const SCOPES: readonly Scope[] = ['upload', 'read', 'process', 'delete', 'release']
 /** The presets of the issue form: Phone, Reviewer, Agent. */
 export const PRESETS: Record<'phone' | 'reviewer' | 'agent', Scope[]> = { phone: ['upload'], reviewer: ['read'], agent: ['process'] }
 
@@ -527,6 +527,26 @@ function parseReviewInfo(v: any): ReviewInfo | null {
 /** Someone else has the session checked out (409): who, from the server's answer. */
 export class CheckedOut extends CloudError {
   constructor(public info: ReviewInfo) { super(`checked out by ${info.lock?.by.name || 'someone else'}`, 409) }
+}
+
+/** A raw ride an agent is processing (server/README.md "Processing"): who, since when, until when if not renewed. */
+export type ProcessingInfo = { sessionId: string; by: { id: string; name: string }; at: string; until: string }
+
+/** GET /processing: the rides being processed now (finished, released and expired ones are not listed). */
+export async function listProcessing(cfg: CloudConfig, f: typeof fetch = fetch): Promise<ProcessingInfo[]> {
+  const r = await f(`${root(cfg)}/processing`, { headers: headers(cfg), cache: 'no-store' })
+  await check(r, 'processing')
+  const j = (await r.json()) as any
+  if (j?.schema !== 'poi-cloud-processing/1' || !Array.isArray(j.processing)) throw new Error('not a processing list')
+  return j.processing.filter((x: any) => x && typeof x.sessionId === 'string' && x.by && typeof x.by.name === 'string')
+    .map((x: any) => ({ sessionId: x.sessionId, by: { id: String(x.by.id ?? ''), name: x.by.name }, at: String(x.at), until: String(x.until) }))
+}
+
+/** Stop the processing of a ride: one's own claim, or anybody's with the release scope (404: nobody has it). */
+export async function releaseProcessing(cfg: CloudConfig, sessionId: string, f: typeof fetch = fetch): Promise<void> {
+  const r = await f(`${root(cfg)}/processing/${encodeURIComponent(sessionId)}`, { method: 'DELETE', headers: headers(cfg) })
+  if (r.status === 404) return
+  await check(r, 'release')
 }
 
 export async function listReviews(cfg: CloudConfig, f: typeof fetch = fetch): Promise<ReviewInfo[]> {

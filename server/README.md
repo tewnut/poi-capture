@@ -145,20 +145,43 @@ saved in between) or discard them. It never overwrites unsaved changes by itself
 - `GET /reviews` → `{schema: "poi-cloud-reviews/1", reviews: [{sessionId, lock, saved, ended}]}`: `lock` = `{by:
   {id, name}, at, until}` or null (free); `saved` = `{by, at, size, done, total, version}` or null (nothing saved yet);
   `ended` = how the last checkout ended, `{of: {id, name}, by, at, reason}` with reason `checkin`, `gaveup`,
-  `released` (by an admin), `revoked` (its key) or `expired`; null while checked out.
+  `released` (by an admin or a key with `release`), `revoked` (its key) or `expired`; null while checked out.
 - `POST /reviews/<session>/checkout`: take the lock. `200` with the review's state when it was free, expired, or
   already this key's (renewed); `409` with who has it otherwise.
 - `GET /reviews/<session>`: the current review zip (`404` none).
 - `PUT /reviews/<session>[?checkin=1]`, body the zip (at most 100 MB), headers `X-Review-Done` / `X-Review-Total`
   (decided / to decide, for the list): only by the key holding the checkout (`409` otherwise). It renews the lock;
   `checkin=1` ends it. Versions kept per session: the current one, the last 10 check-ins and the last 5 saves.
-- `DELETE /reviews/<session>/checkout`: give up the checkout without saving (one's own; an admin: anybody's).
+- `DELETE /reviews/<session>/checkout`: give up the checkout without saving (one's own; an admin or a key with `release`: anybody's).
 - `GET /reviews/<session>/history` → `{schema: "poi-cloud-review-history/1", events: [{at, action, by, of, version,
   size, done, total, note}]}`, newest first: `checkout`, `save`, `checkin`, `gaveup`, `released`, `revoked`,
   `expired`, `restored`. `version` is set on saves still kept.
 - `POST /reviews/<session>/restore` `{version}` (admin only): make a kept version the current review again (undo a
   check-in). `409` while checked out. Nothing is deleted, so a restore can be undone the same way.
 - Revoking a key ends its checkouts at once.
+
+### Conflicts (two reviewers changed the same session)
+
+A reviewer whose checkout ended (released, expired) keeps their unsaved changes in the browser. If somebody else
+saved the session meanwhile, "Check out again, keep my changes" does not overwrite that save: the web app (web/src/
+merge.ts) merges place by place against the review the reviewer's work started from (the version loaded or last
+saved, kept in the browser): a place changed on one side only takes that change, a place changed the same way on both
+is kept, and a place both changed differently is a **conflict** shown side by side ("Yours" / "Theirs", with
+decision, edited fields, comment and who). The reviewer keeps one per place (or all mine / all theirs); Save and
+Check in wait until every conflict is decided. The server is unchanged: it stores whole reviews and their versions,
+so either side stays restorable from the history.
+
+### Processing (who is working on a raw ride)
+
+So the reviewers see that a waiting ride is being worked on, and two agents do not process the same one:
+
+- `GET /processing` (read or process) → `{schema: "poi-cloud-processing/1", processing: [{sessionId, by: {id, name},
+  at, until}]}`: the rides being processed now.
+- `POST /processing/<sessionId>` (process): claim it, or renew one's own claim (`until` = now + 12 h); `409` with the
+  holder's claim when another key has it. `cloud.py pull` claims a raw ride before downloading it.
+- `DELETE /processing/<sessionId>`: release (one's own, or any with `release` / as an admin); `404` when nobody has it.
+- A claim ends by itself when a complete `processed-result` with that `sessionId` (or `parentId`) is uploaded after
+  it, or 12 h after its last renewal. The web list shows "⚙ <name> is processing · since …" on the waiting ride.
 
 ### Direct uploads (presigned R2 parts)
 
@@ -195,6 +218,7 @@ Every request carries `Authorization: Bearer <token>` (CORS preflights excepted)
 | `read` | View & download | `GET <BASE>/index.json`, `GET <BASE>/<id>` (every upload) |
 | `process` | Process rides | list and download (as `read`), and create / `HEAD` / `PATCH` `processed-result` uploads (the agent pipeline, `cloud.py`) |
 | `delete` | Delete uploads | `DELETE <BASE>/<id>` of any upload, finished ones included (R2 object and row) |
+| `release` | Release others' checkouts | end another key's review checkout (`DELETE /reviews/<s>/checkout`) or processing claim (`DELETE /processing/<s>`): a lead reviewer, without the admin token |
 
 Any valid token may `GET /me`, send `OPTIONS`, and `DELETE` (tus termination) its **own unfinished** uploads. `HEAD` /
 `PATCH` need the scope that allows creating that upload's type. Managing tokens (`/admin/...`) is the admin password's
