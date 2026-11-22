@@ -15,7 +15,7 @@ import SettingsPage from './components/SettingsPage.vue'
 import ReviewBar from './components/ReviewBar.vue'
 import { state, load, remove, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, stageOf, STAGES } from './store'
 import { to } from './router'
-import { t } from './i18n'
+import { t, relTime } from './i18n'
 import { keptPhotos, exportNames } from './photos'
 import { zipSync, strToU8 } from 'fflate'
 import { geojson, csv, osm, tasksGeojson, download, type Published, type Removed } from './publish'
@@ -137,12 +137,28 @@ onMounted(() => { autosave = setInterval(() => {
 }, AUTOSAVE_MS) })
 onBeforeUnmount(() => clearInterval(autosave))
 /** The list's word on a session's review: who has it checked out, or how far the last saved review got. */
-function lockLabel(r: Row): { text: string; cls: string } | null {
+function lockLabel(r: Row): { text: string; cls: string; title: string } | null {
   const i = conn.reviews[r.sessionId]
-  if (i?.lock) return i.lock.by.id === conn.me?.id ? { text: t('lockYou'), cls: 'ok' } : { text: t('lockOther', { name: i.lock.by.name }), cls: 'visit' }
-  if (i?.saved && i.saved.total != null) return { text: t('reviewProgress', { done: i.saved.done ?? 0, total: i.saved.total }), cls: 'todo' }
+  if (i?.lock) {
+    const p = { name: i.lock.by.name, when: relTime(i.lock.at), until: relTime(i.lock.until) }
+    return { text: i.lock.by.id === conn.me?.id ? t('lockYou', p) : t('lockOther', p), cls: i.lock.by.id === conn.me?.id ? 'ok' : 'visit', title: t('lockTitle', p) }
+  }
+  if (i?.saved && i.saved.total != null) {
+    const p = { done: i.saved.done ?? 0, total: i.saved.total, name: i.saved.by.name, when: relTime(i.saved.at) }
+    return { text: t('reviewProgress', p), cls: 'todo', title: t('reviewProgressTitle', p) }
+  }
   return null
 }
+// who has what checked out changes from other browsers: refresh the list every minute while this tab is shown,
+// and at once when it comes back to the front
+const LIST_REFRESH_MS = 60 * 1000
+let listTimer: ReturnType<typeof setInterval> | undefined
+const onVisible = () => { if (document.visibilityState === 'visible' && connected.value && !conn.listing) refresh().catch(() => {}) }
+onMounted(() => {
+  listTimer = setInterval(() => { if (document.visibilityState === 'visible' && connected.value && !conn.listing) refresh().catch(() => {}) }, LIST_REFRESH_MS)
+  document.addEventListener('visibilitychange', onVisible)
+})
+onBeforeUnmount(() => { clearInterval(listTimer); document.removeEventListener('visibilitychange', onVisible) })
 function openRow(r: Row) {
   if (dsOf(r)) router.push(to.session(r.sessionId))
   else if (r.item && !conn.pulling) fetchSession(r.item)
@@ -365,7 +381,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
                     <span class="chip new" v-if="dsOf(r)!.places.filter((p) => gstat(p) === 'new').length">{{ t('newToGoogle', { n: dsOf(r)!.places.filter((p) => gstat(p) === 'new').length }) }}</span>
                     <span class="chip todo" v-if="dsOf(r)!.tasks.length">{{ t('nTasks', { n: dsOf(r)!.tasks.length }) }}</span>
                     <span class="chip" v-if="r.state === 'local' && !r.item && connected">{{ t('onlyHere') }}</span>
-                    <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]">{{ lockLabel(r)!.text }}</span>
+                    <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]" :title="lockLabel(r)!.title">{{ lockLabel(r)!.text }}</span>
                   </div>
                   <StageBar :ds="dsOf(r)!" />
                 </template>
@@ -373,7 +389,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
                   <span v-if="conn.pulling === r.sessionId" class="chip">{{ t('downloadingShort') }}</span>
                   <span v-else-if="r.state === 'waiting'" class="chip">{{ t('waitingAgent') }}</span>
                   <span v-else class="chip ok">{{ t('onServer', { size: humanSize(r.item?.size ?? null) }) }}</span>
-                  <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]">{{ lockLabel(r)!.text }}</span>
+                  <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]" :title="lockLabel(r)!.title">{{ lockLabel(r)!.text }}</span>
                 </div>
               </div>
               <button v-if="r.state === 'updated' && r.item" class="secondary small" :disabled="!!conn.pulling" :title="t('updateTitle')" @click="fetchSession(r.item)">{{ t('update') }}</button>
