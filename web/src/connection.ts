@@ -6,7 +6,7 @@
 import { computed, reactive } from 'vue'
 import {
   loadCloud, saveCloud, me, fetchIndex, downloadItem, endpoint, CloudError,
-  listReviews, checkout, releaseCheckout, getReview, putReviewPackage,
+  listReviews, checkout, releaseCheckout, getReview, putReviewPackage, CheckedOut,
   type CloudConfig, type CloudItem, type Me, type ReviewInfo, restoreReview } from './cloud'
 import { build, parse, collect, reviewFiles, progress, REVIEW_SCHEMA } from './reviewpkg'
 import type { Dataset } from './types'
@@ -142,7 +142,14 @@ export async function saveToServer(d: Dataset, checkin: boolean, f: typeof fetch
     }
     const savedAt = new Date().toISOString()
     const zip = build({ schema: REVIEW_SCHEMA, sessionId: d.id, reviewer: state.reviewer, savedAt, reviews, removals }, files)
-    const info = await putReviewPackage(conn.cfg, d.id, zip, progress(d, reviews, removals), checkin, f)
+    let info: ReviewInfo
+    try {
+      info = await putReviewPackage(conn.cfg, d.id, zip, progress(d, reviews, removals), checkin, f)
+    } catch (e) {
+      // the checkout ended meanwhile (released, expired, taken): show it at once, the changes stay here (ReviewBar)
+      if (e instanceof CheckedOut && e.info.sessionId) setInfo(e.info)
+      throw e
+    }
     state.dirty.delete(d.id)
     await saveReviews()
     if (info.saved) await setSynced(d.id, info.saved.at)

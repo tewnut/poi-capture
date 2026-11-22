@@ -130,19 +130,33 @@ objects and slow downloads; per-upload state in R2 object metadata cannot serial
 
 A processed session is reviewed by one person at a time, in the reviewer web app. The review (every decision, field
 edit, pin and the photos the reviewer added or cropped) travels as one zip, `review.json` + those photos
-(web/src/reviewpkg.ts), kept in R2 as `reviews/<session id>.zip`. Every call needs `read` (View & download) or
-`process`.
+(web/src/reviewpkg.ts). Every save is its own R2 object, `reviews/<session id>/<version>.zip` (a version); the
+session's row points at the current one. Every call needs `read` (View & download) or `process`.
 
-- `GET /reviews` → `{schema: "poi-cloud-reviews/1", reviews: [{sessionId, lock, saved}]}`: `lock` = `{by: {id, name},
-  at, until}` or null (free); `saved` = `{by, at, size, done, total}` or null (nothing saved yet).
+Lifecycle: **free** → *check out* → **checked out** (save any number of times; the web app autosaves every 2 min)
+→ *check in* → **free**, the next reviewer going on from the checked-in review. A checkout also ends by *giving up*
+(no save), an admin *releasing* it, its key being *revoked*, or *expiring* after 24 h without a save. However it
+ends, changes the reviewer had not saved stay in their browser: the web app shows why the checkout ended and lets
+them check out again keeping their changes (they replace the server's on the next save; asked first when someone
+saved in between) or discard them. It never overwrites unsaved changes by itself.
+
+- `GET /reviews` → `{schema: "poi-cloud-reviews/1", reviews: [{sessionId, lock, saved, ended}]}`: `lock` = `{by:
+  {id, name}, at, until}` or null (free); `saved` = `{by, at, size, done, total, version}` or null (nothing saved yet);
+  `ended` = how the last checkout ended, `{of: {id, name}, by, at, reason}` with reason `checkin`, `gaveup`,
+  `released` (by an admin), `revoked` (its key) or `expired`; null while checked out.
 - `POST /reviews/<session>/checkout`: take the lock. `200` with the review's state when it was free, expired, or
   already this key's (renewed); `409` with who has it otherwise.
-- `GET /reviews/<session>`: the last saved review zip (`404` none).
+- `GET /reviews/<session>`: the current review zip (`404` none).
 - `PUT /reviews/<session>[?checkin=1]`, body the zip (at most 100 MB), headers `X-Review-Done` / `X-Review-Total`
   (decided / to decide, for the list): only by the key holding the checkout (`409` otherwise). It renews the lock;
-  `checkin=1` releases it: the next reviewer can check out and goes on from there.
-- `DELETE /reviews/<session>/checkout`: give up the checkout without saving (one's own; an admin's: anybody's).
-- A checkout with no save for 24 hours expires.
+  `checkin=1` ends it. Versions kept per session: the current one, the last 10 check-ins and the last 5 saves.
+- `DELETE /reviews/<session>/checkout`: give up the checkout without saving (one's own; an admin: anybody's).
+- `GET /reviews/<session>/history` → `{schema: "poi-cloud-review-history/1", events: [{at, action, by, of, version,
+  size, done, total, note}]}`, newest first: `checkout`, `save`, `checkin`, `gaveup`, `released`, `revoked`,
+  `expired`, `restored`. `version` is set on saves still kept.
+- `POST /reviews/<session>/restore` `{version}` (admin only): make a kept version the current review again (undo a
+  check-in). `409` while checked out. Nothing is deleted, so a restore can be undone the same way.
+- Revoking a key ends its checkouts at once.
 
 ### Direct uploads (presigned R2 parts)
 
