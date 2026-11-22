@@ -35,7 +35,7 @@ const tus = new Server({
 })
 
 const TUS_HEADERS = ['Authorization', 'Content-Type', 'Location', 'Tus-Extension', 'Tus-Max-Size', 'Tus-Resumable',
-  'Tus-Version', 'Upload-Concat', 'Upload-Defer-Length', 'Upload-Length', 'Upload-Metadata', 'Upload-Offset',
+  'Tus-Version', 'Upload-Defer-Length', 'Upload-Length', 'Upload-Metadata', 'Upload-Offset',
   'X-Client', 'X-HTTP-Method-Override', 'X-Requested-With']
 
 function corsOrigin(origin) {

@@ -19,11 +19,13 @@ They meet only in the web app's published data, and through the task list a swee
 
 By hand: the phone's Send / Save zip (or adb), the agent's output folder or zip imported into the web app. Or through
 a shared **tus server** (resumable uploads, tus.io 1.0; `server/`, see its README). The team's server is a
-Cloudflare Worker storing uploads in R2 (`server/worker/`), at `https://poi-capture-cloud.4hum-ai.workers.dev/files/`;
+Cloudflare Worker storing uploads in R2 (`server/worker/`), at `https://poi-uploader.4hum.ai/files/`;
 every request needs its bearer token, which is not in the repository. A self-hosted Node version is in `server/` too.
+The phone sends its session zips straight to R2 (presigned parts, server/README.md "Direct uploads": tus through the
+Worker is far too slow from Vietnam); the agent and the web app use tus.
 
 ```
-phone ── raw session zip, type=raw-session ──►  tus server  ──► agent: cloud.py list / pull <id>
+phone ── raw session zip, type=raw-session ──►  server  ──► agent: cloud.py list / pull <id>
                                                     ▲           ... process-sweep ...
 web app ◄── From server: type=processed-result ─────┴────────── agent: cloud.py push <result folder>
 ```
@@ -209,6 +211,6 @@ The comparison marks (`google`: `match` / `differs`, `googleValue`, `source`, `n
 | Result bundle | `result.json` (`poi-result/1`) + photo folders | every processed folder |
 | 3 web app (POI Capture Reviewer): import, sessions, map, review (fields, 3 pins, final pin, photos), tasks, shareable links, publish GeoJSON / CSV / .osm / photos / project package | yes | `web/`, Cloudflare Pages `poi-capture-reviewer` (`.github/workflows/web.yml`) |
 | Phone: import the task list as a map layer, close tasks by Place capture | yes (app 0.17, unreleased) | `core/FieldTasks.kt`, `ui/TasksUi.kt`; web `tasksGeojson` |
-| Cloud path: phone uploads (tus), agent pull / push, web app *From server* | yes (app 0.17, unreleased); server deployed as a Cloudflare Worker + R2 | `server/worker/`, `server/`, `capture/UploadWork.kt`, `cloud.py`, `web/src/cloud.ts` |
+| Cloud path: phone uploads (direct to R2), agent pull / push, web app *From server* | yes (app 0.17, unreleased); server deployed as a Cloudflare Worker + R2 | `server/worker/`, `server/`, `capture/UploadWork.kt`, `cloud.py`, `web/src/cloud.ts` |
 | 4 VMAP edit from a project package | tools take tasks.jsonl | poi-contribution (`tools/tasks.py`, `vmap_edit.py`, `vmap_create.py`) |
 | OSM building outlines for the agent pin | no | next |

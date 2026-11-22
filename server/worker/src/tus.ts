@@ -1,7 +1,7 @@
 // Pure tus helpers and constants (the Worker's main module may export only handlers and classes).
 
 export const TUS_VERSION = '1.0.0'
-export const EXTENSIONS = 'creation,creation-with-upload,termination,expiration,concatenation'
+export const EXTENSIONS = 'creation,creation-with-upload,termination,expiration'
 export const PART_SIZE = 8 * 1024 * 1024        // R2: >= 5 MiB, equal for every part but the last; = cloud.py's chunk
 export const DEFAULT_MAX_SIZE = 4 * 1024 ** 3   // 4 GiB per upload unless MAX_SIZE says otherwise
 

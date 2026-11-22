@@ -17,6 +17,10 @@
     "CORS_ORIGINS": "http://localhost:5173,http://localhost:5199,https://poi-capture-reviewer.pages.dev,https://*.poi-capture-reviewer.pages.dev",
     "BASE_PATH": "/files",
     "MAX_SIZE": "4294967296",
-    "EXPIRE_DAYS": "7"
+    "EXPIRE_DAYS": "7",
+    // direct uploads (README "Direct uploads"); secrets R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY: an R2 API token
+    // with Object Read & Write on this bucket
+    "R2_ACCOUNT_ID": "4e48e295fbbb6bed3f3975df76345d02",
+    "R2_BUCKET": "poi-capture-uploads"
   }
 }

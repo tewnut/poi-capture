@@ -383,90 +383,72 @@ describe('permissions (scopes)', () => {
   })
 })
 
-describe('parallel uploads (concatenation)', () => {
+describe('direct uploads (presigned R2 parts)', () => {
   const ROOT = 'https://cloud.test'
-  const ADMIN = { Authorization: 'Bearer admin-token' }
-  async function key(name: string, scopes: string[]) {
-    const r = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { ...ADMIN, 'Content-Type': 'application/json' }, body: JSON.stringify({ name, scopes }) })
-    return { Authorization: `Bearer ${(await r.json<{ secret: string }>()).secret}`, 'Tus-Resumable': '1.0.0' }
-  }
-  async function partial(h: Record<string, string>, data: Uint8Array, chunk: number) {
-    const r = await SELF.fetch(BASE, { method: 'POST', headers: { ...h, 'Upload-Concat': 'partial', 'Upload-Length': String(data.length) } })
-    expect(r.status).toBe(201)
-    const url = r.headers.get('Location')!
-    for (let off = 0; off < data.length; off += chunk) {
-      const p = await SELF.fetch(url, { method: 'POST', headers: { ...h, 'X-HTTP-Method-Override': 'PATCH', 'Upload-Offset': String(off), 'Content-Type': 'application/offset+octet-stream' }, body: data.subarray(off, Math.min(off + chunk, data.length)) })
-      expect(p.status).toBe(204)
-    }
-    return url
-  }
-  const final = (h: Record<string, string>, urls: string[], meta = { filename: 's.zip', type: 'raw-session', sessionId: 's_cat' }) =>
-    SELF.fetch(BASE, { method: 'POST', headers: { ...h, 'Upload-Concat': 'final;' + urls.join(' '), 'Upload-Metadata': encodeMetadata(meta) } })
+  const KEY = { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' }
+  const post = (path: string, body: unknown, h: Record<string, string> = KEY) =>
+    SELF.fetch(ROOT + path, { method: 'POST', headers: h, body: JSON.stringify(body) })
 
-  it('joins partials uploaded in parallel; lists and downloads the whole file; deletes the parts with it', async () => {
-    const phone = await key('Phone cat', ['upload'])
-    const data = bytes(3 * PART_SIZE + 12345, 7)
-    const cuts = [0, PART_SIZE, 2 * PART_SIZE, data.length]
-    const urls = await Promise.all([0, 1, 2].map((i) => partial(phone, data.subarray(cuts[i], cuts[i + 1]), 3 * MiB)))
-    expect((await SELF.fetch(BASE + 'index.json', { headers: AUTH })).status).toBe(200)
-    const head = await SELF.fetch(urls[0], { method: 'HEAD', headers: phone })
-    expect(head.headers.get('Upload-Concat')).toBe('partial')
-    expect((await SELF.fetch(urls[0], { headers: AUTH })).status).toBe(404)   // a partial alone is not downloadable
-
-    const r = await final(phone, urls)
-    expect(r.status).toBe(201)
-    const url = r.headers.get('Location')!
-    expect(r.headers.get('Upload-Offset')).toBe(String(data.length))
-    const h = await SELF.fetch(url, { method: 'HEAD', headers: phone })
-    expect(h.headers.get('Upload-Length')).toBe(String(data.length))
-    expect(h.headers.get('Upload-Offset')).toBe(String(data.length))
-    expect(h.headers.get('Upload-Concat')).toMatch(/^final;\/files\/[0-9a-f]{32} /)
-
-    const idx = await (await SELF.fetch(BASE + 'index.json', { headers: AUTH })).json<{ uploads: { id: string; size: number; complete: boolean }[] }>()
-    const ids = idx.uploads.map((u) => u.id)
-    expect(ids).toContain(url.split('/').pop())
-    for (const u of urls) expect(ids).not.toContain(u.split('/').pop())   // partials are not listed
-    expect(idx.uploads.find((u) => u.id === url.split('/').pop())).toMatchObject({ size: data.length, complete: true })
-
-    const got = await download(url)
-    expect(same(got, data)).toBe(true)
-
-    expect((await final(phone, urls)).status).toBe(409)                       // used once only
-    expect((await SELF.fetch(urls[1], { method: 'DELETE', headers: { ...ADMIN, 'Tus-Resumable': '1.0.0' } })).status).toBe(409)   // part of a joined upload
-    expect((await SELF.fetch(url, { method: 'DELETE', headers: { ...ADMIN, 'Tus-Resumable': '1.0.0' } })).status).toBe(204)
-    for (const u of urls) {
-      expect((await SELF.fetch(u, { method: 'HEAD', headers: AUTH })).status).toBe(404)
-      expect(await env.BUCKET.head(`files/${u.split('/').pop()}`)).toBeNull()
-    }
+  it('signs like the reference SigV4 (Python, checked against R2)', async () => {
+    const { presign } = await import('../src/presign')
+    const url = await presign({ accountId: 'acc123', bucket: 'bkt', accessKeyId: 'AKIDEXAMPLE', secretAccessKey: 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY' },
+      'PUT', 'files/abc', { partNumber: '3', uploadId: 'up+id/=x' }, 3600, new Date('2026-11-22T01:02:03.456Z'))
+    expect(url).toBe('https://acc123.r2.cloudflarestorage.com/bkt/files/abc?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIDEXAMPLE%2F20261122%2Fauto%2Fs3%2Faws4_request&X-Amz-Date=20261122T010203Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&partNumber=3&uploadId=up%2Bid%2F%3Dx&X-Amz-Signature=28b1e54ab7696614d48012eda8564d308b0f6c185a7c60c3bd83f1df67f4fa7b')
   })
 
-  it('refuses bad joins', async () => {
-    const a = await key('Cat A', ['upload'])
-    const b = await key('Cat B', ['upload'])
-    const reader = await key('Cat reader', ['read'])
-    const done = await partial(a, bytes(100), 100)
-    const r = await SELF.fetch(BASE, { method: 'POST', headers: { ...a, 'Upload-Concat': 'partial', 'Upload-Length': '100' } })
-    const unfinished = r.headers.get('Location')!
-    const normal = await upload(bytes(10), 10)
-    expect((await final(a, [done, unfinished])).status).toBe(400)            // not finished
-    expect((await final(a, [done, normal])).status).toBe(400)                // not a partial
-    expect((await final(a, [done, BASE + 'f'.repeat(32)])).status).toBe(404)
-    expect((await final(b, [done])).status).toBe(403)                         // someone else's partial
-    expect((await final(a, [done], { filename: 'r.zip', type: 'processed-result', sessionId: 'x' })).status).toBe(403)   // scope for the type
-    expect((await final(a, [done, done])).status).toBe(400)                  // duplicates
-    expect((await final(a, [])).status).toBe(400)
-    expect((await SELF.fetch(BASE, { method: 'POST', headers: { ...reader, 'Upload-Concat': 'partial', 'Upload-Length': '5' } })).status).toBe(403)
-    expect((await SELF.fetch(BASE, { method: 'POST', headers: { ...a, 'Upload-Concat': 'nonsense', 'Upload-Length': '5' } })).status).toBe(400)
-    expect((await final(a, [done])).status).toBe(201)                         // still usable after the refusals
-  })
+  it('creates, takes the parts (written here through the binding) and completes into an ordinary upload', async () => {
+    const size = 8 * MiB + 1000
+    const r = await post('/direct', { size, metadata: { type: 'raw-session', filename: 'd.zip' } })
+    expect(r.status).toBe(201)
+    const d = await r.json<{ id: string; location: string; partSize: number; parts: number; urls: { part: number; url: string }[] }>()
+    expect(d.partSize).toBe(8 * MiB)
+    expect(d.parts).toBe(2)
+    expect(d.urls.map((u) => u.part)).toEqual([1, 2])
+    expect(d.urls[0].url).toContain('partNumber=1')
+    expect(d.location).toBe(`${ROOT}/files/${d.id}`)
+    // listed as unfinished, and not a tus PATCH target
+    expect((await (await SELF.fetch(BASE + 'index.json', { headers: AUTH })).json<{ uploads: { id: string; complete: boolean }[] }>()).uploads.find((u) => u.id === d.id)?.complete).toBe(false)
+    expect((await patch(d.location, 0, bytes(10))).status).toBe(400)
+    // fresh URLs for one part
+    const again = await post(`/direct/${d.id}/urls`, { parts: [2] })
+    expect(again.status).toBe(200)
+    expect((await again.json<{ urls: { part: number }[] }>()).urls.map((u) => u.part)).toEqual([2])
+    expect((await post(`/direct/${d.id}/urls`, { parts: [3] })).status).toBe(400)
+    // the parts, as R2 would take them from the presigned PUTs
+    const data = bytes(size, 7)
+    const row = await env.UPLOADS.get(env.UPLOADS.idFromName('uploads')).get(d.id)
+    const mp = env.BUCKET.resumeMultipartUpload(`files/${d.id}`, row!.mpId!)
+    const p1 = await mp.uploadPart(1, data.subarray(0, 8 * MiB))
+    const p2 = await mp.uploadPart(2, data.subarray(8 * MiB))
+    // wrong list: refused, nothing changes
+    expect((await post(`/direct/${d.id}/complete`, { parts: [{ part: 1, etag: p1.etag }] })).status).toBe(400)
+    // another key may not complete it
+    const other = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'other', scopes: ['upload'] }) })
+    const secret = (await other.json<{ secret: string }>()).secret
+    expect((await post(`/direct/${d.id}/complete`, { parts: [] }, { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' })).status).toBe(403)
+    const done = await post(`/direct/${d.id}/complete`, { parts: [{ part: 1, etag: p1.etag }, { part: 2, etag: p2.etag }] })
+    expect(done.status).toBe(200)
+    expect(await done.json()).toMatchObject({ id: d.id, size, complete: true })
+    // a repeat is fine (the first answer may have been lost)
+    expect((await post(`/direct/${d.id}/complete`, { parts: [] })).status).toBe(200)
+    const h = await SELF.fetch(d.location, { method: 'HEAD', headers: AUTH })
+    expect(h.headers.get('Upload-Offset')).toBe(String(size))
+    const dl = await SELF.fetch(d.location, { headers: AUTH })
+    expect(new Uint8Array(await dl.arrayBuffer())).toEqual(data)
+    const idx = await (await SELF.fetch(BASE + 'index.json', { headers: AUTH })).json<{ uploads: { id: string; complete: boolean }[] }>()
+    expect(idx.uploads.find((u) => u.id === d.id)?.complete).toBe(true)
+    expect((await SELF.fetch(d.location, { method: 'DELETE', headers: { Authorization: 'Bearer admin-token', 'Tus-Resumable': '1.0.0' } })).status).toBe(204)
+  }, 120_000)
 
-  it('expires partials nobody joined; lists concatenation', async () => {
-    const a = await key('Cat exp', ['upload'])
-    const lonely = await partial(a, bytes(50), 50)
-    const s = env.UPLOADS.get(env.UPLOADS.idFromName('uploads'))
-    const gone = await s.expire(Date.now() + 1000)
-    expect(gone.map((g) => g.id)).toContain(lonely.split('/').pop())
-    const o = await SELF.fetch(BASE, { method: 'OPTIONS', headers: AUTH })
-    expect(o.headers.get('Tus-Extension')!.split(',')).toContain('concatenation')
+  it('checks permissions and input', async () => {
+    const reader = await SELF.fetch(ROOT + '/admin/tokens', { method: 'POST', headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'reader', scopes: ['read'] }) })
+    const secret = (await reader.json<{ secret: string }>()).secret
+    expect((await post('/direct', { size: 10, metadata: { type: 'raw-session' } }, { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' })).status).toBe(403)
+    expect((await post('/direct', { size: 0 })).status).toBe(400)
+    expect((await post('/direct', { size: 10, metadata: { type: 5 } })).status).toBe(400)
+    expect((await post('/direct', { size: 10 }, { 'Content-Type': 'application/json' })).status).toBe(401)
+    expect((await post('/direct/abc/complete', { parts: [] })).status).toBe(404)
   })
 })

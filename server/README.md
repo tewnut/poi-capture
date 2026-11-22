@@ -11,7 +11,7 @@ phone ── raw session zip (type=raw-session) ──►  server  ◄── age
 Two implementations of the same contract:
 
 - **Cloudflare Worker** (`worker/`, below): bytes in R2, state in a Durable Object. This is the team's server,
-  deployed at **`https://poi-capture-cloud.4hum-ai.workers.dev/files/`** and preset in the web app.
+  deployed at **`https://poi-uploader.4hum.ai/files/`** and preset in the web app.
 - **Node** (`server.mjs`, this folder): [`@tus/server`](https://github.com/tus/tus-node-server) with files on disk
   (`@tus/file-store`), for running it yourself.
 
@@ -126,30 +126,29 @@ daily cron, with their R2 parts).
 Why not the alternatives: storing every PATCH as its own object and concatenating on download makes many small
 objects and slow downloads; per-upload state in R2 object metadata cannot serialise two PATCHes to the same upload.
 
-### Parallel uploads (tus concatenation)
+### Direct uploads (presigned R2 parts)
 
-Uploads from Vietnam to Cloudflare's free hostnames are throttled per connection (measured 2026-11-21: one connection
-~0.1 MB/s, four in parallel ~0.3 MB/s, while Cloudflare's own speed test reaches 2.5 MB/s), so a client may send one
-file as several **partial** uploads at once and then join them (tus `concatenation` extension; `Tus-Extension`
-lists it).
+From Vietnam, uploads to Cloudflare's customer addresses (our Worker, on workers.dev or our own domain, and Pages)
+crawl, before the Worker even runs: measured 2026-11-22, 0.01–0.08 MB/s per connection, while R2's own S3 endpoint
+takes 1.1–1.5 MB/s per connection and 3.3 MB/s with four. So the phone sends its session zip straight to R2, and the
+Worker only says yes and joins the parts. The app uploads only this way; tus stays for the web app, `cloud.py`
+and `server.mjs` (small processed results).
 
-- `POST <BASE>/` with `Upload-Concat: partial` and `Upload-Length` → `201` + `Location`. Needs the `upload` or
-  `process` scope. Upload-Metadata is optional and ignored. A partial is written with `PATCH` / `HEAD` like any
-  upload (`HEAD` also returns `Upload-Concat: partial`); it is never listed in `index.json` and cannot be downloaded
-  on its own (`404`).
-- `POST <BASE>/` with `Upload-Concat: final;<url> <url> …` (1–16 partials, in file order, absolute URLs or paths)
-  and the file's `Upload-Metadata`, no `Upload-Length` → `201` + `Location` of a **complete** upload whose size is the
-  sum of the partials. Needs the scope for the metadata's `type` (as a normal create). Every partial must exist
-  (`404`), be complete (`400`), not be used by another final upload (`409`) and have been created by the same key
-  (`403`; the admin is exempt).
-- `HEAD` of the final upload: `Upload-Offset` = `Upload-Length` = the size, `Upload-Concat: final;…`. `GET` streams
-  the partials one after the other (one `Content-Length`). `DELETE` (with `delete`) removes the partials too.
-- The daily cron removes unfinished partials untouched for `EXPIRE_DAYS` (as any upload) and finished partials no
-  final upload uses after `EXPIRE_DAYS`.
-
-Clients: the phone splits files over 16 MiB into up to 4 contiguous parts (cut at multiples of 8 MiB), uploads them
-concurrently, then sends the final request; with a server that does not list `concatenation` it uploads in one part
-as before. Each PATCH's size adapts to the measured speed (about 20 s per request, 256 KiB – 8 MiB).
+- `POST /direct` (scope `upload`, or `process` for a processed-result), JSON `{size, metadata: {name: string}}` →
+  `201 {schema: "poi-cloud-direct/1", id, location, size, partSize, parts, urls: [{part, url}], expiresAt}`. The Worker
+  opens an R2 multipart upload; every part is `partSize` (8 MiB) except the last. `location` is the upload at the tus
+  endpoint: HEAD (Upload-Offset = size once complete), DELETE and download work there as for any upload, and it is in
+  `index.json` (unfinished until complete).
+- `PUT <url>` with the part's bytes, straight to R2 (no Authorization header: the presigned URL is the permission;
+  valid 6 h). R2 answers with the part's `ETag`. Parts may go in any order and several at once.
+- `POST /direct/<id>/urls` `{parts: [n, …]}` → fresh URLs (up to 1000 at once), e.g. after a restart.
+- `POST /direct/<id>/complete` `{parts: [{part, etag}, …]}`: every part, in order. `200 {id, location, size, complete:
+  true}`, also when repeated after completing. `409` when R2 lacks a part or the sizes do not add up (start again).
+- Only the token that opened it (or an admin) may continue or complete it. A tus `PATCH` to it is refused (400). An
+  unfinished one is removed by the daily cleanup like any unfinished upload (its R2 parts too).
+- `501` when the server has no R2 keys: clients fall back to tus. Setup: create an R2 API token with **Object Read &
+  Write** on the bucket, then in `server/worker`: `npx wrangler secret put R2_ACCESS_KEY_ID` and
+  `npx wrangler secret put R2_SECRET_ACCESS_KEY` (`R2_ACCOUNT_ID` and `R2_BUCKET` are vars in `wrangler.jsonc`).
 
 ### Tokens and permissions
 
@@ -231,7 +230,7 @@ connection test.
 
 **Setup QR / link.** A token is handed to a phone as one string, shown as a QR code by the web app:
 `<tus endpoint>#token=<secret>&name=<url-encoded token name>`, e.g.
-`https://poi-capture-cloud.4hum-ai.workers.dev/files/#token=pct_…&name=S%C6%A1n%20%E2%80%93%20phone`. The fragment is
+`https://poi-uploader.4hum.ai/files/#token=pct_…&name=S%C6%A1n%20%E2%80%93%20phone`. The fragment is
 never sent to a server. The phone splits it: the part before `#` is the server address, `token` the access token.
 
 ### Deploy

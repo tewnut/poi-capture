@@ -5,6 +5,8 @@
 //   GET <BASE>/<id>                             download a finished upload
 //   GET <BASE>/index.json[?type=...]            {schema: "poi-cloud-index/1", uploads: [...]}, newest first
 //   GET /me, GET|POST /admin/tokens, DELETE /admin/tokens/<id>   who am I; personal tokens (admin)
+//   POST /direct, POST /direct/<id>/urls, POST /direct/<id>/complete   direct uploads: the client PUTs its parts
+//                                               straight to R2 with presigned URLs (README "Direct uploads")
 //
 // Tokens and permissions (../README.md): ADMIN_TOKEN = the admin password, TOKEN = the old shared token, personal
 // tokens issued by an admin with independent scopes (upload, read, process, delete), kept as SHA-256 hashes.
@@ -17,6 +19,7 @@
 // two PATCHes to one upload never interleave (the second gets 423), and its result is committed at the end in one
 // step: a PATCH that fails half way leaves the upload at its old offset, and the client resends from there.
 import { DurableObject } from 'cloudflare:workers'
+import { presign, type R2Keys } from './presign'
 import { DEFAULT_MAX_SIZE, EXTENSIONS, PART_SIZE, TUS_VERSION, corsOrigin, encodeMetadata, parseMetadata } from './tus'
 
 export interface Env {
@@ -28,7 +31,15 @@ export interface Env {
   MAX_SIZE?: string
   BASE_PATH?: string
   EXPIRE_DAYS?: string
+  // direct uploads (README "Direct uploads"): an R2 API token with Object Read & Write on the bucket
+  R2_ACCOUNT_ID?: string
+  R2_BUCKET?: string
+  R2_ACCESS_KEY_ID?: string
+  R2_SECRET_ACCESS_KEY?: string
 }
+
+const DIRECT_PART = 8 * 1024 * 1024             // direct uploads: every part this size except the last (R2: >= 5 MiB, equal)
+const DIRECT_URL_S = 6 * 3600                   // a presigned part URL is valid this long; the client asks again after
 
 const LEASE_MS = 5 * 60 * 1000                  // a PATCH that has not finished in 5 min loses its lease
 const MAX_METADATA = 8 * 1024                   // Upload-Metadata header, bytes
@@ -36,7 +47,7 @@ const TOUCH_MS = 10 * 60 * 1000                 // a token's lastUsedAt is writt
 const SEEN_MS = 60 * 1000                       // the last-seen record: at most once a minute unless client/city change
 
 const TUS_HEADERS = ['Authorization', 'Content-Type', 'Location', 'Tus-Extension', 'Tus-Max-Size', 'Tus-Resumable',
-  'Tus-Version', 'Upload-Concat', 'Upload-Defer-Length', 'Upload-Expires', 'Upload-Length', 'Upload-Metadata',
+  'Tus-Version', 'Upload-Defer-Length', 'Upload-Expires', 'Upload-Length', 'Upload-Metadata',
   'Upload-Offset', 'X-Client', 'X-HTTP-Method-Override', 'X-Requested-With']
 
 // ------------------------------------------------------------------------------------------------ state (DO)
@@ -55,9 +66,8 @@ export type UploadState = {
   carryLen: number
   complete: boolean
   by?: By | null             // the token that created it
-  concat?: Concat            // tus concatenation: a partial, or a final upload made of partials (ids, in order)
+  direct?: boolean           // written by the client straight to R2 (POST /direct): no PATCH, no carry
 }
-export type Concat = { partial: true } | { final: string[] } | null
 export type By = { id: string; name: string }
 export type Scope = 'upload' | 'read' | 'process' | 'delete'
 const SCOPES: Scope[] = ['upload', 'read', 'process', 'delete']
@@ -102,11 +112,9 @@ function fromRow(r: Row): UploadState {
     parts: JSON.parse(String(r.parts)), carryKey: (r.carry_key as string | null) ?? null, carryLen: Number(r.carry_len),
     complete: Number(r.complete) === 1,
     by: r.by_id ? { id: String(r.by_id), name: String(r.by_name ?? '') } : null,
-    concat: r.concat === 'partial' ? { partial: true } : r.concat ? { final: JSON.parse(String(r.concat)) } : null,
+    direct: Number(r.direct ?? 0) === 1,
   }
 }
-const isPartial = (s: UploadState) => !!s.concat && 'partial' in s.concat
-const finalParts = (s: UploadState) => (s.concat && 'final' in s.concat ? s.concat.final : null)
 
 const iso = (ms: unknown) => (ms ? new Date(Number(ms)).toISOString() : null)
 const strOrNull = (v: unknown) => (v == null ? null : String(v))
@@ -135,9 +143,10 @@ export class Uploads extends DurableObject<Env> {
     const cols = this.sql.exec('PRAGMA table_info(uploads)').toArray().map((c) => String(c.name))
     if (!cols.includes('by_id')) this.sql.exec('ALTER TABLE uploads ADD COLUMN by_id TEXT')
     if (!cols.includes('by_name')) this.sql.exec('ALTER TABLE uploads ADD COLUMN by_name TEXT')
-    // concatenation: 'partial' | JSON list of partial ids (final); final_id: the final upload a partial belongs to
+    // concat / final_id: tus concatenation (removed 2026-11-22); rows still marked are hidden and dropped by the cron
     if (!cols.includes('concat')) this.sql.exec('ALTER TABLE uploads ADD COLUMN concat TEXT')
     if (!cols.includes('final_id')) this.sql.exec('ALTER TABLE uploads ADD COLUMN final_id TEXT')
+    if (!cols.includes('direct')) this.sql.exec('ALTER TABLE uploads ADD COLUMN direct INTEGER NOT NULL DEFAULT 0')
     this.sql.exec(`CREATE TABLE IF NOT EXISTS tokens (
       id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, prefix TEXT NOT NULL,
       created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER)`)
@@ -215,48 +224,33 @@ export class Uploads extends DurableObject<Env> {
   }
 
   private row(id: string): Row | null {
-    return this.sql.exec('SELECT * FROM uploads WHERE id = ?', id).toArray()[0] ?? null
+    return this.sql.exec('SELECT * FROM uploads WHERE id = ? AND concat IS NULL', id).toArray()[0] ?? null
   }
 
   create(s: UploadState): void {
-    this.sql.exec(`INSERT INTO uploads (id, size, offset, metadata, created_at, updated_at, parts, complete, by_id, by_name, concat)
-      VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?)`, s.id, s.size, s.offset, JSON.stringify(s.metadata), s.createdAt,
-      s.updatedAt, s.complete ? 1 : 0, s.by?.id ?? null, s.by?.name ?? null,
-      s.concat ? ('partial' in s.concat ? 'partial' : JSON.stringify(s.concat.final)) : null)
+    this.sql.exec(`INSERT INTO uploads (id, size, offset, metadata, created_at, updated_at, mp_id, parts, complete, by_id, by_name, direct)
+      VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?)`, s.id, s.size, s.offset, JSON.stringify(s.metadata), s.createdAt,
+      s.updatedAt, s.mpId, s.complete ? 1 : 0, s.by?.id ?? null, s.by?.name ?? null, s.direct ? 1 : 0)
   }
 
   /**
-   * The final upload of a concatenation, in one step: every partial must exist (404), be a partial (400), be complete
-   * (400), not belong to another final (409) and be [by]'s (403; null = admin). Returns the new state.
+   * A direct upload [by] may continue (null: an admin): 404 unknown or not direct, 403 another token's, 400 finished.
+   * [touch]: it is still being written (the daily cleanup counts from this).
    */
-  concatFinal(f: Omit<UploadState, 'size' | 'offset'>, ids: string[], by: string | null): { status: 201 | 400 | 403 | 404 | 409; state?: UploadState; why?: string } {
-    let size = 0
-    for (const id of ids) {
-      const r = this.row(id)
-      if (!r) return { status: 404, why: `partial ${id} not found` }
-      const ps = fromRow(r)
-      if (!isPartial(ps)) return { status: 400, why: `${id} is not a partial upload` }
-      if (!ps.complete) return { status: 400, why: `partial ${id} is not finished` }
-      if (r.final_id) return { status: 409, why: `partial ${id} is already part of an upload` }
-      if (by !== null && ps.by?.id !== by) return { status: 403, why: `partial ${id} is not yours` }
-      size += ps.size
-    }
-    const s: UploadState = { ...f, size, offset: size, complete: true, concat: { final: ids } }
-    this.create(s)
-    for (const id of ids) this.sql.exec('UPDATE uploads SET final_id = ? WHERE id = ?', s.id, id)
-    return { status: 201, state: s }
+  directOf(id: string, by: string | null, touch: boolean): { status: 200 | 400 | 403 | 404; state?: UploadState } {
+    const r = this.row(id)
+    if (!r) return { status: 404 }
+    const s = fromRow(r)
+    if (!s.direct) return { status: 404 }
+    if (by !== null && s.by?.id !== by) return { status: 403 }
+    if (s.complete) return { status: 400, state: s }
+    if (touch) this.sql.exec('UPDATE uploads SET updated_at = ? WHERE id = ?', Date.now(), id)
+    return { status: 200, state: s }
   }
 
-  /** The partials of a final upload, removed with it; returned for R2 cleanup. */
-  dropParts(ids: string[]): UploadState[] {
-    const out: UploadState[] = []
-    for (const id of ids) {
-      const r = this.row(id)
-      if (!r) continue
-      out.push(fromRow(r))
-      this.sql.exec('DELETE FROM uploads WHERE id = ?', id)
-    }
-    return out
+  /** The direct upload's object is in R2 in full: finished. */
+  directDone(id: string): void {
+    this.sql.exec('UPDATE uploads SET complete = 1, offset = size, mp_id = NULL, updated_at = ? WHERE id = ?', Date.now(), id)
   }
 
   get(id: string): UploadState | null {
@@ -269,7 +263,7 @@ export class Uploads extends DurableObject<Env> {
     const r = this.row(id)
     if (!r) return { ok: false, status: 404 }
     const s = fromRow(r)
-    if (s.complete) return { ok: false, status: 400, state: s }
+    if (s.complete || s.direct) return { ok: false, status: 400, state: s }
     const now = Date.now()
     if (r.lease && Number(r.lease_until) > now) return { ok: false, status: 423, state: s }
     if (s.offset !== offset) return { ok: false, status: 409, state: s }
@@ -296,11 +290,10 @@ export class Uploads extends DurableObject<Env> {
    * Termination: forget an unfinished upload no PATCH is writing; the caller frees its R2 objects. [by]: only an
    * upload this token created (403 otherwise); null: an admin, who may also remove finished uploads and leased ones.
    */
-  terminate(id: string, by: string | null): { status: 204 | 404 | 400 | 403 | 409 | 423; state?: UploadState } {
+  terminate(id: string, by: string | null): { status: 204 | 404 | 400 | 403 | 423; state?: UploadState } {
     const r = this.row(id)
     if (!r) return { status: 404 }
     const s = fromRow(r)
-    if (r.final_id) return { status: 409 }   // part of a final upload: delete that one instead
     if (by === null) {
       this.sql.exec('DELETE FROM uploads WHERE id = ?', id)
       return { status: 204, state: s }
@@ -313,14 +306,17 @@ export class Uploads extends DurableObject<Env> {
   }
 
   list(type: string): UploadState[] {
-    return this.sql.exec("SELECT * FROM uploads WHERE concat IS NULL OR concat != 'partial' ORDER BY created_at DESC").toArray()
+    return this.sql.exec('SELECT * FROM uploads WHERE concat IS NULL ORDER BY created_at DESC').toArray()
       .map(fromRow).filter((s) => !type || s.metadata.type === type)
   }
 
-  /** Unfinished uploads untouched since [before] (ms) and not being written: removed, returned for R2 cleanup. */
+  /**
+   * Unfinished uploads untouched since [before] (ms) and not being written, and what is left of tus concatenation
+   * (partials, joined uploads): removed, returned for R2 cleanup.
+   */
   expire(before: number): UploadState[] {
-    const rows = this.sql.exec(`SELECT * FROM uploads WHERE updated_at < ? AND lease_until < ? AND (complete = 0
-      OR (concat = 'partial' AND final_id IS NULL))`, before, Date.now()).toArray().map(fromRow)
+    const rows = this.sql.exec(`SELECT * FROM uploads WHERE (updated_at < ? AND lease_until < ? AND complete = 0)
+      OR concat IS NOT NULL`, before, Date.now()).toArray().map(fromRow)
     for (const s of rows) this.sql.exec('DELETE FROM uploads WHERE id = ?', s.id)
     return rows
   }
@@ -375,8 +371,8 @@ const has = (p: Principal, sc: Scope) => p.admin || p.scopes.includes(sc)
 const canRead = (p: Principal) => has(p, 'read') || has(p, 'process')
 /** May this token create (and so HEAD / PATCH) an upload of this type? */
 const canWrite = (p: Principal, type: string | undefined) => (type === 'processed-result' ? has(p, 'process') : has(p, 'upload'))
-/** PATCH / HEAD of an existing upload: a partial is anybody's who may upload anything (its type is on the final). */
-const canWriteState = (p: Principal, s: UploadState) => (isPartial(s) ? has(p, 'upload') || has(p, 'process') : canWrite(p, s.metadata.type))
+/** PATCH / HEAD of an existing upload. */
+const canWriteState = (p: Principal, s: UploadState) => canWrite(p, s.metadata.type)
 const me = (p: Principal) => ({ id: p.id, name: p.name, scopes: p.scopes, admin: p.admin, role: roleOf(p.scopes, p.admin) })
 
 function json(status: number, body: unknown): Response {
@@ -453,7 +449,6 @@ function tusHeaders(env: Env, s: UploadState): Record<string, string> {
   }
   if (Object.keys(s.metadata).length) h['Upload-Metadata'] = encodeMetadata(s.metadata)
   if (!s.complete) h['Upload-Expires'] = new Date(s.updatedAt + expireMs(env)).toUTCString()
-  if (s.concat) h['Upload-Concat'] = 'partial' in s.concat ? 'partial' : `final;${s.concat.final.map((id) => `${base(env)}/${id}`).join(' ')}`
   return h
 }
 const base = (env: Env) => '/' + (env.BASE_PATH || '/files').replace(/^\/+|\/+$/g, '')
@@ -574,11 +569,6 @@ async function append(env: Env, ctx: ExecutionContext, id: string, offset: numbe
 
 async function create(env: Env, ctx: ExecutionContext, req: Request, base: string, by: Principal): Promise<Response> {
   if (req.headers.get('Upload-Defer-Length')) return text(501, 'Not supported\n')
-  const concatH = (req.headers.get('Upload-Concat') || '').trim()
-  if (concatH.startsWith('final;')) return createFinal(env, req, concatH.slice(6), by)
-  if (concatH && concatH !== 'partial') return text(400, 'Upload-Concat: partial or final;<urls>\n')
-  const partial = concatH === 'partial'
-  if (partial && !has(by, 'upload') && !has(by, 'process')) return text(403, 'Forbidden\n')
   const lenH = req.headers.get('Upload-Length')
   if (!lenH || !/^\d+$/.test(lenH)) return text(400, 'Upload-Length required\n')
   const size = Number(lenH)
@@ -587,17 +577,16 @@ async function create(env: Env, ctx: ExecutionContext, req: Request, base: strin
   if (metaH && metaH.length > MAX_METADATA) return text(400, 'Upload-Metadata too long\n')
   const metadata = parseMetadata(metaH)
   if (!metadata) return text(400, 'Bad Upload-Metadata\n')
-  if (!partial && !canWrite(by, metadata.type)) return text(403, 'Forbidden\n')
+  if (!canWrite(by, metadata.type)) return text(403, 'Forbidden\n')
   const id = crypto.randomUUID().replace(/-/g, '')
   const now = Date.now()
   const s: UploadState = { id, size, offset: 0, metadata, createdAt: new Date(now).toISOString(), updatedAt: now,
-    mpId: null, parts: [], carryKey: null, carryLen: 0, complete: size === 0, by: { id: by.id, name: by.name },
-    concat: partial ? { partial: true } : null }
+    mpId: null, parts: [], carryKey: null, carryLen: 0, complete: size === 0, by: { id: by.id, name: by.name } }
   if (size === 0) {
     await env.BUCKET.put(dataKey(id), new Uint8Array(0), { customMetadata: { id, filename: metadata.filename || id } })
   }
   await stub(env).create(s)
-  console.log(`created ${id} (${size} B) ${partial ? 'partial' : `${metadata.type || ''} ${metadata.filename || ''}`}`)
+  console.log(`created ${id} (${size} B) ${metadata.type || ''} ${metadata.filename || ''}`)
   const location = `${new URL(req.url).origin}${base}/${id}`
   const h: Record<string, string> = { Location: location, 'Tus-Resumable': TUS_VERSION, 'Cache-Control': 'no-store' }
   // creation-with-upload: the first bytes in the POST itself
@@ -629,30 +618,6 @@ async function patch(env: Env, ctx: ExecutionContext, req: Request, id: string, 
   }
 }
 
-/** Upload-Concat: final;<url> <url> ...: join finished partials into one complete upload (README, Parallel uploads). */
-async function createFinal(env: Env, req: Request, list: string, by: Principal): Promise<Response> {
-  const ids = list.trim().split(/\s+/).filter(Boolean).map((u) => {
-    try { return new URL(u, req.url).pathname.split('/').pop() || '' } catch { return '' }
-  })
-  if (!ids.length || ids.length > 16 || ids.some((i) => !isId(i)) || new Set(ids).size !== ids.length) {
-    return text(400, 'Upload-Concat final: 1 to 16 distinct partial upload URLs\n')
-  }
-  const metaH = req.headers.get('Upload-Metadata')
-  if (metaH && metaH.length > MAX_METADATA) return text(400, 'Upload-Metadata too long\n')
-  const metadata = parseMetadata(metaH)
-  if (!metadata) return text(400, 'Bad Upload-Metadata\n')
-  if (!canWrite(by, metadata.type)) return text(403, 'Forbidden\n')
-  const id = crypto.randomUUID().replace(/-/g, '')
-  const now = Date.now()
-  const r = await stub(env).concatFinal({ id, metadata, createdAt: new Date(now).toISOString(), updatedAt: now, mpId: null,
-    parts: [], carryKey: null, carryLen: 0, complete: true, by: { id: by.id, name: by.name } }, ids, by.admin ? null : by.id)
-  if (r.status !== 201) return text(r.status, `${r.why}\n`, { 'Tus-Resumable': TUS_VERSION })
-  if (r.state!.size > maxSize(env)) console.log(`final ${id} is ${r.state!.size} B, over MAX_SIZE`)
-  console.log(`created ${id} (${r.state!.size} B) ${metadata.type || ''} ${metadata.filename || ''} from ${ids.length} partials`)
-  return new Response(null, { status: 201, headers: { Location: `${new URL(req.url).origin}${base(env)}/${id}`,
-    'Tus-Resumable': TUS_VERSION, 'Upload-Offset': String(r.state!.size), 'Cache-Control': 'no-store' } })
-}
-
 async function head(env: Env, id: string, p: Principal): Promise<Response> {
   const s = await stub(env).get(id)
   if (s && !canWriteState(p, s) && !canRead(p)) return text(403, 'Forbidden\n', { 'Tus-Resumable': TUS_VERSION })
@@ -666,14 +631,9 @@ async function terminate(env: Env, id: string, p: Principal): Promise<Response> 
   if (r.status === 400) return text(400, 'A finished upload can only be deleted with the Delete uploads permission\n', h)
   if (r.status === 403) return text(403, 'Not your upload\n', h)
   if (r.status === 423) return text(423, 'Another PATCH is writing this upload\n', h)
-  if (r.status === 409) return text(409, 'Part of a joined upload: delete that upload instead\n', h)
   if (r.status !== 204) return text(404, 'Not found\n', h)
   await freeR2(env, r.state!)
   if (r.state!.complete) await env.BUCKET.delete(dataKey(id))
-  const ids = finalParts(r.state!)
-  if (ids) {
-    for (const ps of await stub(env).dropParts(ids)) { await freeR2(env, ps); await env.BUCKET.delete(dataKey(ps.id)) }
-  }
   console.log(`deleted ${id}${r.state!.complete ? ' (finished)' : ''} by ${p.id}`)
   return new Response(null, { status: 204, headers: h })
 }
@@ -694,43 +654,130 @@ async function index(env: Env, type: string): Promise<Response> {
 async function download(env: Env, ctx: ExecutionContext, id: string): Promise<Response> {
   if (!isId(id)) return text(404, 'Not found\n')
   const s = await stub(env).get(id)
-  if (!s || isPartial(s)) return text(404, 'Not found\n')
-  let body: ReadableStream
-  let size: number
-  let filename = s.metadata.filename || id
-  const ids = finalParts(s)
-  if (ids) {
-    // a joined upload: its partials one after the other, streamed from R2 (no copy is ever stored)
-    const objs: R2ObjectBody[] = []
-    for (const pid of ids) {
-      const o = await env.BUCKET.get(dataKey(pid))
-      if (!o) return text(500, `part ${pid} missing\n`)
-      objs.push(o)
-    }
-    size = objs.reduce((n, o) => n + o.size, 0)
-    const { readable, writable } = new FixedLengthStream(size)
-    ctx.waitUntil((async () => {
-      for (const o of objs) await o.body.pipeTo(writable, { preventClose: true })
-      await writable.close()
-    })().catch((e) => { console.error('concat download failed:', id, (e as Error)?.message); return writable.abort(e) }))
-    body = readable
-  } else {
-    const obj = await env.BUCKET.get(dataKey(id))
-    if (!obj) return text(404, 'Upload not finished\n')
-    body = obj.body
-    size = obj.size
-    filename = String(obj.customMetadata?.filename || filename)
-  }
+  if (!s) return text(404, 'Not found\n')
+  const obj = await env.BUCKET.get(dataKey(id))
+  if (!obj) return text(404, 'Upload not finished\n')
+  const filename = String(obj.customMetadata?.filename || s.metadata.filename || id)
   const name = String(filename).replace(/[^\w.\-]+/g, '_')
-  return new Response(body, {
+  return new Response(obj.body, {
     headers: {
       'Content-Type': 'application/octet-stream',   // never rendered by the browser, whatever was uploaded
-      'Content-Length': String(size),
+      'Content-Length': String(obj.size),
       'Content-Disposition': `attachment; filename="${name}"`,
       'X-Content-Type-Options': 'nosniff',
       'Cache-Control': 'no-store',
     },
   })
+}
+
+// ------------------------------------------------------------------------------------------------ direct uploads
+
+function r2Keys(env: Env): R2Keys | null {
+  if (!env.R2_ACCOUNT_ID || !env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY) return null
+  return { accountId: env.R2_ACCOUNT_ID, bucket: env.R2_BUCKET || 'poi-capture-uploads', accessKeyId: env.R2_ACCESS_KEY_ID,
+    secretAccessKey: env.R2_SECRET_ACCESS_KEY }
+}
+
+const partCount = (size: number) => Math.max(1, Math.ceil(size / DIRECT_PART))
+
+async function partUrls(k: R2Keys, s: UploadState, parts: number[]) {
+  const expiresAt = new Date(Date.now() + DIRECT_URL_S * 1000).toISOString()
+  const urls = await Promise.all(parts.map(async (n) => ({ part: n,
+    url: await presign(k, 'PUT', dataKey(s.id), { partNumber: String(n), uploadId: s.mpId! }, DIRECT_URL_S) })))
+  return { urls, expiresAt }
+}
+
+async function readJson(req: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const t = await req.text()
+    if (t.length > 1024 * 1024) return null
+    const v = JSON.parse(t)
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null
+  } catch { return null }
+}
+
+/**
+ * README "Direct uploads": the client sends its file straight to R2 in DIRECT_PART parts (presigned PUTs, any order,
+ * several at once), keeps each part's ETag, and asks the Worker to complete. The upload is an ordinary entry
+ * otherwise: HEAD / DELETE / download at <BASE>/<id>, listed in index.json once complete.
+ */
+async function direct(env: Env, req: Request, base: string, rest: string, p: Principal): Promise<Response> {
+  if (req.method !== 'POST') return text(405, 'Method not allowed\n')
+  const k = r2Keys(env)
+  if (!k) return text(501, 'Direct uploads are not set up on this server\n')
+  const body = await readJson(req)
+  if (!body) return text(400, 'JSON body required\n')
+  const origin = new URL(req.url).origin
+
+  if (!rest) {
+    const size = Number(body.size)
+    if (!Number.isSafeInteger(size) || size < 1) return text(400, 'size: a positive integer\n')
+    if (size > maxSize(env)) return text(413, 'Upload too large\n')
+    const m = body.metadata
+    if (m != null && (typeof m !== 'object' || Array.isArray(m))) return text(400, 'metadata: an object of strings\n')
+    const metadata: Record<string, string> = {}
+    for (const [n, v] of Object.entries((m ?? {}) as Record<string, unknown>)) {
+      if (typeof v !== 'string' || !/^[A-Za-z0-9_.-]{1,64}$/.test(n)) return text(400, 'metadata: an object of strings\n')
+      metadata[n] = v
+    }
+    if (JSON.stringify(metadata).length > MAX_METADATA) return text(400, 'metadata too long\n')
+    if (!canWrite(p, metadata.type)) return text(403, 'Forbidden\n')
+    const id = crypto.randomUUID().replace(/-/g, '')
+    const mp = await env.BUCKET.createMultipartUpload(dataKey(id), {
+      customMetadata: { id, filename: metadata.filename || id }, httpMetadata: { contentType: 'application/octet-stream' } })
+    const now = Date.now()
+    const s: UploadState = { id, size, offset: 0, metadata, createdAt: new Date(now).toISOString(), updatedAt: now,
+      mpId: mp.uploadId, parts: [], carryKey: null, carryLen: 0, complete: false, by: { id: p.id, name: p.name },
+      direct: true }
+    await stub(env).create(s)
+    const n = partCount(size)
+    console.log(`direct ${id} (${size} B, ${n} parts) ${metadata.type || ''} ${metadata.filename || ''}`)
+    return json(201, { schema: 'poi-cloud-direct/1', id, location: `${origin}${base}/${id}`, size, partSize: DIRECT_PART,
+      parts: n, ...(await partUrls(k, s, Array.from({ length: Math.min(n, 1000) }, (_, i) => i + 1))) })
+  }
+
+  const m = /^([A-Za-z0-9_-]{1,64})\/(urls|complete)$/.exec(rest)
+  if (!m) return text(404, 'Not found\n')
+  const [, id, what] = m
+  const d = await stub(env).directOf(id, p.admin ? null : p.id, what === 'urls')
+  if (d.status === 404) return text(404, 'Not found\n')
+  if (d.status === 403) return text(403, 'Not your upload\n')
+  const s = d.state!
+  const n = partCount(s.size)
+  if (what === 'urls') {
+    if (d.status === 400) return text(400, 'Upload already finished\n')
+    const parts = Array.isArray(body.parts) ? body.parts : []
+    if (!parts.length || parts.length > 1000 || parts.some((x) => !Number.isInteger(x) || x < 1 || x > n)) {
+      return text(400, `parts: 1 to 1000 part numbers between 1 and ${n}\n`)
+    }
+    return json(200, { schema: 'poi-cloud-direct/1', id, ...(await partUrls(k, s, parts as number[])) })
+  }
+
+  // complete: every part, in order, with the ETag R2 gave the client
+  if (d.status === 400) return json(200, { schema: 'poi-cloud-direct/1', id, location: `${origin}${base}/${id}`, size: s.size, complete: true })
+  const list = Array.isArray(body.parts) ? body.parts as { part?: unknown; etag?: unknown }[] : []
+  if (list.length !== n || list.some((x, i) => x?.part !== i + 1 || typeof x?.etag !== 'string' || !x.etag)) {
+    return text(400, `parts: all ${n} parts in order, each {part, etag}\n`)
+  }
+  try {
+    await env.BUCKET.resumeMultipartUpload(dataKey(id), s.mpId!).complete(list.map((x) => ({ partNumber: x.part as number, etag: (x.etag as string).replace(/^"|"$/g, '') })))
+  } catch (e) {
+    // a repeated complete whose first answer was lost: the object is there in full
+    const h = await env.BUCKET.head(dataKey(id))
+    if (!h || h.size !== s.size) {
+      console.log(`direct ${id} complete failed: ${(e as Error)?.message}`)
+      return text(409, `Could not complete: ${(e as Error)?.message || 'parts missing or wrong'}\n`)
+    }
+  }
+  const h = await env.BUCKET.head(dataKey(id))
+  if (!h || h.size !== s.size) {
+    await env.BUCKET.delete(dataKey(id))
+    await stub(env).terminate(id, null)
+    return text(409, `The parts add up to ${h?.size ?? 0} bytes, not ${s.size}: start again\n`)
+  }
+  await stub(env).directDone(id)
+  console.log(`finished ${id} (direct)`)
+  return json(200, { schema: 'poi-cloud-direct/1', id, location: `${origin}${base}/${id}`, size: s.size, complete: true })
 }
 
 async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -750,13 +797,15 @@ async function route(req: Request, env: Env, ctx: ExecutionContext): Promise<Res
   if (url.pathname === '/' || url.pathname === '/health') return text(200, `POI Capture cloud: tus at ${base}/\n`)
   const isMe = url.pathname === '/me'
   const isAdmin = url.pathname.startsWith('/admin/')
-  if (!isMe && !isAdmin && url.pathname !== base && !url.pathname.startsWith(base + '/')) return text(404, 'Not found\n')
+  const isDirect = url.pathname === '/direct' || url.pathname.startsWith('/direct/')
+  if (!isMe && !isAdmin && !isDirect && url.pathname !== base && !url.pathname.startsWith(base + '/')) return text(404, 'Not found\n')
   const p = await principal(env, req)
   if (!p) return text(401, 'Unauthorized\n', { 'WWW-Authenticate': 'Bearer' })
   if (p.id !== 'open') ctx.waitUntil(stub(env).touchSeen(p.id, seenInput(req)).catch(() => {}))
   const forbidden = () => text(403, 'Forbidden\n')
   if (isMe) return req.method === 'GET' ? json(200, { schema: 'poi-cloud-me/1', ...me(p) }) : text(405, 'Method not allowed\n')
   if (isAdmin) return p.admin ? admin(env, req, url.pathname.slice('/admin/'.length)) : forbidden()
+  if (isDirect) return direct(env, req, base, url.pathname.slice('/direct'.length).replace(/^\/+/, ''), p)
 
   const rest = url.pathname.slice(base.length).replace(/^\/+/, '')
   let method = req.method
@@ -808,8 +857,8 @@ export default {
     const gone = await stub(env).expire(Date.now() - expireMs(env))
     for (const s of gone) {
       await freeR2(env, s)
-      if (s.complete) await env.BUCKET.delete(dataKey(s.id))   // a finished partial no final upload used
+      if (s.complete) await env.BUCKET.delete(dataKey(s.id))   // a leftover of tus concatenation
     }
-    if (gone.length) console.log(`expired ${gone.length} unfinished upload(s) or unused partial(s)`)
+    if (gone.length) console.log(`expired ${gone.length} unfinished or leftover upload(s)`)
   },
 } satisfies ExportedHandler<Env>
