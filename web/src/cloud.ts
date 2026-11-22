@@ -69,7 +69,7 @@ export const PRESETS: Record<'phone' | 'reviewer' | 'agent', Scope[]> = { phone:
 /** The server's one-word summary of the scopes, for older clients (`custom` when none fits). */
 export type Role = 'uploader' | 'reviewer' | 'agent' | 'custom' | 'admin'
 
-/** A built-in identity: the admin password (`admin`) or the old shared token (`shared`); scopes set as server secrets. */
+/** A built-in identity (the admin password, `admin`): a server secret, not issued; its scopes cannot be changed. */
 export type Builtin = { id: string; name: string; scopes: Scope[]; role: Role; seen: Seen | null }
 
 export type Me = { id: string; name: string; scopes: Scope[]; admin: boolean; role: Role }

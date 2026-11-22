@@ -161,8 +161,8 @@ valuable), positions triangulated vs single-photo, and the link to `index.html`.
 ## Cloud server (when the session came from it)
 
 When the team uses the upload server (`server/README.md`), sessions arrive there instead of by adb. With
-`POI_CLOUD_URL` (the tus endpoint; the team's is `https://poi-uploader.4hum.ai/files/`) and, if the server has one, `POI_CLOUD_TOKEN` set in
-the environment (never pass or print the token):
+`POI_CLOUD_URL` (the tus endpoint; the team's is `https://poi-uploader.4hum.ai/files/`) and `POI_CLOUD_TOKEN` (a personal access key with Process rides, issued on the
+admin page; the shared token is gone) set in the environment (never pass or print the token):
 
 ```
 python <skill>/scripts/cloud.py list                         # raw sessions from phones (type raw-session)

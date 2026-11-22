@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Admin, "Access keys": every identity, the built-in ones (admin password, shared key: server secrets, read-only) and
+// Admin, "Access keys": every identity, the built-in one (the admin password: a server secret, read-only) and
 // the issued keys, as a list or a map of where each was last seen (IP lookup: approximate). A click on a key, in either
 // view, opens it in the side panel: rename, change permissions, revoke, its full last-seen record. "New key" opens the
 // same panel: name and permissions, then the secret, shown once, with the phone's setup QR code (drawn here, never by a

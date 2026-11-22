@@ -37,7 +37,7 @@ web app ◄── session list: type=processed-result ─────┴──�
   the phone (setting, on by default). The session card has one Send to server control that shows progress, waiting,
   failure or done (`capture/UploadWork.kt`); never while a session is recording.
 - **Agent**: `.claude/skills/process-sweep/scripts/cloud.py` (`list`, `pull <id> <dir>`, `push <zip|folder>`),
-  `POI_CLOUD_URL` (e.g. the Worker URL above) / `POI_CLOUD_TOKEN`.
+  `POI_CLOUD_URL` (e.g. the Worker URL above) / `POI_CLOUD_TOKEN` (a personal key with Process rides).
 - **Web app**: works only from the server (no import by hand). The server is the build's (`VITE_CLOUD_URL`, default
   the project server); the reviewer adds their access key in Settings (#/settings: Connection, Language, This browser),
   kept in this browser only; the key's name is the name saved with each review. The session list is the server's

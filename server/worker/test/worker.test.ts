@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { PART_SIZE, corsOrigin, encodeMetadata, parseMetadata } from '../src/tus'
 
 const BASE = 'https://cloud.test/files/'
-const AUTH = { Authorization: 'Bearer test-token', 'Tus-Resumable': '1.0.0' }
+const AUTH = { Authorization: 'Bearer admin-token', 'Tus-Resumable': '1.0.0' }
 const MiB = 1024 * 1024
 
 function bytes(n: number, seed = 1): Uint8Array {
@@ -45,7 +45,7 @@ async function upload(data: Uint8Array, chunks: number[] | number, viaOverride =
 }
 
 async function download(url: string) {
-  const r = await SELF.fetch(url, { headers: { Authorization: 'Bearer test-token' } })
+  const r = await SELF.fetch(url, { headers: { Authorization: 'Bearer admin-token' } })
   expect(r.status).toBe(200)
   expect(r.headers.get('Content-Type')).toBe('application/octet-stream')
   return new Uint8Array(await r.arrayBuffer())
@@ -63,10 +63,10 @@ describe('auth and CORS', () => {
     expect(pre.headers.get('Access-Control-Allow-Origin')).toBe('http://localhost:5173')
     expect(pre.headers.get('Access-Control-Allow-Methods')).toContain('PATCH')
     expect(pre.headers.get('Access-Control-Allow-Headers')).toContain('Upload-Offset')
-    const res = await SELF.fetch(BASE + 'index.json', { headers: { Authorization: 'Bearer test-token', Origin: 'https://abc.poi-capture-reviewer.pages.dev' } })
+    const res = await SELF.fetch(BASE + 'index.json', { headers: { Authorization: 'Bearer admin-token', Origin: 'https://abc.poi-capture-reviewer.pages.dev' } })
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('https://abc.poi-capture-reviewer.pages.dev')
     expect(res.headers.get('Access-Control-Expose-Headers')).toContain('Upload-Offset')
-    const other = await SELF.fetch(BASE + 'index.json', { headers: { Authorization: 'Bearer test-token', Origin: 'https://evil.example' } })
+    const other = await SELF.fetch(BASE + 'index.json', { headers: { Authorization: 'Bearer admin-token', Origin: 'https://evil.example' } })
     expect(other.headers.get('Access-Control-Allow-Origin')).toBeNull()
   })
 
@@ -149,7 +149,7 @@ describe('uploads', () => {
     expect(await dl.text()).toMatch(/not finished/)
     const big = await SELF.fetch(BASE, { method: 'POST', headers: { ...AUTH, 'Upload-Length': String(5 * 1024 ** 3) } })
     expect(big.status).toBe(413)
-    expect((await SELF.fetch(BASE, { method: 'POST', headers: { Authorization: 'Bearer test-token', 'Upload-Length': '1' } })).status).toBe(412)
+    expect((await SELF.fetch(BASE, { method: 'POST', headers: { Authorization: 'Bearer admin-token', 'Upload-Length': '1' } })).status).toBe(412)
     expect((await SELF.fetch(BASE + 'nope', { method: 'HEAD', headers: AUTH })).status).toBe(404)
   })
 
@@ -165,8 +165,15 @@ describe('uploads', () => {
   })
 
   it('deletes unfinished uploads only, and expires abandoned ones', async () => {
-    const done = await upload(bytes(10), 10)
-    expect((await SELF.fetch(done, { method: 'POST', headers: { ...AUTH, 'X-HTTP-Method-Override': 'DELETE' } })).status).toBe(400)
+    // a phone's own finished upload: tus termination refuses it (deleting finished uploads is the admin's)
+    const k = await SELF.fetch('https://cloud.test/admin/tokens', { method: 'POST', headers: { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'phone', scopes: ['upload'] }) })
+    const PHONE = { Authorization: `Bearer ${(await k.json<{ secret: string }>()).secret}`, 'Tus-Resumable': '1.0.0' }
+    const c = await SELF.fetch(BASE, { method: 'POST', headers: { ...PHONE, 'Upload-Length': '10', 'Content-Type': 'application/offset+octet-stream',
+      'Upload-Metadata': encodeMetadata({ filename: 'p.zip', type: 'raw-session' }) }, body: bytes(10) })
+    expect(c.status).toBe(201)
+    const done = new URL(c.headers.get('Location')!, BASE).toString()
+    expect((await SELF.fetch(done, { method: 'POST', headers: { ...PHONE, 'X-HTTP-Method-Override': 'DELETE' } })).status).toBe(400)
     expect((await download(done)).length).toBe(10)
     const part = await create(PART_SIZE * 2)
     expect((await patch(part, 0, bytes(PART_SIZE + 10))).status).toBe(204)
@@ -201,7 +208,7 @@ describe('tokens and roles', () => {
   it('says who you are', async () => {
     const me = async (h: Record<string, string>) => (await SELF.fetch(ROOT + '/me', { headers: h })).json<{ id: string; role: string }>()
     expect(await me(ADMIN)).toMatchObject({ id: 'admin', role: 'admin' })
-    expect(await me(bearer('test-token'))).toMatchObject({ id: 'shared', role: 'reviewer' })
+    expect((await SELF.fetch(ROOT + '/me', { headers: bearer('test-token') })).status).toBe(401)   // no shared token any more
     expect((await SELF.fetch(ROOT + '/me')).status).toBe(401)
   })
 
@@ -301,8 +308,6 @@ describe('last seen', () => {
     expect(b).toMatchObject({ client: phoneB, prevClient: phoneA })
     expect(b!.prevAt).not.toBeNull()
 
-    await SELF.fetch(ROOT + '/me', { headers: { Authorization: 'Bearer test-token', 'X-Client': 'cloud.py/1' } })
-    expect(await seenOf('shared', (s) => s?.client === 'cloud.py/1')).not.toBeNull()
     expect(await seenOf('admin', (s) => s != null)).not.toBeNull()
   })
 
@@ -378,14 +383,14 @@ describe('permissions (scopes)', () => {
 
   it('lists built-ins with their scopes', async () => {
     const l = await (await SELF.fetch(ROOT + '/admin/tokens', { headers: ADMIN })).json<{ builtins: { id: string; scopes: string[] }[] }>()
-    expect(l.builtins.find((b) => b.id === 'shared')!.scopes).toEqual(['upload', 'read', 'process'])
+    expect(l.builtins.map((b) => b.id)).toEqual(['admin'])
     expect(l.builtins.find((b) => b.id === 'admin')!.scopes).toEqual(['upload', 'read', 'process', 'delete'])
   })
 })
 
 describe('direct uploads (presigned R2 parts)', () => {
   const ROOT = 'https://cloud.test'
-  const KEY = { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' }
+  const KEY = { Authorization: 'Bearer admin-token', 'Content-Type': 'application/json' }
   const post = (path: string, body: unknown, h: Record<string, string> = KEY) =>
     SELF.fetch(ROOT + path, { method: 'POST', headers: h, body: JSON.stringify(body) })
 

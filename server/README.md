@@ -187,20 +187,17 @@ alone and is never a scope. Presets in the admin page: Phone = `upload`; Reviewe
 Where the token comes from:
 - `ADMIN_TOKEN` (secret, `npx wrangler secret put ADMIN_TOKEN`): id `admin`, name `Admin`, every scope plus `/admin/...`.
   Never on a phone.
-- `TOKEN` (secret, optional): the old shared token, id `shared`, name `Shared token`, scopes `upload`, `read`, `process`.
-  Kept so clients set up before personal tokens keep working; delete it (`npx wrangler secret delete TOKEN`) once
-  everyone has their own (the admin page shows when it was last seen).
 - Personal tokens issued by an admin (below), stored in the Durable Object as a SHA-256 hash only: the secret is shown
   once, when issued. A revoked token gets 401 at once. Tokens issued before scopes existed: role `uploader` → `upload`;
   `reviewer` → `upload`, `read`, `process`.
-- With neither secret set and no personal token issued, the server is open (local tests only).
+- With no `ADMIN_TOKEN` and no personal token issued, the server is open (local tests only).
 
 A wrong or revoked token gets `401`; a valid token without the scope gets `403 Forbidden`.
 
 **Attribution.** Each upload records the token that created it; `index.json` entries get
 `"by": {"id": "<token id>", "name": "<token name>"}` (`null` for uploads made before this).
 
-**Last seen.** For every token (personal, `admin`, `shared`) the Worker keeps **one** record of its latest request,
+**Last seen.** For every token (personal, `admin`) the Worker keeps **one** record of its latest request,
 overwritten each time (at most once a minute, or at once when the client or the city changes). No IP address and no
 history is kept:
 
@@ -218,7 +215,7 @@ history is kept:
   from two different clients within 7 days (a copied token, or a new phone).
 
 `GET /admin/tokens` adds `"seen": Seen | null` to each Token, and a list of the built-in identities:
-`"builtins": [{"id": "admin" | "shared", "name", "scopes", "role", "seen": Seen | null}]`.
+`"builtins": [{"id": "admin", "name", "scopes", "role", "seen": Seen | null}]`.
 
 **Trip metadata.** A phone's `raw-session` upload carries, besides `filename`, `type`, `sessionId`, `name`, …:
 `track` (the ride as a Google encoded polyline, precision 5, simplified so it stays under 2,000 characters),
@@ -260,10 +257,9 @@ npm install
 npx wrangler r2 bucket create poi-capture-uploads
 npx wrangler deploy
 npx wrangler secret put ADMIN_TOKEN    # paste a long random string: the admin password (Admin tab, deletes)
-npx wrangler secret put TOKEN          # optional: the old shared token (role reviewer) until everyone has their own
 ```
 
-Without `ADMIN_TOKEN`, `TOKEN` or any issued token the server is open to anyone who knows the URL: always set
+Without `ADMIN_TOKEN` or any issued token the server is open to anyone who knows the URL: always set
 `ADMIN_TOKEN`. (A first deploy can also take secrets from a file: `npx wrangler deploy --secrets-file secrets.json`,
 kept outside the repo.) No secret is in the repository. The admin password stays with whoever runs the server (a
 password manager); everyone else gets a personal token from the reviewer's Admin tab (phones scan its QR code), and a

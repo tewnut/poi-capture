@@ -10,8 +10,8 @@
 //   GET /reviews, POST|DELETE /reviews/<session>/checkout, GET|PUT /reviews/<session>   a session's review: one
 //                                               reviewer checks it out (a lock), saves, checks in (README "Reviews")
 //
-// Tokens and permissions (../README.md): ADMIN_TOKEN = the admin password, TOKEN = the old shared token, personal
-// tokens issued by an admin with independent scopes (upload, read, process, delete), kept as SHA-256 hashes.
+// Tokens and permissions (../README.md): ADMIN_TOKEN = the admin password; everyone else has a personal token issued
+// by an admin with independent scopes (upload, read, process, delete), kept as SHA-256 hashes.
 //
 // Chunks: R2 multipart parts must all be the same size (>= 5 MiB) except the last, while tus PATCHes come in any size
 // (the phone sends 2 MB, cloud.py 8 MiB). Each PATCH is streamed into PART_SIZE buffers; every full buffer becomes a
@@ -27,8 +27,9 @@ import { DEFAULT_MAX_SIZE, EXTENSIONS, PART_SIZE, TUS_VERSION, corsOrigin, encod
 export interface Env {
   BUCKET: R2Bucket
   UPLOADS: DurableObjectNamespace<Uploads>
-  TOKEN?: string
   ADMIN_TOKEN?: string
+  /** The removed shared token: no longer accepted, but while still set the server never falls back to open. */
+  TOKEN?: string
   CORS_ORIGINS?: string
   MAX_SIZE?: string
   BASE_PATH?: string
@@ -418,14 +419,12 @@ async function same(given: string, secret: string): Promise<boolean> {
 }
 
 const ADMIN: Principal = { id: 'admin', name: 'Admin', scopes: [...SCOPES], admin: true }
-const SHARED: Principal = { id: 'shared', name: 'Shared token', scopes: ['upload', 'read', 'process'], admin: false }
 
 /** Who sent the request, or null (401). Open (admin) only while no secret is set and no token was issued. */
 async function principal(env: Env, req: Request): Promise<Principal | null> {
   const given = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
   if (given) {
     if (env.ADMIN_TOKEN && (await same(given, env.ADMIN_TOKEN))) return ADMIN
-    if (env.TOKEN && (await same(given, env.TOKEN))) return SHARED
     if (given.startsWith('pct_')) {
       const p = await stub(env).findToken(await sha256hex(given))
       if (p) return p
@@ -469,7 +468,6 @@ async function admin(env: Env, req: Request, rest: string): Promise<Response> {
   if (rest === 'tokens' && req.method === 'GET') {
     const builtins = []
     if (env.ADMIN_TOKEN) builtins.push({ ...me(ADMIN), seen: await tokens.seenOf('admin') })
-    if (env.TOKEN) builtins.push({ ...me(SHARED), seen: await tokens.seenOf('shared') })
     return json(200, { schema: 'poi-cloud-tokens/1', tokens: await tokens.listTokens(), builtins })
   }
   if (rest === 'tokens' && req.method === 'POST') {
