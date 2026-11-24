@@ -3,7 +3,7 @@
     <!-- App theme (Compose draws everything; this only sets the window). -->
     <style name="Theme.PoiCapture" parent="@android:style/Theme.Material.Light.NoActionBar" />
 
-    <!-- Splash screen: the logo on the app's green while the app starts, then the app theme. -->
+    <!-- Splash screen: the VMAP mark on VMAP lime while the app starts, then the app theme. -->
     <style name="Theme.PoiCapture.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>

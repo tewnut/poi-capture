@@ -371,21 +371,53 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 .padding(horizontal = 16.dp, vertical = 10.dp))
     }
 
-    if (confirmEnd) EndDialog(ui, video, { confirmEnd = false }, { confirmEnd = false; end(discardIfEmpty = false) },
+    if (confirmEnd) EndDialog(ui, video, session, { confirmEnd = false }, { confirmEnd = false; end(discardIfEmpty = false) },
         onDiscard = { confirmEnd = false; confirmDiscard = true })
     if (confirmDiscard) DiscardDialog(ui, video, { confirmDiscard = false }, { confirmDiscard = false; discard() })
 }
 
 @Composable
-private fun EndDialog(ui: CaptureUi, video: Boolean, onDismiss: () -> Unit, onEnd: () -> Unit, onDiscard: () -> Unit) {
+private fun EndDialog(ui: CaptureUi, video: Boolean, session: Session?, onDismiss: () -> Unit, onEnd: () -> Unit, onDiscard: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    // what this ride did, read off the track once (distance, time) while the dialog opens
+    val stats by androidx.compose.runtime.produceState<io.github.tewnut.poicapture.core.TrackStats?>(null, session?.id) {
+        val s = session ?: return@produceState
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { io.github.tewnut.poicapture.core.TrackStats.of(CaptureService.store(ctx).trackFile(s.id), s.settings.maxAccuracyM) }.getOrNull()
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.capture_end_title)) },
         text = {
             val clips = ui.videos + if (ui.recording) 1 else 0
-            val count = if (video) pluralStringResource(R.plurals.capture_end_videos, clips, clips)
-                else pluralStringResource(R.plurals.capture_end_photos, ui.photos, ui.photos)
-            Text(count + " " + stringResource(R.string.capture_end_body))
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // the ride in numbers, VMAP lime on black
+                Row(Modifier.fillMaxWidth().background(Palette.Black, RoundedCornerShape(16.dp)).padding(vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly) {
+                    @Composable fun Stat(value: String, label: String) = Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(value, color = Palette.Lime, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+                        Text(label, color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
+                    }
+                    if (video) Stat("$clips", stringResource(R.string.capture_end_stat_videos))
+                    else Stat("${ui.photos}", stringResource(R.string.capture_end_stat_photos))
+                    stats?.takeIf { it.distanceM > 0 }?.let { st ->
+                        Stat(if (st.distanceM < 1000) "${st.distanceM.toInt()} m" else String.format(java.util.Locale.ROOT, "%.1f km", st.distanceM / 1000),
+                            stringResource(R.string.capture_end_stat_distance))
+                    }
+                    when {
+                        session?.kind == io.github.tewnut.poicapture.core.SessionKind.POI ->
+                            Stat("${ui.poiNumber}", stringResource(R.string.capture_end_stat_places))
+                        session?.target == io.github.tewnut.poicapture.core.SweepTarget.SIGNS ->
+                            Stat("${ui.signsSeen}", stringResource(R.string.capture_end_stat_signs))
+                        session?.target == io.github.tewnut.poicapture.core.SweepTarget.ADDRESSES ->
+                            Stat("${ui.platesSeen}", stringResource(R.string.capture_end_stat_numbers))
+                        else -> stats?.takeIf { it.durationMs > 0 }?.let { st -> Stat("${(st.durationMs / 60_000).coerceAtLeast(1)}′",
+                            stringResource(R.string.capture_end_stat_minutes)) }
+                    }
+                }
+                Text(stringResource(R.string.capture_end_body))
+            }
         },
         confirmButton = { TextButton(onClick = onEnd) { Text(stringResource(R.string.capture_end_save)) } },
         dismissButton = {
@@ -450,6 +482,12 @@ private fun StatusText(ui: CaptureUi, session: Session?, poiMode: Boolean) {
     if (!poiMode && session?.target == io.github.tewnut.poicapture.core.SweepTarget.ADDRESSES && ui.photos > 0)
         ShadowText(pluralStringResource(R.plurals.capture_plates_seen, ui.platesSeen, ui.platesSeen) +
             (ui.lastPlate?.let { " · $it" } ?: ""), size = 13.sp, bold = false)
+    // traffic-signs ride: how many photos the phone's detector found a sign on, and what it took the last for (a hint)
+    if (!poiMode && signs && ui.photos > 0)
+        ShadowText(pluralStringResource(R.plurals.capture_signs_seen, ui.signsSeen, ui.signsSeen) +
+            (ui.lastSign?.let { " · $it" } ?: ""), size = 13.sp, bold = false)
+    // a sign in view: photos come denser until it is passed (the rider sees why the shutter speeds up)
+    if (!poiMode && signs && ui.signBoost) ShadowText(stringResource(R.string.capture_sign_boost), color = Palette.Lime, size = 13.sp)
     // traffic-signs ride: the camera must look ahead, so forward is right and sideways is the mistake
     if (!poiMode && signs) when (ui.mount) {
         "right", "left" -> ShadowText(stringResource(R.string.service_mount_side_signs), color = Color(0xFFFF6B6B))

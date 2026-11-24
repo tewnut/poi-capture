@@ -61,8 +61,13 @@ import androidx.core.content.ContextCompat
 import io.github.tewnut.poicapture.core.Side
 
 object Palette {
-    val Green = Color(0xFF0B6B4C)
-    val GreenLight = Color(0xFFD7F0E5)
+    // VMAP brand (docs/vmap-trademark.svg): lime gradient #7BCF00 -> #BEFF00 with black. Lime is never text on white:
+    // [Green] is the deep lime that reads on white and carries white text; [Lime] is for fills behind black text.
+    val Green = Color(0xFF3D6B00)
+    val GreenLight = Color(0xFFEEF9D2)
+    val Lime = Color(0xFFBEFF00)
+    val LimeDeep = Color(0xFF7BCF00)
+    val Black = Color(0xFF0A0A0A)
     val Amber = Color(0xFFB54708)
     val AmberLight = Color(0xFFFEF0C7)
     val Red = Color(0xFFD92D20)
@@ -72,9 +77,9 @@ object Palette {
     val Road = Color(0xFF98A2B3)
     val House = Color(0xFFE4E7EC)
     /** screen background: a soft green-grey, so white cards stand out without heavy shadows */
-    val Canvas = Color(0xFFF3F6F4)
+    val Canvas = Color(0xFFF4F6F0)
     /** hairline borders and dividers */
-    val Line = Color(0xFFE3E8E5)
+    val Line = Color(0xFFE4E8DC)
 }
 
 /**

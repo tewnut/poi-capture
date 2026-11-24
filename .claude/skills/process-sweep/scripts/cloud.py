@@ -2,7 +2,7 @@
 
     python cloud.py list [--type raw-session|processed-result|all]
     python cloud.py pull <id> <dir> [--extract]       download one upload into <dir> (and unzip it next to it)
-    python cloud.py push <zip-or-folder> [--type processed-result] [--session-id ID] [--name NAME]
+    python cloud.py push <zip-or-folder> [--type processed-result] [--session-id ID] [--name NAME] [--unblurred]
     python cloud.py delete <id> [<id> ...]           remove uploads, finished ones too (needs the admin token)
     python cloud.py processing                       who is processing which ride
     python cloud.py claim <session-id>               say you are processing it (pull does it), renew it
@@ -31,6 +31,7 @@ import sys
 import tempfile
 import urllib.error
 import urllib.parse
+import time
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -188,6 +189,20 @@ class Cloud:
 
 # ----------------------------------------------------------------------------------------------- commands
 
+def unblurred(folder: str) -> list[str]:
+    """Place folders (with a place.json) whose photos blur.py has not blurred: faces and plates must not leave the PC."""
+    bad = []
+    for d in sorted(os.listdir(folder)):
+        p = os.path.join(folder, d, 'place.json')
+        if os.path.isfile(p):
+            m = json.load(open(p, encoding='utf-8'))
+            if not (m.get('privacy') or {}).get('blurred') and any(
+                    f.lower().endswith(('.jpg', '.jpeg', '.png')) and not f.startswith('WEB_')
+                    for _, _, fs in os.walk(os.path.join(folder, d)) for f in fs):
+                bad.append(d)
+    return bad
+
+
 def zip_folder(folder: str) -> str:
     fd, out = tempfile.mkstemp(suffix='.zip', prefix=os.path.basename(os.path.abspath(folder)) + '-')
     os.close(fd)
@@ -253,7 +268,22 @@ def push(cloud: Cloud, path: str, type_: str, session_id: str | None, name: str 
             f.seek(offset)
             while offset < size:
                 chunk = f.read(CHUNK)
-                new = cloud.patch(url, offset, chunk)
+                for attempt in range(5):   # a slow link times a chunk out now and then: ask where the server is, go on
+                    try:
+                        new = cloud.patch(url, offset, chunk)
+                        break
+                    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+                        if isinstance(e, urllib.error.HTTPError) and e.code < 500 and e.code != 409:
+                            raise
+                        if attempt == 4:
+                            raise
+                        time.sleep(5 * (attempt + 1))
+                        now = cloud.offset(url)
+                        print(f'  retrying after {getattr(e, "reason", e)} (server at {human(now or 0)})', file=sys.stderr)
+                        if now is not None and now != offset:
+                            offset = now
+                            f.seek(offset)
+                            chunk = f.read(CHUNK)
                 if new <= offset:
                     raise SystemExit(f'the server did not advance the offset ({offset})')
                 offset = new
@@ -290,6 +320,7 @@ def main(argv=None) -> int:
     p.add_argument('--type', default='processed-result')
     p.add_argument('--session-id')
     p.add_argument('--name')
+    p.add_argument('--unblurred', action='store_true', help='send place photos that blur.py has not blurred')
     p = sub.add_parser('delete')
     p.add_argument('ids', nargs='+')
     a = ap.parse_args(argv)
@@ -329,7 +360,9 @@ def main(argv=None) -> int:
                 raise SystemExit(f"{sid}: {c['by']['name']} is processing it since {c['at'][:16]} (--force to pull anyway)")
             print(f"{sid}: processing by {c['by']['name']} (until {c['until'][:16]} UTC, renewed by claim)" if ok
                   else f"{sid}: pulled anyway, {c['by']['name']} is processing it")
-        name = os.path.basename(meta.get('filename') or a.id) or a.id
+        # named by the session: the pieces of a ride split per street share the phone's file name
+        name = (f'{sid}.zip' if sid and str(meta.get('filename', '')).endswith('.zip') else
+                os.path.basename(meta.get('filename') or a.id) or a.id)
         os.makedirs(a.dir, exist_ok=True)
         out = os.path.join(a.dir, name)
         n = cloud.download(a.id, out)
@@ -361,6 +394,11 @@ def main(argv=None) -> int:
         for i in a.ids:
             print(f"{i}  {'deleted' if cloud.delete(i) else 'not on the server'}")
     elif a.cmd == 'push':
+        if os.path.isdir(a.path) and a.type == 'processed-result' and not a.unblurred:
+            bad = unblurred(a.path)
+            if bad:
+                raise SystemExit(f"{len(bad)} place folder(s) not blurred yet (faces, number plates), e.g. {bad[0]}: run "
+                                 f"blur.py detect / apply first (SKILL.md 'Privacy'), or --unblurred to send them as they are")
         url = push(cloud, a.path, a.type, a.session_id, a.name)
         print(url)
     return 0

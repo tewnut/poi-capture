@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Languages of the UI, offered by Android 13+ in Settings > Apps > POI Capture > Language. English is the default. -->
+<!-- Languages of the UI, offered by Android 13+ in Settings > Apps > Quét Phố > Language. English is the default. -->
 <locale-config xmlns:android="http://schemas.android.com/apk/res/android">
     <locale android:name="en" />
     <locale android:name="vi" />

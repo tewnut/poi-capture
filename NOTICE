@@ -1,4 +1,4 @@
-POI Capture
+Quét Phố (formerly POI Capture)
 Copyright 2026 The POI Capture authors
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
@@ -6,3 +6,12 @@ This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 Offline road packs built by tools/roadpack (published as release assets, not part of this source tree) contain
 OpenStreetMap data, © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0:
 https://www.openstreetmap.org/copyright
+
+The app's traffic-sign detector (app/src/main/assets/signs, trained with ml/signs) was trained on the
+"Vietnam Road Signs Dataset" (VNTS) by Thanh Hiep Vo, licensed under CC BY-SA 4.0:
+https://www.kaggle.com/datasets/maitam/vietnamese-traffic-signs  https://creativecommons.org/licenses/by-sa/4.0/
+It uses YOLOX (Apache License 2.0, Megvii) and ONNX Runtime (MIT License, Microsoft).
+
+The app bundles the Be Vietnam Pro typeface (app/src/main/res/font), Copyright 2021 The Be Vietnam Pro Project
+Authors (https://github.com/bettergui/BeVietnamPro), licensed under the SIL Open Font License 1.1:
+https://openfontlicense.org

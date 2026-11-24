@@ -1,6 +1,8 @@
-<img src="docs/logo.svg" width="96" alt="POI Capture logo">
+<img src="docs/logo.svg" width="96" alt="Quét Phố logo">
 
-# POI Capture (Android)
+# Quét Phố (Android)
+
+Formerly POI Capture. Internal names (package `io.github.tewnut.poicapture`, server `poi-capture-cloud`, web `poi-capture-reviewer`, the `POI Capture/<version>` client header) are unchanged so installed phones keep their rides.
 
 An Android app for field contributors who put shops and other places on a map. Ride along a street with the phone
 mounted (the app photographs the row of buildings by itself), or stop at each place and photograph it. Every photo

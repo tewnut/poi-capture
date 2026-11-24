@@ -448,7 +448,7 @@
     <string name="sessionmap_counter">%1$d / %2$d</string>
     <!-- device check: what the phone must have -->
     <string name="device_title">Điện thoại này không ghi được</string>
-    <string name="device_lead">POI Capture cần những thứ sau để đặt mỗi ảnh đúng chỗ, và máy này không có:</string>
+    <string name="device_lead">Quét Phố cần những thứ sau để đặt mỗi ảnh đúng chỗ, và máy này không có:</string>
     <string name="device_need_gps">Bộ thu GPS</string>
     <string name="device_need_gps_why">Vị trí của mỗi ảnh.</string>
     <string name="device_need_gyro">Con quay hồi chuyển (gyroscope)</string>
@@ -489,7 +489,7 @@
     <string name="capture_too_dark_title">Quá tối để quét đường</string>
     <string name="capture_too_dark_text">Khi chạy xe cần tốc độ chụp 1/500 giây hoặc nhanh hơn để đọc được biển hiệu, và trời không đủ sáng. Hãy dùng Chụp địa điểm: dừng ở từng cửa hàng và giữ yên máy.</string>
     <string name="capture_too_dark_back">Quay lại</string>
-    <string name="sessions_title">Ghi POI</string>
+    <string name="sessions_title">Chuyến quét</string>
     <string name="home_new_session">Ghi mới</string>
     <string name="session_no_street">Chưa rõ tên đường</string>
     <string name="sessionmap_moved">Đã đặt vị trí</string>
@@ -541,7 +541,7 @@
     <!-- việc từ người duyệt -->
     <string name="settings_tasks">Việc từ người duyệt</string>
     <string name="tasks_title">Việc cần làm</string>
-    <string name="tasks_intro">Những địa điểm người duyệt muốn kiểm tra tại chỗ. Xuất từ POI Capture Reviewer (Việc cần làm → Xuất), gửi file sang điện thoại (Zalo, Drive…) rồi nhập ở đây. Việc hiện trên bản đồ Phiên mới.</string>
+    <string name="tasks_intro">Những địa điểm người duyệt muốn kiểm tra tại chỗ. Xuất từ Quét Phố Reviewer (Việc cần làm → Xuất), gửi file sang điện thoại (Zalo, Drive…) rồi nhập ở đây. Việc hiện trên bản đồ Phiên mới.</string>
     <string name="tasks_none">Chưa có việc nào trên điện thoại này.</string>
     <string name="tasks_counts">%1$d việc cần làm · %2$d đã xong hoặc bỏ qua</string>
     <string name="tasks_import">Nhập file việc</string>
@@ -549,7 +549,7 @@
     <string name="tasks_clear">Xoá tất cả</string>
     <string name="tasks_clear_title">Xoá tất cả việc?</string>
     <string name="tasks_clear_text">Danh sách việc sẽ bị xoá khỏi điện thoại. Phiên và ảnh của bạn vẫn giữ nguyên.</string>
-    <string name="tasks_bad_file">Đây không phải file việc. Trong POI Capture Reviewer, mở mục Việc cần làm và bấm Xuất.</string>
+    <string name="tasks_bad_file">Đây không phải file việc. Trong Quét Phố Reviewer, mở mục Việc cần làm và bấm Xuất.</string>
     <string name="tasks_sheet_hint">Chụp địa điểm xong trong vòng %1$d m quanh một việc thì việc đó tự hoàn thành.</string>
     <string name="tasks_type_visit">Đến chụp</string>
     <string name="tasks_type_check">Còn hay đã đóng?</string>
@@ -580,7 +580,7 @@
     <string name="upload_scan_unavailable">Trình quét QR chưa sẵn sàng: Dịch vụ Google Play vẫn đang tải xuống. Hãy thử lại sau một phút.</string>
     <string name="upload_scan_failed">Không mở được trình quét QR: %s</string>
     <string name="upload_test_me">Đã kết nối với tên %1$s · có quyền: %2$s</string>
-    <string name="upload_test_not_server">Địa chỉ này có phản hồi, nhưng không phải máy chủ POI Capture</string>
+    <string name="upload_test_not_server">Địa chỉ này có phản hồi, nhưng không phải máy chủ Quét Phố</string>
     <string name="upload_scope_upload">Gửi chuyến đi</string>
     <string name="upload_scope_read">Xem và tải về</string>
     <string name="upload_scope_process">Xử lý chuyến đi</string>
@@ -639,4 +639,23 @@
     <plurals name="capture_plates_seen">
         <item quantity="other">🔢 Thấy số nhà trên %d ảnh</item>
     </plurals>
+    <plurals name="capture_signs_seen">
+        <item quantity="other">🚸 Thấy biển báo trên %d ảnh</item>
+    </plurals>
+    <string name="setup_kind_label">Chế độ</string>
+    <string name="setup_sweep_short">Quét đường</string>
+    <string name="setup_place_short">Chụp điểm</string>
+    <string name="setup_target_label">Đối tượng</string>
+    <string name="setup_target_shops_short">Địa điểm</string>
+    <string name="setup_target_addresses_short">Địa chỉ</string>
+    <string name="setup_target_signs_short">Biển báo</string>
+    <string name="setup_holding_mount_short">Kẹp cố định</string>
+    <string name="capture_end_stat_photos">ảnh</string>
+    <string name="capture_end_stat_videos">đoạn phim</string>
+    <string name="capture_end_stat_distance">đã đi</string>
+    <string name="capture_end_stat_places">địa điểm</string>
+    <string name="capture_end_stat_signs">ảnh có biển</string>
+    <string name="capture_end_stat_numbers">ảnh có số nhà</string>
+    <string name="capture_end_stat_minutes">phút</string>
+    <string name="capture_sign_boost">🚸 Có biển phía trước · chụp dày hơn</string>
 </resources>

@@ -1,6 +1,6 @@
 // Publish: the confirmed places as GeoJSON, CSV and an OpenStreetMap (.osm) file; the task list as GeoJSON.
 // Only what the photos showed or the reviewer confirmed is written: never the Google block or Google's pin
-// (Google's terms; docs/pipeline.md).
+// (Google's terms; docs/pipeline.md). KML, GPX, Shapefile, Excel and the all-formats zip are in exports.ts.
 import type { Dataset, Place, Review, FieldKey, RemovalReview, Task } from './types'
 import { FIELD_KEYS, layerOf } from './types'
 import { exportNames } from './photos'
@@ -63,7 +63,7 @@ export function geojson(places: Published[], removed: Removed[]) {
   return JSON.stringify({ type: 'FeatureCollection', features: feats }, null, 1)
 }
 
-const CSV_COLS = ['id', 'change', 'name', 'category', 'layer', 'signCode', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
+export const CSV_COLS = ['id', 'change', 'name', 'category', 'layer', 'signCode', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
   'fromGoogle', 'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment', 'photos'] as const
 
 /** A CSV cell. Text starting with = + - @ (or a tab / return) is prefixed with ' so spreadsheets do not run it

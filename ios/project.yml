@@ -24,10 +24,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.tewnut.poicapture
-        PRODUCT_NAME: POI Capture
+        PRODUCT_NAME: Quet Pho
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: POI Capture
+        INFOPLIST_KEY_CFBundleDisplayName: Quét Phố
         INFOPLIST_KEY_NSCameraUsageDescription: "Take photos of shopfronts and signs."
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Know where each photo was taken and which street you are on."
         INFOPLIST_KEY_NSMotionUsageDescription: "Know which way the camera looks when a photo is taken."

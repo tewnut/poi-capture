@@ -84,6 +84,8 @@ import io.github.tewnut.poicapture.core.PhotoRoles
 import io.github.tewnut.poicapture.core.SignReading
 import io.github.tewnut.poicapture.core.SignText
 import io.github.tewnut.poicapture.core.SweepTarget
+import io.github.tewnut.poicapture.core.SignBoxes
+import io.github.tewnut.poicapture.core.SignBoost
 import io.github.tewnut.poicapture.core.PoiStatus
 import io.github.tewnut.poicapture.core.Pois
 import io.github.tewnut.poicapture.core.FootTracker
@@ -127,6 +129,8 @@ const val MOUNT_MIN_ELEVATION_DEG = -45.0
 const val HAND_MIN_ELEVATION_DEG = -35.0
 /** By hand: turning faster than this (~70°/s) blurs the photo and shows the street sideways: wait. */
 const val HAND_SWING_RADS = 1.2
+/** Signs ride: how often the preview is checked for signs (the detector takes ~0.1-0.3 s on a mid-range phone). */
+const val SCAN_EVERY_NS = 250_000_000L
 
 /** What the capture screen shows. */
 data class CaptureUi(
@@ -170,6 +174,9 @@ data class CaptureUi(
     val reading: Int = 0,                // photos waiting for / in on-device text reading
     val platesSeen: Int = 0,             // house-number ride: photos the phone found a house number on
     val lastPlate: String? = null,       // … and the last number it read (hint, the agent reads the photos)
+    val signsSeen: Int = 0,              // traffic-signs ride: photos the phone's detector found a sign on
+    val lastSign: String? = null,        // … and what it took the last one for (hint: "P.131a Cấm đỗ xe")
+    val signBoost: Boolean = false,      // traffic-signs ride: a sign is in view, photos come ~3x as often
     val readNote: UiText? = null,        // e.g. a sign photo with no readable text: shoot closer
 )
 
@@ -329,6 +336,8 @@ class CaptureService : LifecycleService() {
         // on that executor, and a shut-down executor rejects it (crash after "End and save" mid-shot)
         runCatching { ProcessCameraProvider.getInstance(this).get().unbindAll() }
         io.shutdown()
+        signScan.shutdown()
+        runCatching { ocr.execute { runCatching { signDetector?.close() } } }   // after the last detection still queued
         ocr.shutdown()
         super.onDestroy()
     }
@@ -441,6 +450,7 @@ class CaptureService : LifecycleService() {
                 val wasPortrait = portrait
                 targetRotation = r
                 imageCapture?.targetRotation = r
+                watcher?.setRotation(r)
                 if (portrait != wasPortrait) {
                     watcher?.portrait = portrait
                     applyPlan(currentPlan())
@@ -689,7 +699,13 @@ class CaptureService : LifecycleService() {
                     FrameWatcher(onFrame = { fr -> onFrame(fr) }, onBrightness = { b -> guard?.brightness(b) }).also { it.portrait = portrait }
                     else null
                 watcher = fw
-                fw?.let { useCases += it.analysis() }
+                fw?.let { useCases += it.analysis(); it.setRotation(targetRotation) }
+                if (fw != null && signs) {
+                    // signs ride: look for signs on the preview a few times a second, to shoot denser near them
+                    fw.wantColor = { _state.value.running && !_state.value.hot && !signScanBusy.get() &&
+                        SystemClock.elapsedRealtimeNanos() - lastScanNs >= SCAN_EVERY_NS && !signDetectorFailed }
+                    fw.colorFrame = { bmp, t -> scanForSigns(bmp, t) }
+                }
                 run {
                     val long = st.photoLongEdge
                     val selector = ResolutionSelector.Builder()
@@ -808,7 +824,11 @@ class CaptureService : LifecycleService() {
         val speed = if (freshFix() != null) fp.speedMps else null
         val used = when {
             speed != null && speed < 0.7 -> "wait"                           // waiting (lights, traffic): passing vehicles are not new facade
-            signs -> { trigger.addSpeed(speed ?: 0.0, dt, coverageM); "distance" }   // looking ahead: no slide across the frame
+            signs -> {   // looking ahead: no slide across the frame; denser while a sign is in view
+                val k = boost.speedUp(fr.tNs)
+                if ((k > 1.0) != _state.value.signBoost) _state.update { it.copy(signBoost = k > 1.0) }
+                trigger.addSpeed((speed ?: 0.0) * k, dt, coverageM); if (k > 1.0) "distance-boost" else "distance"
+            }
             fr.shift != null && dt < 0.4 -> {
                 trigger.addFrameShift(fr.shift)
                 trigger.floor(fr.shift, speed ?: 0.0, dt, coveragePerM)   // never as if the fronts were > 40 m away
@@ -904,6 +924,8 @@ class CaptureService : LifecycleService() {
                 .put("sideOfWay", JSONObject.NULL).put("travel", JSONObject.NULL)
         }
         var shotSlide = 0.0
+        if (signs && trigger == "auto" && boost.active(en)) meta.put("signBoost", boost.factor)
+        if (trigger == "sign") shotSlide = this.trigger.shot()   // the edge photo restarts the spacing
         if (trigger == "auto") {
             pendingOverlap?.let { meta.put("overlap", it) }
             pendingOverlap = null
@@ -937,6 +959,7 @@ class CaptureService : LifecycleService() {
                 }
                 store.appendItem(session.id, meta)
                 if (session.kind == SessionKind.SWEEP && session.target == SweepTarget.ADDRESSES) readPlates(id, file)
+                if (signs) findSigns(id, file)
                 shooting = false
                 _state.update {
                     val roles = if (poiId != null && it.poiId == poiId) {
@@ -977,6 +1000,76 @@ class CaptureService : LifecycleService() {
                 if (plates.isNotEmpty()) _state.update { it.copy(platesSeen = it.platesSeen + 1, lastPlate = plates.maxBy { p -> p.heightPx }.text) }
             } finally { plateBusy.set(false) }
         }
+    }
+
+    // ---------- traffic-signs ride: the sign scan on the preview ----------
+
+    private val boost = SignBoost()
+    private val signScan = Executors.newSingleThreadExecutor()
+    private val signScanBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+    @Volatile private var lastScanNs = 0L
+
+    /** The detector, loaded once for both the scan and the photos' hints (null when it cannot load). */
+    @Synchronized private fun signDetectorOrNull(): SignDetector? {
+        if (signDetectorFailed) return null
+        signDetector?.let { return it }
+        return runCatching { SignDetector.open(this) }
+            .onSuccess { signDetector = it; session.camera?.put("signDetector", SignDetector.MODEL_NAME) }
+            .onFailure { signDetectorFailed = true; android.util.Log.w("QuetPho", "sign detector unavailable", it) }.getOrNull()
+    }
+
+    /**
+     * A preview frame (on the frame thread): look for signs on the scan thread; a sign in view makes the photos denser
+     * ([SignBoost]), a near sign at the edge of the frame gets one photo at once (trigger "sign").
+     */
+    private fun scanForSigns(bmp: android.graphics.Bitmap, tNs: Long) {
+        if (!signScanBusy.compareAndSet(false, true)) { bmp.recycle(); return }
+        lastScanNs = tNs
+        runCatching { signScan.execute {
+            try {
+                val det = signDetectorOrNull() ?: return@execute
+                val boxes = runCatching { det.detect(bmp) }.getOrNull() ?: return@execute
+                val edge = boost.onFrame(tNs, boxes)
+                session.camera?.put("signScan", JSONObject().put("seenFrames", boost.seenFrames).put("edgeShots", boost.edgeShots)
+                    .put("factor", boost.factor))
+                if (edge) ContextCompat.getMainExecutor(this).execute { if (_state.value.running && !shooting) takePhoto("sign") }
+            } finally { bmp.recycle(); signScanBusy.set(false) }
+        } }.onFailure { bmp.recycle(); signScanBusy.set(false) }
+    }
+
+    /** Traffic-signs ride: the detector, loaded on the first photo (null after it failed to load: no hints, no retries). */
+    @Volatile private var signDetector: SignDetector? = null
+    @Volatile private var signDetectorFailed = false
+    private val signBusy = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Traffic-signs ride: find the signs on a photo on the phone (ml/signs, ~0.1-0.3 s). The item gets `signs`
+     * ([{code, group, label, score, box}], box = fractions of the upright photo) as a hint for the agent, and the
+     * rider a live count. A photo that comes while one is being looked at is skipped (the next one shows the sign).
+     */
+    private fun findSigns(itemId: String, file: java.io.File) {
+        if (signDetectorFailed || !signBusy.compareAndSet(false, true)) return
+        val sid = session.id
+        runCatching { ocr.execute {
+            try {
+                val det = signDetectorOrNull() ?: return@execute
+                val boxes = runCatching { det.detect(file) }.onFailure { android.util.Log.w("QuetPho", "sign detection failed", it) }.getOrNull() ?: return@execute
+                store.patchItem(sid, itemId, JSONObject().put("signs", org.json.JSONArray().apply {
+                    boxes.forEach { b ->
+                        val c = det.classes.getOrNull(b.cls)
+                        put(JSONObject().put("code", c?.code ?: "").put("group", c?.group ?: "").put("label", c?.label ?: "")
+                            .put("score", Math.round(b.score * 1000) / 1000.0)
+                            .put("box", org.json.JSONArray(listOf(b.x0, b.y0, b.x1, b.y1).map { Math.round(it * 1000) / 1000.0 })))
+                    }
+                }))
+                val seen = boxes.firstOrNull { it.score >= SignBoxes.SEEN }
+                if (seen != null) {
+                    val c = det.classes.getOrNull(seen.cls)
+                    val name = listOfNotNull(c?.code?.takeIf { it.isNotEmpty() }, c?.label?.takeIf { it.isNotEmpty() }).joinToString(" ")
+                    _state.update { it.copy(signsSeen = it.signsSeen + 1, lastSign = name.ifEmpty { null }) }
+                }
+            } finally { signBusy.set(false) }
+        } }.onFailure { signBusy.set(false) }   // executor already shut down (session ending)
     }
 
     /**

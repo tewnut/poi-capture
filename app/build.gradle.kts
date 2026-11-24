@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.tewnut.poicapture"
         minSdk = 30            // Android 11+: raw GNSS, camera/location foreground-service types
         targetSdk = 35
-        versionCode = 18
-        versionName = "0.17.0"
+        versionCode = 20
+        versionName = "0.19.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -34,9 +34,11 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            ndk { abiFilters += listOf("arm64-v8a", "x86_64") }   // phones and the emulator (ONNX Runtime is ~18 MB per ABI)
         }
         release {
             isMinifyEnabled = false
+            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
             signingConfig = signingConfigs.findByName("release")
         }
     }
@@ -79,6 +81,9 @@ dependencies {
     // "Scan setup QR" (upload server settings): Google's code scanner runs its own camera screen in Play services, so
     // the app asks for no camera permission and ships no scanner UI or model (module downloaded at install, manifest).
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // traffic-signs ride: the sign detector (assets/signs, ml/signs) on the CPU. MIT licence; native libs, so release
+    // builds keep only the ARM ABIs real phones use; debug keeps arm64 and x86_64 (the emulator).
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

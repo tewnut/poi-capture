@@ -8,12 +8,14 @@ import kotlin.math.tan
  * What a street sweep is for (docs/sweep-targets.md). It sets how the phone captures; what is read from the photos
  * is decided by the agent (a shops ride may still be read for house numbers when its photos allow).
  * - SHOPS: the camera sideways at the fronts, a photo every 30-45 % of a frame of slide.
- * - ADDRESSES: shops and every house-number plate: plates are small, so about twice as dense, half the blur (slower).
+ * - ADDRESSES: shops and every house-number plate: plates are small, so about twice as dense and a little less blur.
+ *   Speed: [ADDRESSES_SPEED_CAP_KMH] at most (rides of 24 Nov 2026: numbers still readable at 27 km/h, blur flags
+ *   jump above 25 km/h); the camera's shot rate is not held against it, a plate on one sharp photo is enough.
  * - SIGNS: traffic signs, the camera looking **ahead**: no sideways slide to measure, a photo every [SIGN_EVERY_M].
  */
 enum class SweepTarget(val json: String, val earliest: Double, val latest: Double, val maxBlurPx: Double) {
     SHOPS("shops", 0.30, 0.45, 8.0),
-    ADDRESSES("addresses", 0.18, 0.25, 4.0),
+    ADDRESSES("addresses", 0.18, 0.25, 7.0),
     SIGNS("signs", 0.30, 0.45, 8.0);
 
     /** Photos are triggered by the distance ridden (GPS), not by the slide of the camera frames. */
@@ -26,6 +28,8 @@ enum class SweepTarget(val json: String, val earliest: Double, val latest: Doubl
         const val SIGN_EVERY_M = 8.0
         /** House numbers: the largest photo the camera gives (long edge). */
         const val ADDRESSES_LONG_EDGE = 4000
+        /** House numbers: never suggest more (see the class comment). */
+        const val ADDRESSES_SPEED_CAP_KMH = 20
     }
 }
 
@@ -93,7 +97,9 @@ data class CapturePlan(
             val rateMps = every * MAX_SHOTS_PER_SEC
             val blurKmh = (blurMps * 3.6).roundToInt()
             val rateKmh = (rateMps * 3.6).roundToInt()
-            return CapturePlan(d, fov, coverage, every, minOf(blurKmh, rateKmh, SPEED_CAP_KMH), blurKmh, rateKmh, target)
+            val max = if (target == SweepTarget.ADDRESSES) minOf(blurKmh, SweepTarget.ADDRESSES_SPEED_CAP_KMH)
+                else minOf(blurKmh, rateKmh, SPEED_CAP_KMH)
+            return CapturePlan(d, fov, coverage, every, max, blurKmh, rateKmh, target)
         }
     }
 }

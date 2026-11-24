@@ -1,12 +1,13 @@
 <script setup lang="ts">
 // Captured -> Agent processed -> Human reviewed as connected dots (the name on hover), with the review progress.
+// A ride still waiting on the server (no dataset yet) is at the first stage: ds = null.
 import { computed } from 'vue'
 import { STAGES, stageOf } from '../store'
 import { t } from '../i18n'
 import type { Dataset } from '../types'
 
-const props = defineProps<{ ds: Dataset }>()
-const st = computed(() => stageOf(props.ds))
+const props = defineProps<{ ds: Dataset | null }>()
+const st = computed(() => (props.ds ? stageOf(props.ds) : { stage: 'captured' as const, done: 0, total: 0 }))
 const at = computed(() => STAGES.findIndex((s) => s.key === st.value.stage))
 const pct = computed(() => (st.value.total ? Math.round((100 * st.value.done) / st.value.total) : 100))
 const NAME = { captured: 'stageCaptured', processed: 'stageProcessed', reviewed: 'stageReviewed' } as const

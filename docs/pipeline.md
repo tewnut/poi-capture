@@ -131,7 +131,12 @@ first.
   with `"schema": "poi-tasks/1"`, `createdAt`, `createdBy`; each Point's properties: `id` (stable, so re-importing
   keeps what was done on the phone), `type` (`visit` | `verify_removal`), `name`, `why`, `place`, `session`.
 - **Publish** (per session): GeoJSON, CSV and .osm of the confirmed places and removals, *Photos (.zip)*, and
-  **Project (.zip)**, the package for stage 4 (below).
+  **Project (.zip)**, the package for stage 4 (below). Also KML (a Folder per layer: Places / Addresses / Signs /
+  Removals), GPX (a waypoint per row, `<type>` = layer), a zipped point Shapefile (WGS84 .prj, UTF-8 .dbf + .cpg,
+  text cut to 254 bytes; DBF names in `DBF_FIELDS`, e.g. signCode→sign_code, houseNumber→house_no,
+  openingHours→open_hours, fromGoogle→from_ggl, pinSource→pin_source, sessionName→sess_name, reviewedAt→reviewed),
+  Excel (.xlsx, one sheet "Places", inline strings, never formulas) and *All formats (.zip)* — the CSV's rows in each
+  (`web/src/exports.ts`), `fromGoogle` marked, never the Google block or pin. No GeoPackage (needs an SQLite writer).
 
 ### Project package (`poi-project/1`), the hand-off to the VMAP edit
 

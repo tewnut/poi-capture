@@ -9,6 +9,7 @@ import { confirmFields, pendingSuggestions, suggestionKind, missingStreet } from
 import { t } from '../i18n'
 import type { Dataset, Place, Review, FieldKey, PinSource, PhotoEdits, CropRect } from '../types'
 import { FIELD_KEYS, layerOf } from '../types'
+import { signSvg } from '../signArt'
 
 const props = defineProps<{ ds: Dataset; place: Place }>()
 const emit = defineEmits<{ close: []; next: [] }>()
@@ -256,12 +257,17 @@ function marks(k: FieldKey) {
   if (f.ride === 'differs') out.push({ cls: 'warn', tip: t('rideDiffers', { v: f.rideValue || '' }) })
   return out
 }
+
+const signCodeNow = computed(() => r.value.fields.signCode?.value || props.place.fields.signCode?.value || props.place.sign?.code || '')
+const signArt = computed(() => signSvg(signCodeNow.value, r.value.fields.signText?.value || props.place.fields.signText?.value))
 </script>
 
 <template>
   <div class="review">
     <header>
-      <div>
+      <!-- a sign: drawn from its code (follows the reviewer's correction of the code) -->
+      <div v-if="layer === 'sign'" class="signart" :title="signCodeNow" v-html="signArt" />
+      <div class="headtext">
         <h2>{{ place.name }}</h2>
         <div class="muted">
           <span v-if="layer !== 'place'" class="chip">{{ t('layerOne_' + layer) }}</span>
@@ -403,6 +409,9 @@ function marks(k: FieldKey) {
 <style scoped>
 .review { display: flex; flex-direction: column; gap: 10px; }
 header { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.headtext { flex: 1; min-width: 0; }
+.signart { flex: none; width: 64px; height: 64px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.3)); }
+.signart :deep(svg) { display: block; width: 100%; height: 100%; }
 h2 { margin: 0; font-size: 19px; letter-spacing: -0.2px; }
 h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
 .cat { border: 0; border-bottom: 1px dashed var(--line); font: inherit; color: var(--muted); width: 140px; background: transparent; }
@@ -456,10 +465,10 @@ h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing
 .pchip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line);
   background: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
 .pchip .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-.pchip.green .dot { background: #1f7a52; } .pchip.purple .dot { background: #7c3aed; }
+.pchip.green .dot { background: #3d6b00; } .pchip.purple .dot { background: #7c3aed; }
 .pchip.orange .dot { background: #f59f00; } .pchip.blue .dot { background: #1659c7; border-radius: 2px; }
 .pchip.view { border-color: var(--ink); }
-.pchip.final { background: #f1faf5; border-color: var(--accent); color: #1b5e3c; }
+.pchip.final { background: #f3fbe0; border-color: var(--accent); color: #2c4f00; }
 .pchip.blue.view { background: #f5f8ff; }
 .tick { font-size: 11px; }
 .pinfo { font-size: 13px; line-height: 1.5; background: var(--canvas); border-radius: 10px; padding: 8px 10px; }
@@ -476,7 +485,7 @@ h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing
 .vbar span:last-child { display: flex; gap: 6px; }
 textarea { width: 100%; min-height: 54px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; font: inherit; resize: vertical; }
 footer { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; bottom: 0; background: var(--card); padding: 8px 0 2px; }
-.chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #e7f6ec; color: #1b5e3c; font-weight: 600; margin-left: 2px; }
+.chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #e7f6ec; color: #2c4f00; font-weight: 600; margin-left: 2px; }
 .chip.bad { background: #fde8ef; color: #9b1c47; } .chip.warn { background: #fdecea; color: #9b1c1c; }
 .chip.g-found { background: #e8f0fe; color: #123f8c; } .chip.g-new { background: #fff0e6; color: #a23b05; } .chip.g-todo { background: #eef0f2; color: #555; }
 

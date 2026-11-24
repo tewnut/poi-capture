@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">POI Capture</string>
+    <string name="app_name" translatable="false">Quét Phố</string>
 
     <!-- Navigation -->
     <string name="nav_settings">Settings</string>
@@ -464,7 +464,7 @@
     <string name="sessionmap_counter">%1$d / %2$d</string>
     <!-- device check: what the phone must have -->
     <string name="device_title">This phone can\'t record</string>
-    <string name="device_lead">POI Capture needs these to put each photo in the right place, and this phone doesn\'t have them:</string>
+    <string name="device_lead">Quét Phố needs these to put each photo in the right place, and this phone doesn\'t have them:</string>
     <string name="device_need_gps">GPS receiver</string>
     <string name="device_need_gps_why">The position of every photo.</string>
     <string name="device_need_gyro">Gyroscope</string>
@@ -505,7 +505,7 @@
     <string name="capture_too_dark_title">Too dark for street sweep</string>
     <string name="capture_too_dark_text">Riding needs a shutter of 1/500 s or faster to keep signs readable, and there is not enough light for it. Use Place capture: stop at each shop and hold still.</string>
     <string name="capture_too_dark_back">Back</string>
-    <string name="sessions_title">POI Captures</string>
+    <string name="sessions_title">Rides</string>
     <string name="home_new_session">New Capture</string>
     <string name="session_no_street">No street name</string>
     <string name="sessionmap_moved">Place set by hand</string>
@@ -558,7 +558,7 @@
     <!-- tasks from the reviewer -->
     <string name="settings_tasks">Tasks from the reviewer</string>
     <string name="tasks_title">Tasks</string>
-    <string name="tasks_intro">Places the reviewer wants checked on site. Export them from POI Capture Reviewer (Tasks → Export), send the file to this phone (Zalo, Drive…) and import it here. They show on the New session map.</string>
+    <string name="tasks_intro">Places the reviewer wants checked on site. Export them from Quét Phố Reviewer (Tasks → Export), send the file to this phone (Zalo, Drive…) and import it here. They show on the New session map.</string>
     <string name="tasks_none">No tasks on this phone.</string>
     <string name="tasks_counts">%1$d to do · %2$d done or skipped</string>
     <string name="tasks_import">Import tasks file</string>
@@ -566,7 +566,7 @@
     <string name="tasks_clear">Remove all</string>
     <string name="tasks_clear_title">Remove all tasks?</string>
     <string name="tasks_clear_text">The task list leaves this phone. Your sessions and photos stay.</string>
-    <string name="tasks_bad_file">This is not a tasks file. In POI Capture Reviewer, open Tasks and press Export.</string>
+    <string name="tasks_bad_file">This is not a tasks file. In Quét Phố Reviewer, open Tasks and press Export.</string>
     <string name="tasks_sheet_hint">A Place capture finished within %1$d m of a task completes it.</string>
     <string name="tasks_type_visit">Visit</string>
     <string name="tasks_type_check">Is it gone?</string>
@@ -599,7 +599,7 @@
     <string name="upload_scan_unavailable">The QR scanner is not ready yet: Google Play services is still downloading it. Try again in a minute.</string>
     <string name="upload_scan_failed">Could not open the QR scanner: %s</string>
     <string name="upload_test_me">Connected as %1$s · can: %2$s</string>
-    <string name="upload_test_not_server">This address answers, but not as a POI Capture server</string>
+    <string name="upload_test_not_server">This address answers, but not as a Quét Phố server</string>
     <string name="upload_scope_upload">Send rides</string>
     <string name="upload_scope_read">View &amp; download</string>
     <string name="upload_scope_process">Process rides</string>
@@ -660,4 +660,25 @@
         <item quantity="one">🔢 House number found on %d photo</item>
         <item quantity="other">🔢 House numbers found on %d photos</item>
     </plurals>
+    <plurals name="capture_signs_seen">
+        <item quantity="one">🚸 Sign found on %d photo</item>
+        <item quantity="other">🚸 Signs found on %d photos</item>
+    </plurals>
+    <!-- New session: three quick choices, short labels (the (i) button explains them) -->
+    <string name="setup_kind_label">Mode</string>
+    <string name="setup_sweep_short">Sweep</string>
+    <string name="setup_place_short">Places</string>
+    <string name="setup_target_label">Target</string>
+    <string name="setup_target_shops_short">Shops</string>
+    <string name="setup_target_addresses_short">Addresses</string>
+    <string name="setup_target_signs_short">Signs</string>
+    <string name="setup_holding_mount_short">Mounted</string>
+    <string name="capture_end_stat_photos">photos</string>
+    <string name="capture_end_stat_videos">clips</string>
+    <string name="capture_end_stat_distance">ridden</string>
+    <string name="capture_end_stat_places">places</string>
+    <string name="capture_end_stat_signs">photos with signs</string>
+    <string name="capture_end_stat_numbers">photos with numbers</string>
+    <string name="capture_end_stat_minutes">minutes</string>
+    <string name="capture_sign_boost">🚸 Sign ahead · more photos</string>
 </resources>

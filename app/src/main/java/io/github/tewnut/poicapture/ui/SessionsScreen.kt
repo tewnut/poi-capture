@@ -85,7 +85,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 private data class SessionRow(val s: Session, val title: String, val photos: Int, val videos: Int, val stats: TrackStats, val bytes: Long,
-                              val relocated: Int, val pois: Int = 0, val marks: Int = 0, val previews: List<Preview> = emptyList())
+                              val relocated: Int, val pois: Int = 0, val marks: Int = 0, val previews: List<Preview> = emptyList(),
+                              val route: List<io.github.tewnut.poicapture.core.LatLon> = emptyList())
 
 @Composable
 fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> Unit, onOpenSettings: () -> Unit) {
@@ -122,7 +123,8 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                     store.dir(s.id).walkTopDown().filter { it.isFile }.sumOf { it.length() },
                     items.count { (it.has("placeLat") && !it.isNull("placeLat")) || (it.has("relocatedLat") && !it.isNull("relocatedLat")) },
                     pois.size, if (s.kind == SessionKind.SWEEP) store.marks(s.id).size else 0,
-                    previews(s.kind, items, pois))
+                    previews(s.kind, items, pois),
+                    store.trackPoints(s.id).let { pts -> if (pts.size <= 160) pts else pts.filterIndexed { i, _ -> i % (pts.size / 160 + 1) == 0 } })
             }
         }
     }
@@ -389,10 +391,16 @@ private fun Hero(r: SessionRow, recording: Boolean, empty: Boolean, up: UploadSt
                     more = if (poi && i == shown.lastIndex) r.previews.size - shown.size else 0)
             }
         }
+        if (r.route.size >= 2) RouteSketch(r.route, Modifier.align(Alignment.BottomEnd).padding(10.dp))
         if (shown.isNotEmpty()) Box(Modifier.fillMaxWidth().height(52.dp)
             .background(Brush.verticalGradient(listOf(Color(0x59000000), Color.Transparent))))
         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Pill((if (poi) "📍 " else "🛵 ") + stringResource(if (poi) R.string.sessions_kind_poi else R.string.sessions_kind_sweep),
+            Pill(if (poi) "📍 " + stringResource(R.string.sessions_kind_poi) else "🛵 " + stringResource(R.string.sessions_kind_sweep) + " · " +
+                    when (r.s.target) {
+                        io.github.tewnut.poicapture.core.SweepTarget.ADDRESSES -> "🔢 " + stringResource(R.string.setup_target_addresses_short)
+                        io.github.tewnut.poicapture.core.SweepTarget.SIGNS -> "🚸 " + stringResource(R.string.setup_target_signs_short)
+                        else -> "🏪 " + stringResource(R.string.setup_target_shops_short)
+                    },
                 bg = Color(0xF2FFFFFF), fg = Palette.Ink, size = 12.sp, bold = true)
             Box(Modifier.weight(1f))
             when {
@@ -422,6 +430,29 @@ private fun Tile(sessionId: String, p: Preview, modifier: Modifier, label: Boole
         if (more > 0) Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
             Text("+$more", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         }
+    }
+}
+
+/** The ride's route as a small lime line on black (VMAP colours), north up, kept to its shape. */
+@Composable
+private fun RouteSketch(route: List<io.github.tewnut.poicapture.core.LatLon>, modifier: Modifier) {
+    androidx.compose.foundation.Canvas(modifier.size(76.dp, 56.dp).background(Palette.Black.copy(alpha = 0.82f), RoundedCornerShape(12.dp))) {
+        val lat0 = route.minOf { it.lat }; val lat1 = route.maxOf { it.lat }
+        val lon0 = route.minOf { it.lon }; val lon1 = route.maxOf { it.lon }
+        val k = Math.cos(Math.toRadians((lat0 + lat1) / 2))          // a degree of longitude is shorter
+        val w = ((lon1 - lon0) * k).coerceAtLeast(1e-6); val h = (lat1 - lat0).coerceAtLeast(1e-6)
+        val pad = 9.dp.toPx()
+        val sc = minOf((size.width - 2 * pad) / w, (size.height - 2 * pad) / h)
+        val ox = (size.width - (w * sc).toFloat()) / 2; val oy = (size.height - (h * sc).toFloat()) / 2
+        fun at(p: io.github.tewnut.poicapture.core.LatLon) = androidx.compose.ui.geometry.Offset(
+            ox + ((p.lon - lon0) * k * sc).toFloat(), oy + ((lat1 - p.lat) * sc).toFloat())
+        val path = androidx.compose.ui.graphics.Path().apply {
+            at(route[0]).let { moveTo(it.x, it.y) }
+            for (p in route.drop(1)) at(p).let { lineTo(it.x, it.y) }
+        }
+        drawPath(path, Palette.Lime, style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx(),
+            cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        drawCircle(Color.White, 3.dp.toPx(), at(route.last()))
     }
 }
 
@@ -468,14 +499,63 @@ private fun fmt(isoTime: String?): String = isoTime?.let {
     runCatching { DateTimeFormatter.ofPattern("dd/MM HH:mm").withZone(ZoneId.systemDefault()).format(Instant.parse(it)) }.getOrNull()
 } ?: "–"
 
+/**
+ * A street of shopfronts, a rider passing, and the viewfinder of the app icon around one lime sign: a black line
+ * drawing with VMAP lime, drawn in code so it stays sharp and follows the palette.
+ */
+@Composable
+fun StreetIllustration(modifier: Modifier) {
+    androidx.compose.foundation.Canvas(modifier) {
+        val u = size.height / 150f
+        val ink = Palette.Black
+        val line = androidx.compose.ui.graphics.drawscope.Stroke(2.5f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round,
+            join = androidx.compose.ui.graphics.StrokeJoin.Round)
+        fun o(x: Float, y: Float) = androidx.compose.ui.geometry.Offset(x, y)
+        fun sz(w: Float, h: Float) = androidx.compose.ui.geometry.Size(w, h)
+        fun cr(r: Float) = androidx.compose.ui.geometry.CornerRadius(r)
+        val cx = size.width / 2
+        val left = cx - 146 * u
+        // the street, with lane marks
+        drawRoundRect(Palette.GreenLight, o(left - 20 * u, 108 * u), sz(332 * u, 34 * u), cr(17 * u))
+        for (i in 0..5) drawLine(Palette.LimeDeep, o(left + i * 56 * u, 125 * u), o(left + i * 56 * u + 26 * u, 125 * u), 3 * u,
+            cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        // three shopfronts of different heights, each with a sign and a door; the middle one is being scanned
+        for ((x, hgt, scanned) in listOf(Triple(0f, 70f, false), Triple(100f, 92f, true), Triple(200f, 62f, false))) {
+            val x0 = left + x * u; val top = 104 * u - hgt * u
+            drawRoundRect(Color.White, o(x0, top), sz(92 * u, hgt * u), cr(6 * u))
+            drawRoundRect(ink, o(x0, top), sz(92 * u, hgt * u), cr(6 * u), style = line)
+            drawRoundRect(if (scanned) Palette.Lime else Palette.House, o(x0 + 10 * u, top + 10 * u), sz(72 * u, 18 * u), cr(4 * u))
+            drawRoundRect(ink, o(x0 + 10 * u, top + 10 * u), sz(72 * u, 18 * u), cr(4 * u), style = line)
+            drawRoundRect(ink, o(x0 + 34 * u, 74 * u), sz(24 * u, 30 * u), cr(3 * u), style = line)
+            if (scanned) {
+                val l = x0 + 2 * u; val t = top + 2 * u; val r = x0 + 90 * u; val b = top + 36 * u; val c = 9 * u
+                val corners = listOf(
+                    listOf(o(l, t + c), o(l, t), o(l + c, t)), listOf(o(r - c, t), o(r, t), o(r, t + c)),
+                    listOf(o(r, b - c), o(r, b), o(r - c, b)), listOf(o(l + c, b), o(l, b), o(l, b - c)))
+                for (k in corners) {
+                    drawLine(ink, k[0], k[1], 3.5f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    drawLine(ink, k[1], k[2], 3.5f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                }
+            }
+        }
+        // the rider: a scooter, the helmet in lime
+        val bx = cx + 40 * u; val by = 128 * u
+        drawCircle(ink, 7 * u, o(bx - 18 * u, by), style = line)
+        drawCircle(ink, 7 * u, o(bx + 18 * u, by), style = line)
+        drawLine(ink, o(bx - 18 * u, by), o(bx + 6 * u, by - 10 * u), 2.5f * u)
+        drawLine(ink, o(bx + 6 * u, by - 10 * u), o(bx + 18 * u, by), 2.5f * u)
+        drawLine(ink, o(bx + 10 * u, by - 22 * u), o(bx + 18 * u, by), 2.5f * u)
+        drawCircle(Palette.Lime, 5 * u, o(bx + 10 * u, by - 24 * u))
+        drawCircle(ink, 5 * u, o(bx + 10 * u, by - 24 * u), style = line)
+    }
+}
+
 /** No session yet: what a session is, and one big way to start the first. */
 @Composable
 private fun EmptySessions(onNew: () -> Unit, modifier: Modifier) {
     Column(modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center) {
-        Box(Modifier.size(120.dp).background(Palette.GreenLight, CircleShape), contentAlignment = Alignment.Center) {
-            Text("📷", fontSize = 52.sp)
-        }
+        StreetIllustration(Modifier.fillMaxWidth().height(150.dp))
         Box(Modifier.height(24.dp))
         Text(stringResource(R.string.sessions_empty), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.Ink,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)

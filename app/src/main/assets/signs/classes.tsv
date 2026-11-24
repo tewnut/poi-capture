@@ -1,0 +1,53 @@
+# id	QCVN 41:2019 code (empty: no single code)	group	Vietnamese label (from ml/signs/classes.csv)
+0	W.224	warning	Đường người đi bộ cắt ngang
+1	W.205c	warning	Đường giao nhau (ngã ba bên phải)
+2	P.102	prohibitory	Cấm đi ngược chiều
+3	R.302a	mandatory	Phải đi vòng sang bên phải
+4	W.205a	warning	Giao nhau với đường đồng cấp
+5	W.207	warning	Giao nhau với đường không ưu tiên
+6	W.201a	warning	Chỗ ngoặt nguy hiểm vòng bên trái
+7	P.123a	prohibitory	Cấm rẽ trái
+8	I.434a	information	Bến xe buýt
+9	R.303	mandatory	Nơi giao nhau chạy theo vòng xuyến
+10	P.130	prohibitory	Cấm dừng và đỗ xe
+11	I.409	information	Chỗ quay xe
+12	R.415a	mandatory	Biển gộp làn đường theo phương tiện
+13	W.245a	warning	Đi chậm
+14	P.106a	prohibitory	Cấm xe tải
+15	W.203c	warning	Đường bị thu hẹp về phía phải
+16	P.117	prohibitory	Giới hạn chiều cao
+17	P.124a	prohibitory	Cấm quay đầu
+18	P.107	prohibitory	Cấm ô tô khách và ô tô tải
+19	P.124d	prohibitory	Cấm rẽ phải và quay đầu
+20	P.103a	prohibitory	Cấm ô tô
+21	W.203b	warning	Đường bị thu hẹp về phía trái
+22	W.221b	warning	Gồ giảm tốc phía trước
+23	P.111	prohibitory	Cấm xe hai và ba bánh
+24	P.129	prohibitory	Kiểm tra
+25	S.505a (motorbikes)	auxiliary	Chỉ dành cho xe máy
+26	W.246a	warning	Chướng ngoại vật phía trước
+27	W.225	warning	Trẻ em
+28	S.505a (trucks + containers)	auxiliary	Xe tải và xe công
+29	P.104	prohibitory	Cấm mô tô và xe máy
+30	S.505a (trucks)	auxiliary	Chỉ dành cho xe tải
+31		information	Đường có camera giám sát
+32	P.123b	prohibitory	Cấm rẽ phải
+33	W.202b	warning	Nhiều chỗ ngoặt nguy hiểm liên tiếp, chỗ đầu tiên sang phải
+34		prohibitory	Cấm xe sơ-mi rơ-moóc
+35	P.137	prohibitory	Cấm rẽ trái và phải
+36	P.139	prohibitory	Cấm đi thẳng và rẽ phải
+37	W.205b	warning	Đường giao nhau (ngã ba bên trái)
+38	P.127 (50)	prohibitory	Giới hạn tốc độ (50km/h)
+39	P.127 (60)	prohibitory	Giới hạn tốc độ (60km/h)
+40	P.127 (80)	prohibitory	Giới hạn tốc độ (80km/h)
+41	P.127 (40)	prohibitory	Giới hạn tốc độ (40km/h)
+42	R.301e	mandatory	Các xe chỉ được rẽ trái
+43	W.239b	warning	Chiều cao tĩnh không thực tế
+44	W.233	warning	Nguy hiểm khác
+45	I.407a	information	Đường một chiều
+46	P.131a	prohibitory	Cấm đỗ xe
+47	P.124b1	prohibitory	Cấm ô tô quay đầu xe (được rẽ trái)
+48	W.210	warning	Giao nhau với đường sắt có rào chắn
+49	P.124c	prohibitory	Cấm rẽ trái và quay đầu xe
+50	W.201b	warning	Chỗ ngoặt nguy hiểm vòng bên phải
+51	W.246c	warning	Chú ý chướng ngại vật – vòng tránh sang bên phải

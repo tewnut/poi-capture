@@ -7,6 +7,7 @@ import 'leaflet/dist/leaflet.css'
 import { state, reviewOf, gstat, openPlace, openDataset, openTask } from '../store'
 import { t, lang } from '../i18n'
 import { layerOf, type Dataset, type Place, type Review } from '../types'
+import { signSvg } from '../signArt'
 
 const emit = defineEmits<{ select: [ds: string, place: string]; movePin: [lat: number, lon: number] }>()
 const el = ref<HTMLDivElement>()
@@ -15,7 +16,7 @@ let base: L.LayerGroup
 let sel: L.LayerGroup
 let fitted = false
 
-const DECISION_COLOR: Record<string, string> = { confirmed: '#1f7a52', rejected: '#8a949c', visit: '#b7791f' }
+const DECISION_COLOR: Record<string, string> = { confirmed: '#3d6b00', rejected: '#8a949c', visit: '#b7791f' }
 const G_COLOR = { found: '#1659c7', new: '#e8590c', todo: '#6b7280' }
 /** Leaflet tooltips are HTML: imported text (names, reasons) is escaped. */
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
@@ -35,7 +36,7 @@ function icon(p: Place, r: Review, selected: boolean, n: string) {
   })
 }
 
-/** An address: a small square with its house number; a sign: a red-ringed circle (a sign's own look) with its code. */
+/** An address: a small square with its house number; a sign: a drawing of the sign itself (signArt.ts), ✓ / ✕ once decided. */
 function layerIcon(p: Place, r: Review, selected: boolean, l: 'address' | 'sign') {
   const mark = r.decision === 'confirmed' ? '✓' : r.decision === 'rejected' ? '✕' : ''
   const cls = `${selected ? 'sel' : ''} ${esc(r.decision)}`
@@ -44,8 +45,11 @@ function layerIcon(p: Place, r: Review, selected: boolean, l: 'address' | 'sign'
     const bg = r.decision !== 'todo' ? DECISION_COLOR[r.decision] : '#475569'
     return L.divIcon({ className: '', iconSize: [36, 18], iconAnchor: [18, 9], html: `<div class="apin ${cls}" style="background:${bg}">${num}</div>` })
   }
-  const code = mark || esc((r.fields.signCode?.value || p.fields.signCode?.value || p.sign?.code || '').replace(/^[A-Z]\./, ''))
-  return L.divIcon({ className: '', iconSize: [26, 26], iconAnchor: [13, 13], html: `<div class="spin ${cls}">${code}</div>` })
+  const code = r.fields.signCode?.value || p.fields.signCode?.value || p.sign?.code || ''
+  const value = r.fields.signText?.value || p.fields.signText?.value || ''
+  const low = p.confidence === 'low' && r.decision === 'todo' ? 'low' : ''
+  return L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15],
+    html: `<div class="spin ${cls} ${low}">${signSvg(code, value)}${mark ? `<b>${mark}</b>` : ''}</div>` })
 }
 
 function drawAll() {
@@ -95,11 +99,11 @@ function drawSelected() {
   const first = p.pins.algorithm || p.pins.contributor
   if (first) {
     for (const s of first.sightings || []) {
-      L.polyline([[s.lat, s.lon], [first.lat, first.lon]], { color: '#1f7a52', weight: 2 }).addTo(sel)
-      L.circleMarker([s.lat, s.lon], { radius: 4, color: '#1f7a52', fillColor: '#fff', fillOpacity: 1, weight: 2 }).bindTooltip(t('photoN', { n: s.i })).addTo(sel)
+      L.polyline([[s.lat, s.lon], [first.lat, first.lon]], { color: '#3d6b00', weight: 2 }).addTo(sel)
+      L.circleMarker([s.lat, s.lon], { radius: 4, color: '#3d6b00', fillColor: '#fff', fillOpacity: 1, weight: 2 }).bindTooltip(t('photoN', { n: s.i })).addTo(sel)
     }
-    if (first.uncertaintyM) L.circle([first.lat, first.lon], { radius: first.uncertaintyM, color: '#1f7a52', weight: 1, fillOpacity: 0.05 }).addTo(sel)
-    L.circleMarker([first.lat, first.lon], { radius: 7, color: '#1f7a52', weight: 3, fillColor: '#fff', fillOpacity: 1 })
+    if (first.uncertaintyM) L.circle([first.lat, first.lon], { radius: first.uncertaintyM, color: '#3d6b00', weight: 1, fillOpacity: 0.05 }).addTo(sel)
+    L.circleMarker([first.lat, first.lon], { radius: 7, color: '#3d6b00', weight: 3, fillColor: '#fff', fillOpacity: 1 })
       .bindTooltip(t(p.pins.algorithm ? 'algorithm' : 'contributor')).addTo(sel)
   }
   const g = p.pins.google
@@ -196,14 +200,20 @@ defineExpose({ fitOpen, focusOpen })
   border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
 .pin.low { border-style: dashed; border-color: #222; }
 .pin.removal { border-color: #d6336c; border-width: 3px; }
-.pin.sel { transform: scale(1.3); box-shadow: 0 0 0 4px rgba(31,122,82,.35); }
+.pin.sel { transform: scale(1.3); box-shadow: 0 0 0 4px rgba(61,107,0,.35); }
 .apin { height: 18px; max-width: 36px; padding: 0 3px; box-sizing: border-box; border-radius: 3px; color: #fff; font: 700 10px/14px system-ui;
   text-align: center; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.35); overflow: hidden; white-space: nowrap; text-overflow: clip; }
-.spin { width: 26px; height: 26px; box-sizing: border-box; border-radius: 50%; background: #fff; color: #222; font: 700 9px/20px system-ui;
-  text-align: center; border: 3px solid #d6336c; box-shadow: 0 1px 4px rgba(0,0,0,.35); overflow: hidden; white-space: nowrap; }
-.spin.confirmed { color: #1f7a52; font-size: 12px; }
+.spin { position: relative; width: 30px; height: 30px; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+.spin svg { display: block; width: 100%; height: 100%; }
+.spin.low svg { opacity: .8; }
+.spin.low::after { content: '?'; position: absolute; left: -4px; top: -4px; width: 13px; height: 13px; border-radius: 50%;
+  background: #b7791f; color: #fff; font: 700 9px/13px system-ui; text-align: center; }
+.spin > b { position: absolute; right: -5px; bottom: -5px; width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid #fff;
+  color: #fff; font: 700 10px/12px system-ui; text-align: center; background: #8a949c; }
+.spin.confirmed > b { background: #3d6b00; }
 .spin.rejected, .apin.rejected { opacity: .6; }
-.apin.sel, .spin.sel { transform: scale(1.3); box-shadow: 0 0 0 4px rgba(31,122,82,.35); }
+.apin.sel { transform: scale(1.3); box-shadow: 0 0 0 4px rgba(61,107,0,.35); }
+.spin.sel { transform: scale(1.5); filter: drop-shadow(0 0 3px #7bcf00) drop-shadow(0 1px 3px rgba(0,0,0,.5)); z-index: 1; }
 .leaflet-marker-icon > .rm { width: 18px; height: 18px; border-radius: 4px; background: #d6336c; color: #fff; font: 700 11px/18px system-ui; text-align: center; }
 .final-pin { width: 30px; height: 40px; background: no-repeat center/contain
   url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 40'%3E%3Cpath d='M15 39C15 39 2 22 2 14a13 13 0 0 1 26 0c0 8-13 25-13 25z' fill='%23f59f00' stroke='white' stroke-width='2'/%3E%3Ccircle cx='15' cy='14' r='5' fill='white'/%3E%3C/svg%3E"); }

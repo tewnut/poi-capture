@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The VMAP lime gradient (docs/vmap-trademark.svg: #7BCF00 -> #BEFF00), bottom-left to top-right. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient android:angle="45" android:startColor="#7BCF00" android:endColor="#BEFF00" />
+</shape>

@@ -24,7 +24,7 @@ type Msg = string | ((p: Record<string, any>) => string)
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
 const en: Record<string, Msg> = {
-  appName: 'POI Capture Reviewer',
+  appName: 'Quét Phố Reviewer',
   // reviews: checkout / check-in (ReviewBar.vue, connection.ts)
   checkOut: 'Check out to review', checkIn: 'Check in', checkInTitle: 'Upload your review (finished or not) and hand the session back, so another reviewer can take it',
   checkedOutYou: 'Checked out by you', checkedOutBy: (p) => `Checked out by ${p.name} ${p.when}`, readOnly: 'read-only',
@@ -79,7 +79,8 @@ const en: Record<string, Msg> = {
   reviewsKept: 'Reviews', storageUsed: 'Storage used',
   connectTitle: 'Connect to the server', connectText: 'Add the access key from your admin to see the sessions sent from the phones.',
   connectButton: 'Add access key', noSessionsText: 'Rides sent from the phones show here once they reach the server.',
-  onlyHere: 'only in this browser', downloadingShort: 'Downloading…', waitingAgent: 'Waiting to be processed',
+  onlyHere: 'only in this browser', downloadingShort: 'Downloading…', waitingAgent: 'Waiting to be processed', agentGuide: 'How to process',
+  agentGuideTitle: 'Instructions for the agent (AI) that processes rides: what it needs and the steps',
   processingBy: (p) => `⚙ ${p.name} is processing · since ${p.when}`,
   processingTitle: (p) => `${p.name} is turning this ride into places to review (since ${p.when}). If nothing comes, it is free again ${p.until}.`,
   onServer: (p) => `On the server · ${p.size} · open to download`, update: 'Update', updateTitle: 'The server has a newer version of this session: download it (your reviews stay)',
@@ -127,7 +128,7 @@ const en: Record<string, Msg> = {
   issueHint: 'One access key per person and device: each upload then shows who made it, and a lost phone is revoked alone.',
   issuedTitle: (p) => `New access key for ${p.name}`,
   issuedOnce: 'Copy or scan it now: it will not be shown again. If it is lost, revoke it and issue a new one.',
-  issuedQr: 'On the phone, scan this code in the POI Capture app: it sets the server address and the access key.',
+  issuedQr: 'On the phone, scan this code in the Quét Phố app: it sets the server address and the access key.',
   issuedQrAlt: 'QR code with the server address and the access key', issuedDone: 'Done, hide it',
   copy: 'Copy', copied: 'Copied', copyLink: 'Copy setup link', copyFailed: 'Could not copy: select the text and copy it by hand.',
   upAllTypes: 'All types', upType: 'Type', upSize: 'Size', upBy: 'Uploaded by', typeProcessed: 'processed', typeRaw: 'raw session',
@@ -226,7 +227,7 @@ const en: Record<string, Msg> = {
   pendingBeforeConfirm: (p) => `Confirm accepts the clear readings and the Google / website values. Not accepted until you press ✓: ${p.f}.`,
   pendingAfterConfirm: (p) => `Not published until you accept it (✓) or type it: ${p.f}.`,
   suggestionsOpen: (p) => `${p.n} to check`,
-  osmNote: 'The .osm file holds new nodes for JOSM, without the fields filled from Google (OpenStreetMap does not accept them): check them against what is already mapped and follow the OSM import guidelines before uploading. Removals are only in the GeoJSON and CSV.',
+  osmNote: 'The .osm file holds new nodes for JOSM, without the fields filled from Google (OpenStreetMap does not accept them): check them against what is already mapped and follow the OSM import guidelines before uploading. Removals are in the other formats, not in the .osm file.',
   nothingConfirmed: 'Nothing confirmed yet',
   // place review
   category: 'category', status_open: 'open', status_closed: 'closed', status_for_rent: 'for rent',
@@ -269,11 +270,13 @@ const en: Record<string, Msg> = {
   removedN: (p) => `Removed (${p.n}), click to restore:`, restore: 'Restore',
   photoEditsNote: 'Photo changes are saved with your review; the imported photos stay as they were.',
   pubPhotos: 'Photos (.zip)', pubPhotosNote: 'The photos you kept for each confirmed place (cropped where you cropped them), with places.geojson; the photos column lists them.',
+  pubAll: 'All formats (.zip)',
+  pubFormatsNote: 'KML (Google Earth, My Maps), GPX (GPS devices, OsmAnd), Shapefile (QGIS, ArcGIS; UTF-8, WGS84) and Excel hold the same rows as the CSV, removals included, with fields filled from Google marked (fromGoogle). All formats (.zip) bundles GeoJSON, CSV, .osm, KML, GPX, Shapefile and Excel.',
   pubProject: 'Project (.zip)', pubProjectNote: 'For the VMAP step, in one file: every place you decided (with your decision, fields, pin and kept photos), the removals, tasks.jsonl for the VMAP tools, and a README listing what to check (comments, added photos, places not reviewed).',
 }
 
 const vi: Record<string, Msg> = {
-  appName: 'POI Capture Reviewer',
+  appName: 'Quét Phố Reviewer',
   checkOut: 'Nhận để duyệt', checkIn: 'Trả phiên', checkInTitle: 'Tải kết quả duyệt (xong hoặc chưa) lên và trả phiên, để người khác nhận tiếp',
   checkedOutYou: 'Bạn đang giữ phiên này', checkedOutBy: (p) => `${p.name} đang giữ ${p.when}`, readOnly: 'chỉ xem',
   unsaved: 'có thay đổi chưa lên máy chủ', savedWhen: (p) => `đã lưu lên máy chủ ${p.when}`, notSavedYet: 'chưa lưu lên máy chủ',
@@ -325,7 +328,8 @@ const vi: Record<string, Msg> = {
   reviewsKept: 'Kết quả duyệt', storageUsed: 'Dung lượng đã dùng',
   connectTitle: 'Kết nối máy chủ', connectText: 'Thêm mã truy cập quản trị viên cấp để xem các phiên gửi từ điện thoại.',
   connectButton: 'Thêm mã truy cập', noSessionsText: 'Chuyến đi gửi từ điện thoại sẽ hiện ở đây khi tới máy chủ.',
-  onlyHere: 'chỉ có trong trình duyệt này', downloadingShort: 'Đang tải…', waitingAgent: 'Đang chờ xử lý',
+  onlyHere: 'chỉ có trong trình duyệt này', downloadingShort: 'Đang tải…', waitingAgent: 'Đang chờ xử lý', agentGuide: 'Cách xử lý',
+  agentGuideTitle: 'Hướng dẫn cho agent (AI) xử lý chuyến: cần gì và các bước',
   processingBy: (p) => `⚙ ${p.name} đang xử lý · từ ${p.when}`,
   processingTitle: (p) => `${p.name} đang xử lý chuyến này thành các địa điểm để duyệt (từ ${p.when}). Nếu không có kết quả, chuyến sẽ được trả lại ${p.until}.`,
   onServer: (p) => `Trên máy chủ · ${p.size} · mở để tải về`, update: 'Cập nhật', updateTitle: 'Máy chủ có bản mới hơn của phiên này: tải về (kết quả duyệt vẫn giữ)',
@@ -373,7 +377,7 @@ const vi: Record<string, Msg> = {
   issueHint: 'Mỗi người, mỗi thiết bị một mã truy cập: mỗi lượt tải lên sẽ ghi rõ ai làm, và mất điện thoại thì chỉ cần thu hồi mã đó.',
   issuedTitle: (p) => `Mã truy cập mới cho ${p.name}`,
   issuedOnce: 'Hãy sao chép hoặc quét ngay: mã này sẽ không hiện lại. Nếu bị mất, hãy thu hồi và cấp mã mới.',
-  issuedQr: 'Trên điện thoại, quét mã này trong ứng dụng POI Capture: ứng dụng sẽ tự đặt địa chỉ máy chủ và mã truy cập.',
+  issuedQr: 'Trên điện thoại, quét mã này trong ứng dụng Quét Phố: ứng dụng sẽ tự đặt địa chỉ máy chủ và mã truy cập.',
   issuedQrAlt: 'Mã QR chứa địa chỉ máy chủ và mã truy cập', issuedDone: 'Xong, ẩn mã',
   copy: 'Sao chép', copied: 'Đã sao chép', copyLink: 'Sao chép liên kết cài đặt', copyFailed: 'Không sao chép được: hãy chọn văn bản và tự sao chép.',
   upAllTypes: 'Mọi loại', upType: 'Loại', upSize: 'Dung lượng', upBy: 'Người tải lên', typeProcessed: 'đã xử lý', typeRaw: 'phiên gốc',
@@ -466,7 +470,7 @@ const vi: Record<string, Msg> = {
   pendingBeforeConfirm: (p) => `Xác nhận sẽ nhận các giá trị đọc rõ và giá trị từ Google / website. Chưa nhận cho tới khi bạn bấm ✓: ${p.f}.`,
   pendingAfterConfirm: (p) => `Chưa được xuất cho tới khi bạn nhận (✓) hoặc nhập: ${p.f}.`,
   suggestionsOpen: (p) => `${p.n} cần kiểm tra`,
-  osmNote: 'File .osm chứa các điểm mới cho JOSM, không gồm các trường lấy từ Google (OpenStreetMap không chấp nhận): đối chiếu với dữ liệu đã có và làm theo hướng dẫn nhập dữ liệu của OSM trước khi tải lên. Gỡ bỏ chỉ có trong GeoJSON và CSV.',
+  osmNote: 'File .osm chứa các điểm mới cho JOSM, không gồm các trường lấy từ Google (OpenStreetMap không chấp nhận): đối chiếu với dữ liệu đã có và làm theo hướng dẫn nhập dữ liệu của OSM trước khi tải lên. Gỡ bỏ có trong các định dạng khác, không có trong file .osm.',
   nothingConfirmed: 'Chưa xác nhận gì',
   category: 'loại', status_open: 'đang mở', status_closed: 'đã đóng cửa', status_for_rent: 'cho thuê',
   status_under_construction: 'đang xây dựng', status_gone: 'không còn', status_unknown: 'không rõ',
@@ -507,6 +511,8 @@ const vi: Record<string, Msg> = {
   removedN: (p) => `Đã bỏ (${p.n}), bấm để khôi phục:`, restore: 'Khôi phục',
   photoEditsNote: 'Thay đổi ảnh được lưu cùng đánh giá của bạn; ảnh đã nhập vẫn giữ nguyên.',
   pubPhotos: 'Ảnh (.zip)', pubPhotosNote: 'Các ảnh bạn giữ cho mỗi địa điểm đã xác nhận (đã cắt nếu bạn cắt), kèm places.geojson; cột photos liệt kê chúng.',
+  pubAll: 'Tất cả định dạng (.zip)',
+  pubFormatsNote: 'KML (Google Earth, My Maps), GPX (máy GPS, OsmAnd), Shapefile (QGIS, ArcGIS; UTF-8, WGS84) và Excel chứa cùng các dòng như CSV, gồm cả gỡ bỏ, các trường lấy từ Google được đánh dấu (fromGoogle). Tất cả định dạng (.zip) gồm GeoJSON, CSV, .osm, KML, GPX, Shapefile và Excel.',
   pubProject: 'Dự án (.zip)', pubProjectNote: 'Cho bước VMAP, trong một file: mọi địa điểm bạn đã quyết định (kèm quyết định, các trường, ghim và ảnh giữ lại), các yêu cầu xóa, tasks.jsonl cho công cụ VMAP, và README liệt kê những gì cần kiểm tra (ghi chú, ảnh thêm vào, địa điểm chưa duyệt).',
 }
 

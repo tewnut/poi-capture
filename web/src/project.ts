@@ -343,7 +343,7 @@ function readme(p: Project) {
     `# POI project: ${p.session.name || p.session.id}`,
     '',
     `Session \`${p.session.id}\`${p.session.startedAt ? `, captured ${p.session.startedAt}` : ''}. Exported ${p.exportedAt}` +
-      `${p.exportedBy ? ` by ${p.exportedBy}` : ''} from POI Capture Reviewer (schema \`${p.schema}\`).`,
+      `${p.exportedBy ? ` by ${p.exportedBy}` : ''} from Quét Phố Reviewer (schema \`${p.schema}\`).`,
     '',
     `Places: ${c.places} (confirmed ${c.confirmed}, visit ${c.visit}, rejected ${c.rejected}, not reviewed ${c.todo}); ` +
       `photos ${c.photos}; removal tasks ${c.removals.total} (confirmed ${c.removals.confirmed}, on site ${c.removals.verify}, ` +

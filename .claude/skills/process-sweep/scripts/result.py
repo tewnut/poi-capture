@@ -14,7 +14,7 @@ result.json (schema "poi-result/1"):
                                  merged with the website / Google, source "website" / "google"; a street nobody
                                  gives is the road the photos were taken on, source "ride", for the reviewer to check),
             photos [{file, index, cover, why}],
-            pins {algorithm | contributor: {lat, lon, method, uncertaintyM, sightings},
+            pins {algorithm | contributor: {lat, lon, method, uncertaintyM, sightings, unsnapped?, snap?},
                   google: {lat, lon, name, distanceM, url} | null,      (for review only: never published)
                   agent: {lat, lon, why} | null},
             google {the review block}, review {status: todo}
@@ -202,8 +202,9 @@ GOOGLE_MIN_MATCH, GOOGLE_MAX_M = 0.5, 100
 
 def google_mergeable(g):
     """A Google result that is this place: found, name match >= 0.5, within 100 m. Only such a result is merged,
-    counts as "on Google Maps" and lends its website (a farther or weaker one is probably another branch / shop)."""
-    return bool(g) and bool(g.get('name')) and (g.get('nameMatch') or 0) >= GOOGLE_MIN_MATCH         and g.get('distanceM') is not None and g['distanceM'] <= GOOGLE_MAX_M
+    counts as "on Google Maps" and lends its website (a farther or weaker one is probably another branch / shop).
+    `notThisPlace` (set by the agent: another shop, e.g. a generic sign name matched a neighbour) is never merged."""
+    return bool(g) and not g.get('notThisPlace') and bool(g.get('name')) and (g.get('nameMatch') or 0) >= GOOGLE_MIN_MATCH         and g.get('distanceM') is not None and g['distanceM'] <= GOOGLE_MAX_M
 
 
 def merge_google(fields, g):
@@ -322,7 +323,9 @@ def place_entry(folder, m, session_id):
     pins = dict(m.get('pins') or {})
     first = 'contributor' if (m.get('session') or {}).get('kind') == 'poi' else 'algorithm'
     pins.setdefault(first, {'lat': pos['lat'], 'lon': pos['lon'], 'method': pos.get('method'),
-                            'uncertaintyM': pos.get('uncertaintyM'), 'sightings': pos.get('sightings') or []})
+                            'uncertaintyM': pos.get('uncertaintyM'), 'sightings': pos.get('sightings') or [],
+                            # a sign moved onto the road layout: the estimate before, and the move
+                            **{k: pos[k] for k in ('unsnapped', 'snap') if pos.get(k)}})
     pins['google'] = _google_pin(m.get('googleMaps'))
     pins.setdefault('agent', None)
     layer = layer_of(m)

@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
 import android.location.LocationManager
 import android.os.Build
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -31,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -145,11 +147,9 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     LaunchedEffect(tasksTick) { tasks = withContext(Dispatchers.IO) { CaptureService.tasks(ctx).all() } }
     var tasksOpen by remember { mutableStateOf(false) }
     var taskFocus by remember { mutableStateOf<String?>(null) }
-    var mode by remember { mutableStateOf(Mode.PHOTO_AUTO) }
     var kind by remember { mutableStateOf(SessionKind.SWEEP) }
     var holding by remember { mutableStateOf(Prefs.holding(ctx)) }
     var target by remember { mutableStateOf(Prefs.target(ctx)) }
-    var recenter by remember { mutableIntStateOf(0) }
     var nearWays by remember { mutableStateOf<List<Way>?>(null) }
     var roadStatus by remember { mutableStateOf<Int?>(null) }   // string resource of the road data status, null = fine
     var roadSource by remember { mutableStateOf("") }
@@ -211,7 +211,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
         if (tasksOpen) TasksSheet(loc.fix?.let { LatLon(it.lat, it.lon) }, taskFocus, onChanged = { tasksTick++ }) { tasksOpen = false; taskFocus = null }
         // ---------- map ----------
         Box(Modifier.weight(0.38f).heightIn(min = 150.dp).fillMaxWidth()) {
-            LiveMap(settings.tileUrl, loc.fix, recenter, if (showCoverage) mine else CoverLayer(), tasks,
+            LiveMap(settings.tileUrl, loc.fix, if (showCoverage) mine else CoverLayer(), tasks,
                 { taskFocus = it; tasksOpen = true }, Modifier.fillMaxSize().clipToBounds())
             val openTasks = tasks.count { it.open }
             if (openTasks > 0) androidx.compose.material3.AssistChip(onClick = { taskFocus = null; tasksOpen = true },
@@ -243,10 +243,6 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     Pill(stringResource(R.string.setup_simulated), bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp)
                 }
             }
-            SmallFloatingActionButton(onClick = { recenter++ }, modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
-                containerColor = Color.White) {
-                Icon(Icons.Filled.LocationOn, stringResource(R.string.setup_recenter), tint = Palette.Blue)
-            }
         }
 
         // ---------- what will happen + Start ----------
@@ -256,11 +252,18 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // only when there is something to do (permission, location off); the map shows the satellites
                     if (loc.status != LocStatus.SEARCHING) LocationHelp(loc)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KindCard(stringResource(R.string.setup_sweep_title), stringResource(R.string.setup_sweep_sub),
-                            kind == SessionKind.SWEEP, Modifier.weight(1f)) { kind = SessionKind.SWEEP }
-                        KindCard(stringResource(R.string.setup_place_title), stringResource(R.string.setup_place_sub),
-                            kind == SessionKind.POI, Modifier.weight(1f)) { kind = SessionKind.POI }
+                    // three quick choices, short labels only: what each means is behind the (i) button
+                    Choice(stringResource(R.string.setup_kind_label), listOf(
+                        SessionKind.SWEEP to stringResource(R.string.setup_sweep_short),
+                        SessionKind.POI to stringResource(R.string.setup_place_short)), kind) { kind = it }
+                    if (kind == SessionKind.SWEEP) {
+                        Choice(stringResource(R.string.setup_target_label), listOf(
+                            SweepTarget.SHOPS to "🏪 " + stringResource(R.string.setup_target_shops_short),
+                            SweepTarget.ADDRESSES to "🔢 " + stringResource(R.string.setup_target_addresses_short),
+                            SweepTarget.SIGNS to "🚸 " + stringResource(R.string.setup_target_signs_short)), target) { target = it; Prefs.saveTarget(ctx, it) }
+                        Choice(stringResource(R.string.setup_holding_title), listOf(
+                            io.github.tewnut.poicapture.core.Holding.MOUNT to stringResource(R.string.setup_holding_mount_short),
+                            io.github.tewnut.poicapture.core.Holding.HAND to stringResource(R.string.setup_holding_hand)), holding) { holding = it; Prefs.saveHolding(ctx, it) }
                     }
                     Column {
                         Hint(stringResource(R.string.setup_you_are_on))
@@ -273,35 +276,6 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             Hint(stringResource(R.string.setup_pack_suggest), color = Palette.Blue)
                             PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null; roadReload++ })
                         }
-                    }
-                    if (kind == SessionKind.SWEEP) {
-                        // what the ride is for: it sets the spacing, the photo size, the speed and which way the camera looks
-                        Text(stringResource(R.string.setup_target_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            for ((t, title, sub) in listOf(
-                                Triple(SweepTarget.SHOPS, "🏪 " + stringResource(R.string.setup_target_shops), stringResource(R.string.setup_target_shops_sub)),
-                                Triple(SweepTarget.ADDRESSES, "🔢 " + stringResource(R.string.setup_target_addresses), stringResource(R.string.setup_target_addresses_sub)),
-                                Triple(SweepTarget.SIGNS, "🚸 " + stringResource(R.string.setup_target_signs), stringResource(R.string.setup_target_signs_sub)),
-                            )) KindCard(title, sub, target == t, Modifier.fillMaxWidth()) { target = t; Prefs.saveTarget(ctx, t) }
-                        }
-                        if (target == SweepTarget.SIGNS) Hint(stringResource(R.string.setup_target_signs_hint), color = Palette.Blue)
-                        Text(stringResource(R.string.setup_holding_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            KindCard("🛵 " + stringResource(R.string.setup_holding_mount), stringResource(R.string.setup_holding_mount_sub),
-                                holding == io.github.tewnut.poicapture.core.Holding.MOUNT, Modifier.weight(1f)) {
-                                holding = io.github.tewnut.poicapture.core.Holding.MOUNT; Prefs.saveHolding(ctx, holding) }
-                            KindCard("🙋 " + stringResource(R.string.setup_holding_hand), stringResource(R.string.setup_holding_hand_sub),
-                                holding == io.github.tewnut.poicapture.core.Holding.HAND, Modifier.weight(1f)) {
-                                holding = io.github.tewnut.poicapture.core.Holding.HAND; Prefs.saveHolding(ctx, holding) }
-                        }
-                        if (holding == io.github.tewnut.poicapture.core.Holding.HAND) Hint(stringResource(R.string.setup_holding_hand_hint))
-                        Text(stringResource(R.string.setup_mode_short), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(mode == Mode.PHOTO_AUTO, { mode = Mode.PHOTO_AUTO }, { Text(stringResource(R.string.setup_mode_auto)) })
-                            FilterChip(mode == Mode.PHOTO_MANUAL, { mode = Mode.PHOTO_MANUAL }, { Text(stringResource(R.string.setup_mode_manual)) })
-                        }
-                        Hint(if (mode == Mode.PHOTO_AUTO) stringResource(R.string.setup_plan_auto_short, String.format(Locale.ROOT, "%.1f", plan.photoEveryM), plan.maxSpeedKmh)
-                            else stringResource(R.string.setup_plan_short, plan.maxSpeedKmh))
                     }
                 }
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
@@ -322,7 +296,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             }
                             val now = System.currentTimeMillis()
                             val s = Session(id = uid("s_", now), createdAt = iso(now), contributor = contributor, note = "",
-                                vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else mode,
+                                // a sweep always shoots by itself (no hand on the phone while riding), a place is shot by hand
+                                vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else Mode.PHOTO_AUTO,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
                                 settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M,
                                     // house numbers are small print: the largest photo the camera gives
@@ -341,18 +316,28 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     }
 }
 
+/** One setup choice: a short label and a row of segments, the selected one filled. */
 @Composable
-private fun KindCard(title: String, sub: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    androidx.compose.material3.OutlinedCard(
-        onClick = onClick, modifier = modifier, shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) Palette.Green else Color(0xFFD0D5DD)),
-    ) {
-        Column(Modifier.fillMaxWidth().background(if (selected) Palette.GreenLight else Color.Transparent).padding(12.dp)) {
-            Text(title, fontWeight = FontWeight.Bold, color = if (selected) Palette.Green else Palette.Ink)
-            Hint(sub)
+private fun <T> Choice(label: String, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Palette.Muted)
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            options.forEachIndexed { i, (value, text) ->
+                SegmentedButton(
+                    selected = value == selected, onClick = { onSelect(value) },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, options.size),
+                    icon = {},   // no check mark: the fill shows the choice and leaves room for the words
+                    colors = androidx.compose.material3.SegmentedButtonDefaults.colors(
+                        activeContainerColor = Palette.GreenLight, activeContentColor = Palette.Ink, activeBorderColor = Palette.Green),
+                ) { Text(text, maxLines = 1, fontSize = 14.sp, fontWeight = if (value == selected) FontWeight.Bold else FontWeight.Normal,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+            }
         }
     }
 }
+
+/** After the contributor touches the setup map, it stops following them for this long. */
+private const val FOLLOW_PAUSE_MS = 8_000L
 
 /** Already-recorded tracks and places shown on the setup map. */
 data class CoverLayer(val lines: List<List<LatLon>> = emptyList(), val points: List<LatLon> = emptyList())
@@ -363,7 +348,7 @@ fun Hint(t: String, modifier: Modifier = Modifier, color: Color = Palette.Muted)
 
 /** Map centred on the rider: blue dot with an accuracy circle, re-centre on request. */
 @Composable
-private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: CoverLayer,
+private fun LiveMap(tileUrl: String, me: LiveLocation?, mine: CoverLayer,
                     tasks: List<io.github.tewnut.poicapture.core.FieldTask>, onTask: (String) -> Unit, modifier: Modifier) {
     val ctx = LocalContext.current
     val map = remember {
@@ -385,7 +370,13 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: Cov
         onDispose { owner.lifecycle.removeObserver(obs); map.onDetach() }
     }
     var centered by remember { mutableStateOf(false) }
-    var lastRecenter by remember { mutableIntStateOf(0) }
+    // the map follows the rider by itself; a finger on the map (looking at a task, the coverage) pauses that a while
+    val touchedAt = remember { longArrayOf(0L) }
+    DisposableEffect(map) {
+        @Suppress("ClickableViewAccessibility")
+        map.setOnTouchListener { _, _ -> touchedAt[0] = SystemClock.elapsedRealtime(); false }
+        onDispose { map.setOnTouchListener(null) }
+    }
     val blue = Palette.Blue.toArgb()
     val density = ctx.resources.displayMetrics.density
     val meDot = remember {
@@ -439,11 +430,15 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: Cov
                 setInfoWindow(null)
                 setOnMarkerClickListener { _, _ -> true }
             })
-            if (!centered || recenter != lastRecenter) {
+            if (!centered) {
                 centered = true
-                lastRecenter = recenter
                 m.controller.setZoom(17.5)
                 m.controller.animateTo(here)
+            } else if (SystemClock.elapsedRealtime() - touchedAt[0] > FOLLOW_PAUSE_MS && m.width > 0) {
+                // glide the map once the dot leaves the middle half of the view, so it never runs off the edge
+                val px = m.projection.toPixels(here, null)
+                val dx = px.x - m.width / 2f; val dy = px.y - m.height / 2f
+                if (kotlin.math.abs(dx) > m.width / 4f || kotlin.math.abs(dy) > m.height / 4f) m.controller.animateTo(here)
             }
         }
         m.invalidate()
@@ -473,7 +468,6 @@ private fun SetupInfo(photoEveryM: Double, maxSpeedKmh: Int, onClose: () -> Unit
             Item("🛵", stringResource(R.string.setup_holding_mount), stringResource(R.string.setup_mount_hint))
             Item("🙋", stringResource(R.string.setup_holding_hand), stringResource(R.string.setup_hand_info))
             Item("📸", stringResource(R.string.setup_mode_auto), stringResource(R.string.setup_mode_auto_hint, String.format(Locale.ROOT, "%.1f", photoEveryM), maxSpeedKmh))
-            Item("🔘", stringResource(R.string.setup_mode_manual), stringResource(R.string.setup_mode_manual_hint, maxSpeedKmh))
             Item("📏", stringResource(R.string.setup_facade_title), stringResource(R.string.setup_facade_hint))
             Item("🏪", stringResource(R.string.setup_target_shops), stringResource(R.string.setup_target_shops_info))
             Item("🔢", stringResource(R.string.setup_target_addresses), stringResource(R.string.setup_target_addresses_info))

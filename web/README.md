@@ -1,4 +1,6 @@
-# POI Capture Reviewer (web app)
+# Quét Phố Reviewer (web app)
+
+Formerly POI Capture Reviewer.
 
 Stage 3 of the pipeline (docs/pipeline.md): confirm what the agentic processing found, then publish.
 

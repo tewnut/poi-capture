@@ -1,14 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- POI Capture: a place (map pin with a camera lens) inside a camera viewfinder. Same drawing as docs/logo.svg
-     (48-unit grid), scaled into the 66 dp safe zone of the 108 dp adaptive icon. -->
+<!-- Quét Phố: the VMAP arrow-V mark (docs/vmap-mark.svg, from the official docs/vmap-trademark.svg) inside the
+     corners of a viewfinder (the "quét": scanning the street). Fits the 66 dp safe zone of the 108 dp adaptive icon. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <group android:translateX="21" android:translateY="21" android:scaleX="1.375" android:scaleY="1.375">
-        <path android:strokeColor="#FFFFFF" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeLineJoin="round"
-            android:pathData="M10.5,17V13.5Q10.5,10.5 13.5,10.5H17 M31,10.5H34.5Q37.5,10.5 37.5,13.5V17 M37.5,31V34.5Q37.5,37.5 34.5,37.5H31 M17,37.5H13.5Q10.5,37.5 10.5,34.5V31" />
-        <path android:fillColor="#FEC84B" android:pathData="M20.2,35.4a3.8,1.15 0,1 0,7.6 0a3.8,1.15 0,1 0,-7.6 0z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M24,34C24,34 16,25.6 16,20.4A8,8 0,0 1,32 20.4C32,25.6 24,34 24,34Z" />
-        <path android:fillColor="#0B6B4C" android:pathData="M20.3,20.4a3.7,3.7 0,1 0,7.4 0a3.7,3.7 0,1 0,-7.4 0z" />
-        <path android:fillColor="#FFFFFF" android:pathData="M24.15,19.1a1.15,1.15 0,1 0,2.3 0a1.15,1.15 0,1 0,-2.3 0z" />
+    <path android:strokeColor="#0A0A0A" android:strokeWidth="3.2" android:strokeLineCap="round" android:strokeLineJoin="round"
+        android:pathData="M31,38V34.5Q31,31 34.5,31H38 M70,31H73.5Q77,31 77,34.5V38 M77,70V73.5Q77,77 73.5,77H70 M38,77H34.5Q31,77 31,73.5V70" />
+    <group android:translateX="38.040" android:translateY="32.216" android:scaleX="2.8" android:scaleY="2.8">
+        <path android:fillColor="#0A0A0A" android:pathData="M8.80469 1.63863L10.8018 5.87398L10.9023 6.08785L10.8008 6.30172L7.12598 14.0654L6.87207 14.6035L6.38574 14.2597L4.87402 13.1914L4.38867 12.8486L2.39355 11.4384L2.04883 11.1943L2.23145 10.8144C2.51433 10.2234 2.51594 9.47976 2.23828 8.89059C1.99917 8.38367 1.60549 8.09033 1.20996 8.0234L1.04102 8.00875H0.5V4.18844H0.500977V1.36617H1.04297L8.35059 1.35152L8.66895 1.35055L8.80469 1.63863ZM3.70898 5.18258C4.28475 5.6568 4.77774 6.28836 5.13867 7.05367C5.44546 7.70427 5.63106 8.39754 5.70801 9.09664L7.56445 5.17379L3.70898 5.18258Z" />
     </group>
 </vector>

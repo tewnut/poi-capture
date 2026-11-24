@@ -19,6 +19,7 @@ import { t, relTime } from './i18n'
 import { keptPhotos, exportNames } from './photos'
 import { zipSync, strToU8 } from 'fflate'
 import { geojson, csv, osm, tasksGeojson, download, type Published, type Removed } from './publish'
+import { kml, gpx, shapefile, xlsx, allFormats } from './exports'
 import { buildProject, projectName } from './project'
 import { missingStreet, pendingSuggestions } from './fields'
 import { humanSize, type CloudItem } from './cloud'
@@ -297,11 +298,17 @@ const removed = computed<Removed[]>(() => { const d = openDataset.value; return 
   .map((_t, i) => ({ dataset: d, index: i, review: state.removals[`${d.id}|${i}`] }))
   .filter((x) => x.review?.decision === 'confirmed') : [] })
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')
-function pub(kind: 'geojson' | 'csv' | 'osm') {
+function pub(kind: 'geojson' | 'csv' | 'osm' | 'kml' | 'gpx' | 'shp' | 'xlsx' | 'all') {
   const base = `poi-published-${openDataset.value?.session.id || 'session'}-${stamp()}`
-  if (kind === 'geojson') download(`${base}.geojson`, geojson(confirmed.value, removed.value), 'application/geo+json')
-  if (kind === 'csv') download(`${base}.csv`, csv(confirmed.value, removed.value), 'text/csv')
-  if (kind === 'osm') download(`${base}.osm`, osm(confirmed.value), 'application/xml')
+  const [c, r] = [confirmed.value, removed.value]
+  if (kind === 'geojson') download(`${base}.geojson`, geojson(c, r), 'application/geo+json')
+  if (kind === 'csv') download(`${base}.csv`, csv(c, r), 'text/csv')
+  if (kind === 'osm') download(`${base}.osm`, osm(c), 'application/xml')
+  if (kind === 'kml') download(`${base}.kml`, kml(c, r, openDataset.value?.session.name || base), 'application/vnd.google-earth.kml+xml')
+  if (kind === 'gpx') download(`${base}.gpx`, gpx(c, r), 'application/gpx+xml')
+  if (kind === 'shp') download(`${base}-shapefile.zip`, shapefile(c, r, base), 'application/zip')
+  if (kind === 'xlsx') download(`${base}.xlsx`, xlsx(c, r), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  if (kind === 'all') download(`${base}-all.zip`, allFormats(c, r, base), 'application/zip')
 }
 /** The kept (and cropped) photos of the confirmed places, named as in the photos column, with places.geojson. */
 async function pubPhotos() {
@@ -357,7 +364,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
   <div v-else :class="['app', { sess: !!state.open, peek: mapPeek && !!(openPlace || openTask) }]">
     <aside class="side">
       <header class="sidehead">
-        <div class="brand"><span class="logo">◉</span> {{ t('appName') }}</div>
+        <div class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0.5 0.9 10.5 13.8"><path fill="#0a0a0a" d="M8.80469 1.63863L10.8018 5.87398L10.9023 6.08785L10.8008 6.30172L7.12598 14.0654L6.87207 14.6035L6.38574 14.2597L4.87402 13.1914L4.38867 12.8486L2.39355 11.4384L2.04883 11.1943L2.23145 10.8144C2.51433 10.2234 2.51594 9.47976 2.23828 8.89059C1.99917 8.38367 1.60549 8.09033 1.20996 8.0234L1.04102 8.00875H0.5V4.18844H0.500977V1.36617H1.04297L8.35059 1.35152L8.66895 1.35055L8.80469 1.63863ZM3.70898 5.18258C4.28475 5.6568 4.77774 6.28836 5.13867 7.05367C5.44546 7.70427 5.63106 8.39754 5.70801 9.09664L7.56445 5.17379L3.70898 5.18258Z"/></svg></span> {{ t('appName') }}</div>
         <RouterLink class="ghost gear" :to="to.settings()" :title="t('settings')" :aria-label="t('settings')">
           ⚙<span v-if="conn.status === 'error' || conn.status === 'none'" class="dot error"></span></RouterLink>
       </header>
@@ -423,10 +430,13 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
                     :title="t('processingTitle', procParams(r))">{{ t('processingBy', procParams(r)) }}</span>
                   <button v-if="r.state === 'waiting' && conn.processing[r.sessionId] && (canRelease || conn.processing[r.sessionId].by.id === conn.me?.id)"
                     class="ghost small" :title="t('stopProcessingTitle', procParams(r))" @click.stop="stopProc(r)">{{ t('stopProcessing') }}</button>
-                  <span v-else-if="r.state === 'waiting'" class="chip">{{ t('waitingAgent') }}</span>
+                  <a v-else-if="r.state === 'waiting'" class="ghost small guide" href="./agents.md" target="_blank" rel="noopener"
+                    :title="t('agentGuideTitle')" @click.stop>{{ t('agentGuide') }}</a>
                   <span v-else class="chip ok">{{ t('onServer', { size: humanSize(r.item?.size ?? null) }) }}</span>
                   <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]" :title="lockLabel(r)!.title">{{ lockLabel(r)!.text }}</span>
                 </div>
+                <!-- uploaded, not processed yet: "Captured", the stepper on its first step -->
+                <StageBar v-if="!dsOf(r) && r.state === 'waiting'" :ds="null" />
               </div>
               <button v-if="r.state === 'updated' && r.item" class="secondary small" :disabled="!!conn.pulling" :title="t('updateTitle')" @click="fetchSession(r.item)">{{ t('update') }}</button>
               <button v-if="dsOf(r)" class="ghost del" :title="t('removeSession')" :aria-label="t('removeSession')" @click="del(dsOf(r)!)">🗑</button>
@@ -579,12 +589,18 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
             <button class="primary" @click="pub('geojson')">GeoJSON</button>
             <button class="primary" @click="pub('csv')">CSV</button>
             <button class="primary" :disabled="!confirmed.length" @click="pub('osm')">OpenStreetMap (.osm)</button>
+            <button class="primary" @click="pub('kml')">KML (Google Earth)</button>
+            <button class="primary" @click="pub('gpx')">GPX</button>
+            <button class="primary" @click="pub('shp')">Shapefile (.zip)</button>
+            <button class="primary" @click="pub('xlsx')">Excel (.xlsx)</button>
+            <button class="primary" @click="pub('all')">{{ t('pubAll') }}</button>
             <button class="primary" :disabled="!confirmed.length" @click="pubPhotos">{{ t('pubPhotos') }}</button>
             <button class="primary" @click="pubProject">{{ t('pubProject') }}</button>
           </div>
           <p class="muted small">{{ t('pubProjectNote') }}</p>
           <p class="muted small">{{ t('pubPhotosNote') }}</p>
           <p class="muted small">{{ t('osmNote') }}</p>
+          <p class="muted small">{{ t('pubFormatsNote') }}</p>
         </template>
         <button class="ghost" @click="publishOpen = false">{{ t('close') }}</button>
       </div>
