@@ -698,3 +698,22 @@ class BlurTest(unittest.TestCase):
         self.assertEqual((m['privacy']['faces'], m['privacy']['plates'], m['privacy']['added']), (1, 0, 1))
         self.assertEqual(cloud.unblurred(out), [])
         self.assertTrue(os.path.exists(os.path.join(check, 'after_00.jpg')))
+        self.assertEqual(m['privacy']['files'], ['COVER_#1_p.jpg'])
+        # a photo added after the blur: push refuses the folder (and a zip of it), apply refuses to run
+        os.makedirs(os.path.join(out, '01_Cafe', 'more'))
+        shutil.copy(os.path.join(check, 'orig', rel), os.path.join(out, '01_Cafe', 'more', 'p2.jpg'))
+        self.assertEqual(cloud.unblurred(out), ['01_Cafe'])
+        z = cloud.zip_folder(out)
+        try:
+            self.assertEqual(cloud.unblurred_zip(z), ['01_Cafe'])
+        finally:
+            os.remove(z)
+        with self.assertRaises(SystemExit):
+            blur.apply(out, check)
+        self.assertEqual(json.load(open(os.path.join(out, '01_Cafe', 'place.json')))['privacy']['files'], ['COVER_#1_p.jpg'])
+
+    def test_push_check_on_older_results_compares_the_count(self):
+        import cloud
+        self.assertEqual(cloud._unblurred_places({'a': ({'privacy': {'blurred': True, 'photos': 1}}, ['x.jpg', 'y.jpg']),
+                                                  'b': ({'privacy': {'blurred': True, 'photos': 2}}, ['x.jpg', 'y.jpg']),
+                                                  'c': ({}, [])}), ['a'])

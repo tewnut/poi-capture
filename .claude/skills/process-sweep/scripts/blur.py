@@ -346,12 +346,16 @@ def apply(out, check):
             per_file.setdefault(b['file'], []).append((b['kind'], b['box']))
     for a in dec.get('add', []):
         per_file.setdefault(a['file'], []).append(('added', a['box'], 'fraction'))
-    counts, done = {}, []
-    for rel, folder in photos_of(out):
+    photos = photos_of(out)
+    # every photo must have been through detect: a photo missing from the check folder would stay unblurred while
+    # its place folder is stamped as blurred (and cloud.py push would let it out)
+    missing = [rel for rel, _ in photos if not os.path.exists(os.path.join(check, 'orig', rel))]
+    if missing:
+        raise SystemExit(f'{len(missing)} photo(s) not in the check folder, e.g. {missing[0]}: run detect again '
+                         f'(after a rebuild or added photos); nothing was blurred or marked')
+    counts, done, files = {}, [], {}
+    for rel, folder in photos:
         src = os.path.join(check, 'orig', rel)
-        if not os.path.exists(src):
-            print(f'{rel}: not in the check folder (run detect again after a rebuild)')
-            continue
         im, exif = load(src)
         W, H = im.size
         c = counts.setdefault(folder, {'faces': 0, 'plates': 0, 'added': 0, 'photos': 0})
@@ -363,11 +367,12 @@ def apply(out, check):
         im.save(os.path.join(out, rel), quality=92, exif=exif)
         c['photos'] += 1
         done.append(rel)
+        files.setdefault(folder, []).append(os.path.relpath(os.path.join(out, rel), folder).replace(os.sep, '/'))
     kept = sum(1 for b in data['boxes'] if b['id'] in keep)
     for folder, c in counts.items():
         p = os.path.join(folder, 'place.json')
         m = json.load(open(p, encoding='utf-8'))
-        m['privacy'] = {'blurred': True, **c, 'method': METHOD}
+        m['privacy'] = {'blurred': True, **c, 'method': METHOD, 'files': sorted(files.get(folder, []))}
         json.dump(m, open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
     for f in os.listdir(check):
         if f.startswith('after_') and f.endswith('.jpg'):

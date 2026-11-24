@@ -189,18 +189,54 @@ class Cloud:
 
 # ----------------------------------------------------------------------------------------------- commands
 
+def _is_street_photo(name: str) -> bool:
+    base = name.replace(os.sep, '/').rsplit('/', 1)[-1]
+    return base.lower().endswith(('.jpg', '.jpeg', '.png')) and not base.startswith('WEB_')
+
+
+def _unblurred_places(places: dict[str, tuple[dict, list[str]]]) -> list[str]:
+    """{place folder: (place.json, its street photos relative to the folder)} -> the folders with a photo blur.py
+    did not blur: not marked blurred, or a photo that is not in privacy.files (added or rebuilt after the blur)."""
+    bad = []
+    for d, (m, photos) in sorted(places.items()):
+        pv = m.get('privacy') or {}
+        if not photos:
+            continue
+        if not pv.get('blurred'):
+            bad.append(d)
+        elif 'files' in pv:
+            if set(photos) - set(pv['files']):
+                bad.append(d)
+        elif (pv.get('photos') or 0) < len(photos):      # older results: no list, compare the count
+            bad.append(d)
+    return bad
+
+
 def unblurred(folder: str) -> list[str]:
     """Place folders (with a place.json) whose photos blur.py has not blurred: faces and plates must not leave the PC."""
-    bad = []
+    places = {}
     for d in sorted(os.listdir(folder)):
         p = os.path.join(folder, d, 'place.json')
         if os.path.isfile(p):
-            m = json.load(open(p, encoding='utf-8'))
-            if not (m.get('privacy') or {}).get('blurred') and any(
-                    f.lower().endswith(('.jpg', '.jpeg', '.png')) and not f.startswith('WEB_')
-                    for _, _, fs in os.walk(os.path.join(folder, d)) for f in fs):
-                bad.append(d)
-    return bad
+            root = os.path.join(folder, d)
+            photos = [os.path.relpath(os.path.join(r, f), root).replace(os.sep, '/')
+                      for r, _, fs in os.walk(root) for f in fs if _is_street_photo(f)]
+            places[d] = (json.load(open(p, encoding='utf-8')), photos)
+    return _unblurred_places(places)
+
+
+def unblurred_zip(path: str) -> list[str]:
+    """The same check on a processed-result zip (place folders at its top level or one folder down)."""
+    with zipfile.ZipFile(path) as z:
+        names = [n for n in z.namelist() if not n.endswith('/')]
+        dirs = {n.rsplit('/', 1)[0] for n in names if n.endswith('/place.json') or n == 'place.json'}
+        places = {}
+        for d in dirs:
+            pre = d + '/' if d != 'place.json' else ''
+            m = json.loads(z.read(pre + 'place.json').decode('utf-8'))
+            photos = [n[len(pre):] for n in names if n.startswith(pre) and _is_street_photo(n)]
+            places[d] = (m, photos)
+    return _unblurred_places(places)
 
 
 def zip_folder(folder: str) -> str:
@@ -394,8 +430,8 @@ def main(argv=None) -> int:
         for i in a.ids:
             print(f"{i}  {'deleted' if cloud.delete(i) else 'not on the server'}")
     elif a.cmd == 'push':
-        if os.path.isdir(a.path) and a.type == 'processed-result' and not a.unblurred:
-            bad = unblurred(a.path)
+        if a.type == 'processed-result' and not a.unblurred:
+            bad = unblurred(a.path) if os.path.isdir(a.path) else unblurred_zip(a.path)
             if bad:
                 raise SystemExit(f"{len(bad)} place folder(s) not blurred yet (faces, number plates), e.g. {bad[0]}: run "
                                  f"blur.py detect / apply first (SKILL.md 'Privacy'), or --unblurred to send them as they are")
