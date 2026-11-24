@@ -42,10 +42,11 @@ MODELS = {
     'vehicle': 'object_detection_yolox/object_detection_yolox_2022nov.onnx',
 }
 FACE_MIN = 0.6
+FACE_CHECK = 0.3    # below FACE_MIN down to this: shown on the crop sheets (blurred unless kept)
 PLATE_AUTO, PLATE_ON_VEHICLE, PLATE_ANYWHERE = 0.7, 0.3, 0.6
 AUTO_MAX_AREA = 0.006   # a plate blurred without asking is under 0.6 % of the photo; bigger boxes are checked
 VEHICLE_CLASSES = {1: 'bicycle', 2: 'car', 3: 'motorbike', 5: 'bus', 7: 'truck'}
-METHOD = 'YuNet faces, YOLOX vehicles + LPD-YuNet plates, agent-checked; pixelated'
+METHOD = 'YuNet faces, YOLOX vehicles (plate zones) + LPD-YuNet plates on full-resolution tiles, agent-checked; pixelated'
 
 
 def model_path(key):
@@ -62,8 +63,16 @@ def model_path(key):
 # ---------- detectors ----------
 
 class Faces:
-    def __init__(self):
-        self.det = cv2.FaceDetectorYN.create(model_path('face'), '', (320, 320), FACE_MIN, 0.3, 5000)
+    def __init__(self, min_score=FACE_MIN):
+        self.det = cv2.FaceDetectorYN.create(model_path('face'), '', (320, 320), min_score, 0.3, 5000)
+        self._low = None
+
+    def doubtful(self, bgr):
+        """Faces scoring FACE_CHECK..FACE_MIN (profiles, mirrors, under a helmet visor): for the crop sheets."""
+        if self._low is None:
+            self._low = Faces(FACE_CHECK)
+        sure = self(bgr)
+        return [(b, sc) for b, sc in self._low(bgr) if sc < FACE_MIN and all(iou(b, s) < 0.3 for s, _ in sure)]
 
     def __call__(self, bgr):
         h, w = bgr.shape[:2]
@@ -114,6 +123,10 @@ class Vehicles:
         for x0 in (0, w - cw):   # two overlapping halves: vehicles too small at 640 on the whole photo
             for b, s, c in self._run(bgr[:, x0:x0 + cw]):
                 found.append(([b[0] + x0, b[1], b[2] + x0, b[3]], s, c))
+        if max(w, h) > 2 * VEHICLE_TILE:   # a big photo: tiles as well (small bikes parked at the kerb)
+            for x0, y0 in tiles(w, h, VEHICLE_TILE):
+                for b, s, c in self._run(bgr[y0:y0 + VEHICLE_TILE, x0:x0 + VEHICLE_TILE]):
+                    found.append(([b[0] + x0, b[1] + y0, b[2] + x0, b[3] + y0], s, c))
         return nms(found, 0.5)
 
 
@@ -184,13 +197,36 @@ def on_vehicle(box, vehicles, plate_sized=False):
     return False
 
 
+def tiles(w, h, t, overlap=0.25):
+    """Top-left corners of t x t tiles covering a w x h photo, overlapping by `overlap` (none when it fits)."""
+    def starts(n):
+        if n <= t:
+            return [0]
+        step = int(t * (1 - overlap))
+        xs = list(range(0, n - t + 1, step))
+        if xs[-1] + t < n:
+            xs.append(n - t)
+        return xs
+    return [(x, y) for y in starts(h) for x in starts(w)]
+
+
+TILE = 1280          # full-resolution tiles for the plate model: small plates on parked bikes at the kerb
+VEHICLE_TILE = 1600  # vehicles on tiles too (a bike 150 px wide in a 4000 px photo is ~25 px at 640 on the whole)
+
+
 def plates_in(bgr, vehicles, plates):
-    """Plate candidates: the whole photo (long edge 1600) plus every vehicle, enlarged so its long edge is >= 480."""
+    """Plate candidates: the whole photo (long edge 1600), full-resolution tiles (TILE) of a bigger photo, and every
+    vehicle, enlarged so its long edge is >= 480."""
     h, w = bgr.shape[:2]
     s = min(1.0, 1600 / max(w, h))
     small = cv2.resize(bgr, (int(w * s) // 2 * 2, int(h * s) // 2 * 2))
     sx, sy = w / small.shape[1], h / small.shape[0]
     found = [([b[0] * sx, b[1] * sy, b[2] * sx, b[3] * sy], sc) for b, sc in plates(small)]
+    if max(w, h) > 1600:
+        for x0, y0 in tiles(w, h, TILE):
+            tile = bgr[y0:y0 + TILE, x0:x0 + TILE]
+            tile = tile[:tile.shape[0] // 2 * 2, :tile.shape[1] // 2 * 2]
+            found += [([x0 + b[0], y0 + b[1], x0 + b[2], y0 + b[3]], sc) for b, sc in plates(tile)]
     for v, _, _ in vehicles:
         mx, my = (v[2] - v[0]) * 0.1, (v[3] - v[1]) * 0.1
         x0, y0 = max(0, int(v[0] - mx)), max(0, int(v[1] - my))
@@ -207,14 +243,16 @@ def plates_in(bgr, vehicles, plates):
 # ---------- files ----------
 
 def photos_of(out):
-    """(relative path, place folder) of every street photo in the place folders: the place's own photos and more/."""
+    """(relative path, top folder) of every street photo anywhere in the output: the place folders with their more/,
+    and also _removals/ and any other folder (all of it is uploaded). Website images (WEB_*) are not street photos."""
     res = []
-    for name in place_folders(out):
-        d = os.path.join(out, name)
-        for root, _, files in os.walk(d):
-            for f in sorted(files):
-                if f.lower().endswith(('.jpg', '.jpeg', '.png')) and not f.startswith('WEB_'):
-                    res.append((os.path.relpath(os.path.join(root, f), out).replace('\\', '/'), d))
+    for root, dirs, files in os.walk(out):
+        dirs.sort()
+        for f in sorted(files):
+            if f.lower().endswith(('.jpg', '.jpeg', '.png')) and not f.startswith('WEB_'):
+                rel = os.path.relpath(os.path.join(root, f), out).replace(os.sep, '/')
+                top = rel.split('/')[0] if '/' in rel else ''
+                res.append((rel, os.path.join(out, top) if top else out))
     return res
 
 
@@ -222,6 +260,43 @@ def load(path):
     """RGB image with its EXIF orientation applied, and the EXIF to write back (orientation reset)."""
     im = ImageOps.exif_transpose(Image.open(path))
     return im.convert('RGB'), im.getexif()
+
+
+def plate_zone(v, W, H):
+    """The part of a vehicle where its plate can be: the lower 65 % of its box, full width (a motorbike's plate is at
+    the back, a car's at either end, and which end faces the camera is unknown). The plate model, trained on wide
+    single-line car plates, misses most Vietnamese motorbike plates (small, square, two lines): 24 Nov rides, 71
+    plates found by hand at full size, the plate model found none of them; this zone covers 59 of them."""
+    x0, y0, x1, y1 = v
+    return [x0, y0 + ZONE_TOP * (y1 - y0), x1, y1]
+
+
+ZONE_TOP = 0.35
+ZONE_MIN_W = 0.03     # a vehicle narrower than 3 % of the photo's long side: its plate cannot be read
+ZONE_MAX_AREA = 0.25  # a "vehicle" over a quarter of the photo: mostly a shopfront taken for a bus; its plate (if
+                      # any) is big enough for the plate model
+ZONE_MIN_SCORE = 0.4
+
+
+def find(bgr, faces, vehicles, plates):
+    """Everything to blur or check on one photo: [(kind, box, score, state)], and the number of vehicles.
+    kind: face | plate | zone (a vehicle's plate zone); state: auto (blurred) | check (on the crop sheets)."""
+    H, W = bgr.shape[:2]
+    out = [('face', b, sc, 'auto') for b, sc in faces(bgr)]
+    out += [('face', b, sc, 'check') for b, sc in faces.doubtful(bgr)]
+    vs = vehicles(bgr)
+    for b, sc in plates_in(bgr, vs, plates):
+        onv = on_vehicle(b, vs)
+        small = (b[2] - b[0]) * (b[3] - b[1]) <= AUTO_MAX_AREA * W * H
+        if small and on_vehicle(b, vs, plate_sized=True) and sc >= PLATE_AUTO:
+            out.append(('plate', b, sc, 'auto'))
+        elif (onv and sc >= PLATE_ON_VEHICLE) or sc >= PLATE_ANYWHERE:
+            out.append(('plate', b, sc, 'check'))
+    for v, sc, cls in vs:
+        w, h = v[2] - v[0], v[3] - v[1]
+        if sc >= ZONE_MIN_SCORE and w >= ZONE_MIN_W * max(W, H) and w * h <= ZONE_MAX_AREA * W * H:
+            out.append(('zone', plate_zone(v, W, H), sc, 'auto'))
+    return out, len(vs)
 
 
 def detect(out, check):
@@ -250,18 +325,11 @@ def detect(out, check):
                 boxes.append({'id': f'b{n:04d}', 'file': rel, 'kind': kind, 'box': [round(float(v), 1) for v in b],
                               'score': round(sc, 3), 'state': state, 'size': [W, H]})
 
-        for b, sc in faces(bgr):
-            add('face', b, sc, 'auto')
-        vs = vehicles(bgr)
-        for b, sc in plates_in(bgr, vs, plates):
-            onv = on_vehicle(b, vs)
-            small = (b[2] - b[0]) * (b[3] - b[1]) <= AUTO_MAX_AREA * W * H
-            if small and on_vehicle(b, vs, plate_sized=True) and sc >= PLATE_AUTO:
-                add('plate', b, sc, 'auto')
-            elif (onv and sc >= PLATE_ON_VEHICLE) or sc >= PLATE_ANYWHERE:
-                add('plate', b, sc, 'check')
+        found, nv = find(bgr, faces, vehicles, plates)
+        for kind, b, sc, state in found:
+            add(kind, b, sc, state)
         print(f'{rel}: {sum(1 for x in boxes if x["file"] == rel and x["kind"] == "face")} faces, '
-              f'{len(vs)} vehicles, {sum(1 for x in boxes if x["file"] == rel and x["kind"] == "plate")} plates')
+              f'{nv} vehicles, {sum(1 for x in boxes if x["file"] == rel and x["kind"] != "face")} plates / plate zones')
     json.dump({'boxes': boxes}, open(os.path.join(check, 'boxes.json'), 'w', encoding='utf-8'), indent=1)
     for f in os.listdir(check):
         if f.startswith(('plates_', 'after_')) and f.endswith('.jpg'):
@@ -314,7 +382,7 @@ def crop_sheets(check, boxes, cols=5, rows=4, tw=300, th=220):
     return (len(boxes) + per - 1) // per
 
 
-PAD = {'face': (0.15, 0.15), 'plate': (0.2, 0.6)}   # plates: the model's box often holds only one of a motorbike's two lines
+PAD = {'face': (0.15, 0.15), 'plate': (0.2, 0.6), 'zone': (0.05, 0.05)}   # plates: the model's box often holds only one of a motorbike's two lines
 
 
 def pixelate(im, box, kind='face'):
@@ -362,19 +430,24 @@ def apply(out, check):
         src = os.path.join(check, 'orig', rel)
         im, exif = load(src)
         W, H = im.size
-        c = counts.setdefault(folder, {'faces': 0, 'plates': 0, 'added': 0, 'photos': 0})
+        c = counts.setdefault(folder, {'faces': 0, 'plates': 0, 'zones': 0, 'added': 0, 'photos': 0})
         for kind, box, *frac in per_file.get(rel, []):
             if frac:
                 box = [box[0] * W, box[1] * H, box[2] * W, box[3] * H]
             pixelate(im, box, kind)
-            c[{'face': 'faces', 'plate': 'plates'}.get(kind, 'added')] += 1
+            c[{'face': 'faces', 'plate': 'plates', 'zone': 'zones'}.get(kind, 'added')] += 1
         im.save(os.path.join(out, rel), quality=92, exif=exif)
         c['photos'] += 1
         done.append(rel)
         files.setdefault(folder, []).append(os.path.relpath(os.path.join(out, rel), folder).replace(os.sep, '/'))
     kept = sum(1 for b in data['boxes'] if b['id'] in keep)
+    # the whole output: every photo blurred (cloud.py push checks each photo against this list)
+    json.dump({'blurred': True, 'method': METHOD, 'files': sorted(done)},
+              open(os.path.join(out, 'privacy.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     for folder, c in counts.items():
         p = os.path.join(folder, 'place.json')
+        if not os.path.isfile(p):   # _removals/ etc.: covered by privacy.json
+            continue
         m = json.load(open(p, encoding='utf-8'))
         m['privacy'] = {'blurred': True, **c, 'method': METHOD, 'files': sorted(files.get(folder, []))}
         json.dump(m, open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
@@ -382,8 +455,8 @@ def apply(out, check):
         if f.startswith('after_') and f.endswith('.jpg'):
             os.remove(os.path.join(check, f))
     after_sheets(out, check, done)
-    tot = {k: sum(c[k] for c in counts.values()) for k in ('faces', 'plates', 'added', 'photos')}
-    print(f'blurred {tot["photos"]} photos: {tot["faces"]} faces, {tot["plates"]} plates, {tot["added"]} added by hand; '
+    tot = {k: sum(c[k] for c in counts.values()) for k in ('faces', 'plates', 'zones', 'added', 'photos')}
+    print(f'blurred {tot["photos"]} photos: {tot["faces"]} faces, {tot["plates"]} plates, {tot["zones"]} vehicle plate zones, {tot["added"]} added by hand; '
           f'{kept} boxes kept as not plates. Look over {os.path.join(check, "after_00.jpg")} ... for anything missed.')
 
 

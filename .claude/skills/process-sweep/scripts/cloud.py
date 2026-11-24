@@ -213,22 +213,38 @@ def _unblurred_places(places: dict[str, tuple[dict, list[str]]]) -> list[str]:
 
 
 def unblurred(folder: str) -> list[str]:
-    """Place folders (with a place.json) whose photos blur.py has not blurred: faces and plates must not leave the PC."""
+    """Photos blur.py has not blurred (faces and plates must not leave the PC). With privacy.json (blur.py since
+    25 Nov 2026) every street photo anywhere in the output must be in its list; older outputs are checked per place
+    folder, and a photo outside the place folders (e.g. _removals/) is refused."""
+    photos = [os.path.relpath(os.path.join(r, f), folder).replace(os.sep, '/')
+              for r, _, fs in os.walk(folder) for f in fs if _is_street_photo(f)]
+    pj = os.path.join(folder, 'privacy.json')
+    if os.path.isfile(pj):
+        return _not_listed(json.load(open(pj, encoding='utf-8')), photos)
     places = {}
+    loose = [p for p in photos if '/' not in p or not os.path.isfile(os.path.join(folder, p.split('/')[0], 'place.json'))]
     for d in sorted(os.listdir(folder)):
         p = os.path.join(folder, d, 'place.json')
         if os.path.isfile(p):
-            root = os.path.join(folder, d)
-            photos = [os.path.relpath(os.path.join(r, f), root).replace(os.sep, '/')
-                      for r, _, fs in os.walk(root) for f in fs if _is_street_photo(f)]
-            places[d] = (json.load(open(p, encoding='utf-8')), photos)
-    return _unblurred_places(places)
+            places[d] = (json.load(open(p, encoding='utf-8')), [x[len(d) + 1:] for x in photos if x.startswith(d + '/')])
+    return _unblurred_places(places) + loose
+
+
+def _not_listed(privacy: dict, photos: list[str]) -> list[str]:
+    if not privacy.get('blurred'):
+        return sorted(photos)
+    return sorted(set(photos) - set(privacy.get('files') or []))
 
 
 def unblurred_zip(path: str) -> list[str]:
     """The same check on a processed-result zip (place folders at its top level or one folder down)."""
     with zipfile.ZipFile(path) as z:
         names = [n for n in z.namelist() if not n.endswith('/')]
+        pj = sorted((n for n in names if n == 'privacy.json' or n.endswith('/privacy.json')), key=len)
+        if pj:   # the output's privacy.json: every street photo in the zip must be listed
+            pre = pj[0][:-len('privacy.json')]
+            photos = [n[len(pre):] if n.startswith(pre) else n for n in names if _is_street_photo(n)]
+            return _not_listed(json.loads(z.read(pj[0]).decode('utf-8')), photos)
         dirs = {n.rsplit('/', 1)[0] for n in names if n.endswith('/place.json') or n == 'place.json'}
         places = {}
         for d in dirs:
@@ -236,7 +252,10 @@ def unblurred_zip(path: str) -> list[str]:
             m = json.loads(z.read(pre + 'place.json').decode('utf-8'))
             photos = [n[len(pre):] for n in names if n.startswith(pre) and _is_street_photo(n)]
             places[d] = (m, photos)
-    return _unblurred_places(places)
+        # a photo in no place folder (e.g. _removals/) has no record: refused
+        loose = [n for n in names if _is_street_photo(n) and 'place.json' not in dirs
+                 and not any(n.startswith(d + '/') for d in dirs)]
+    return _unblurred_places(places) + loose
 
 
 def zip_folder(folder: str) -> str:

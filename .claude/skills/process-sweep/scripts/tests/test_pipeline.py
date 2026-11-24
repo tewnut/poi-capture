@@ -708,15 +708,40 @@ class BlurTest(unittest.TestCase):
         # a photo added after the blur: push refuses the folder (and a zip of it), apply refuses to run
         os.makedirs(os.path.join(out, '01_Cafe', 'more'))
         shutil.copy(os.path.join(check, 'orig', rel), os.path.join(out, '01_Cafe', 'more', 'p2.jpg'))
-        self.assertEqual(cloud.unblurred(out), ['01_Cafe'])
+        self.assertEqual(cloud.unblurred(out), ['01_Cafe/more/p2.jpg'])   # privacy.json: the photo itself
         z = cloud.zip_folder(out)
         try:
-            self.assertEqual(cloud.unblurred_zip(z), ['01_Cafe'])
+            self.assertEqual(cloud.unblurred_zip(z), ['01_Cafe/more/p2.jpg'])
         finally:
             os.remove(z)
         with self.assertRaises(SystemExit):
             blur.apply(out, check)
         self.assertEqual(json.load(open(os.path.join(out, '01_Cafe', 'place.json')))['privacy']['files'], ['COVER_#1_p.jpg'])
+
+    def test_removal_photos_are_blurred_and_checked_too(self):
+        import blur, cloud
+        from PIL import Image
+        out, check = os.path.join(self.tmp, 'out'), os.path.join(self.tmp, 'check')
+        os.makedirs(os.path.join(out, '01_A')); os.makedirs(os.path.join(out, '_removals'))
+        json.dump({'place': {'name': 'A'}}, open(os.path.join(out, '01_A', 'place.json'), 'w'))
+        for f in ('01_A/COVER_#1_p.jpg', '_removals/REMOVED_#2_p.jpg'):
+            Image.new('RGB', (60, 40), (200, 200, 200)).save(os.path.join(out, f))
+        self.assertEqual(cloud.unblurred(out), ['01_A', '_removals/REMOVED_#2_p.jpg'])   # not blurred; a loose photo too
+        self.assertIn('_removals/REMOVED_#2_p.jpg', [r for r, _ in blur.photos_of(out)])
+        for rel, _ in blur.photos_of(out):
+            os.makedirs(os.path.dirname(os.path.join(check, 'orig', rel)), exist_ok=True)
+            shutil.copy(os.path.join(out, rel), os.path.join(check, 'orig', rel))
+        json.dump({'boxes': []}, open(os.path.join(check, 'boxes.json'), 'w'))
+        blur.apply(out, check)
+        self.assertEqual(json.load(open(os.path.join(out, 'privacy.json')))['files'], ['01_A/COVER_#1_p.jpg', '_removals/REMOVED_#2_p.jpg'])
+        self.assertEqual(cloud.unblurred(out), [])
+        z = cloud.zip_folder(out)
+        try:
+            self.assertEqual(cloud.unblurred_zip(z), [])
+        finally:
+            os.remove(z)
+        Image.new('RGB', (60, 40)).save(os.path.join(out, '_removals', 'REMOVED_#3_p.jpg'))   # added after the blur
+        self.assertEqual(cloud.unblurred(out), ['_removals/REMOVED_#3_p.jpg'])
 
     def test_push_check_on_older_results_compares_the_count(self):
         import cloud
