@@ -51,7 +51,7 @@ def load(src, work):
 
 
 def load_track(src, work):
-    """GPS fixes [(elapsedNanos, lat, lon, speed, heading)] from track.jsonl (raw session dir or unzipped export)."""
+    """GPS fixes [(elapsedNanos, lat, lon, speed, heading)] from track.jsonl (raw session dir) or track.geojson (export)."""
     for d in (src, os.path.join(work, 'raw')):
         f = os.path.join(d, 'track.jsonl') if os.path.isdir(d) else None
         if f and os.path.exists(f):
@@ -64,6 +64,18 @@ def load_track(src, work):
                 if o.get('en') is not None and o.get('lat') is not None:
                     out.append((o['en'], o['lat'], o['lon'], o.get('spd'), o.get('hdg')))
             return sorted(out)
+    # an export from the app has track.geojson instead: one Point feature per fix, with elapsedNanos
+    for d in (src, os.path.join(work, 'raw')):
+        f = os.path.join(d, 'track.geojson') if os.path.isdir(d) else None
+        if f and os.path.exists(f):
+            out = []
+            for ft in json.load(open(f, encoding='utf-8')).get('features', []):
+                g, pr = ft.get('geometry') or {}, ft.get('properties') or {}
+                if g.get('type') == 'Point' and pr.get('elapsedNanos') is not None:
+                    lon, lat = g['coordinates'][:2]
+                    out.append((pr['elapsedNanos'], lat, lon, pr.get('speedMps'), pr.get('headingDeg')))
+            if out:
+                return sorted(out)
     return []
 
 
@@ -138,6 +150,22 @@ def sheets(photos, out, per=4, width=1000):
         sheet.save(os.path.join(out, f"sheet_{s:03d}.jpg"), quality=85)
 
 
+def sign_hints(item):
+    """The phone's sign detector boxes on a photo, as hints: {code, group, label, score, x, w, h, box}. x = the box
+    centre, w / h its width / height (fractions of the upright photo's width / height; box = [x0, y0, x1, y1] as the
+    phone gave it). build.py ranges a sign from w (a standard-size sign's width in the photo gives its distance)."""
+    out = []
+    for s in item.get('signs') or []:
+        b = s.get('box')
+        ok = isinstance(b, (list, tuple)) and len(b) == 4 and all(isinstance(v, (int, float)) for v in b)
+        out.append({'code': s.get('code'), 'group': s.get('group'), 'label': s.get('label'), 'score': s.get('score'),
+                    'x': round((b[0] + b[2]) / 2, 3) if ok else None,
+                    'w': round(abs(b[2] - b[0]), 4) if ok else None,
+                    'h': round(abs(b[3] - b[1]), 4) if ok else None,
+                    'box': [round(v, 4) for v in b] if ok else None})
+    return out or None
+
+
 TARGETS = {
     'shops': 'shops: read every business (SKILL.md, step 2)',
     'addresses': 'addresses (shops + house numbers): read every business and every readable house-number plate, '
@@ -183,6 +211,12 @@ def main():
             'ocrText': (i.get('ocr') or {}).get('text'),
             # house-number rides: the numbers the phone's text reader found on this photo (a hint where to look)
             'plates': [p.get('text') for p in i.get('plates') or []] or None,
+            # signs rides (app 0.18+): what the phone's sign detector found, box centre x (0 = left) and score; a
+            # hint where to look: about half are shop letters or logos, and the code is right on about a third
+            # signs rides (app 0.19+): "sign" = an extra photo taken as a near sign reached the edge of the frame
+            # (its closest sharp view); signBoost = taken while photos came denser because a sign was in view
+            'trigger': i.get('trigger'), 'signBoost': i.get('signBoost'),
+            'signHints': sign_hints(i),
         })
     json.dump(photos, open(os.path.join(work, 'photos.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     json.dump(session, open(os.path.join(work, 'session.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)

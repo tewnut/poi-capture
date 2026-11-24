@@ -38,7 +38,12 @@ next to "places", each built like a place (folder, best photos, position from th
              "confidence": "high", "note": ""}]
 A sign was photographed by a camera looking ahead: each photo's bearing is its travel bearing ("forward"), x across
 the frame an angle off it (hFovDeg); no facade snap. facingDeg = the travel bearing at the cover photo.
-"defaultSignDistanceM" (default 15) is the single-photo distance for signs.
+"defaultSignDistanceM" (default 15) is the single-photo distance for signs without a range.
+Range: a circle / triangle / octagon sign has a standard size (QCVN 41:2019: 0.70 / 0.70 / 0.60 m at size
+coefficient 1, urban roads; "signSizeFactor" for the ride, "sizeFactor" or "sizeM" per sign; a gantry sign 1.8x), so
+its width in the photo ("w" of a sighting, else the phone detector's box in signHints) gives its distance; rays and
+ranges are solved together (locate_sign). "road" (the cross-section per stretch of photos) then snaps each sign
+across the road onto the line of its "side" (snap_sign); see SKILL.md.
 """
 import csv, html, json, math, os, re, shutil, sys, tempfile, urllib.parse
 
@@ -188,6 +193,345 @@ def locate(place, photos, default_d, gate=None):
     lat, lon = to_ll(x + default_d * math.sin(b), y + default_d * math.cos(b), lat0, lon0)
     return lat, lon, {'method': f'single-photo estimate, {default_d:.0f} m from the camera', 'uncertaintyM': round(default_d / 2),
                       'sightings': [x for x in seen if x['i'] == s['photo']]}
+
+
+# ---------- traffic signs: range from the sign's size, road layout, snap ----------
+
+# QCVN 41:2019 art. 16, table 1 (size coefficient 1, metres): circle outer diameter 0.70, triangle side 0.70,
+# octagon (R.122 stop) outer diameter 0.60. Table 2: coefficient 1 on urban roads (the default here), 1.25 on ordinary
+# roads, 1.8 on dual carriageways outside towns, and signs on a gantry / cantilever of an urban dual carriageway take
+# the dual-carriageway coefficient (1.8). Rectangles (lane boards R.4xx, indication I.xxx, plates S.xxx) have no one
+# size: no range unless places.json gives the sign's "sizeM".
+SIGN_SHAPE_WIDTH_M = {'circle': 0.70, 'triangle': 0.70, 'octagon': 0.60}
+GANTRY_SIZE_FACTOR = 1.8
+RANGE_REL_ERR = 0.12            # a sign's width read in the photo, and its real size, each a little off
+RANGE_PX_ERR = 6                # pixels of box error on top (the detector margin varies 0-14 px)
+RAY_ERR_DEG = 5                 # a forward ray: GPS travel bearing + x (the road's vanishing point sat within ~2 deg
+                                # of the centre on the first ride); sideways sweeps keep 10 (mount yaw unknown)
+LANE_WIDTH_M = {'car': 3.5, 'bus': 3.5, 'truck': 3.5, 'moto': 2.75, 'motorbike': 2.75, 'bike': 2.0}
+SIGN_SETBACK_M = 1.0            # a roadside sign's pole stands this far outside the kerb
+MEDIAN_WIDTH_M = 1.0            # a median sign stands in the middle of the median
+MAX_SNAP_M = 6.0                # a lateral move larger than this is flagged, not made
+# the phone detector's boxes are wider than the sign by ~12 px of a 3264 px photo (~2 px of its 640 px input),
+# measured on the first signs ride (Dong Van Cong, 24 Nov 2026): 6-14 px on 6 signs; with it taken off, the widths
+# of 21 signs on two photos and the GPS distance between them give a median real width of 0.71 m (0.83 without)
+BOX_PAD = 0.0035                # of the photo width; places.json "signBoxPad" overrides
+
+
+def sign_shape(code):
+    """circle | triangle | octagon | None (rectangle or unknown) from a QCVN 41 code."""
+    c = (code or '').strip().upper()
+    m = re.match(r'(DP|P|W|R|I|S)\.?(\d+)', c)
+    if not m:
+        return None
+    letter, num = m.group(1), int(m.group(2))
+    if letter in ('P', 'DP'):
+        return 'circle'
+    if letter == 'W':
+        return 'triangle' if num < 245 else None   # W.245+ are rectangles (go slow, chevrons, ...)
+    if letter == 'R':
+        return 'octagon' if num == 122 else 'circle' if num < 400 else None
+    return None
+
+
+def sign_width_m(sign, spec=None):
+    """The sign's real width in metres: its "sizeM" in places.json, else its shape's QCVN size times the size
+    coefficient ("sizeFactor" of the sign, else 1.8 on a gantry, else the ride's "signSizeFactor", default 1)."""
+    if sign.get('sizeM'):
+        return float(sign['sizeM'])
+    base = SIGN_SHAPE_WIDTH_M.get(sign_shape(sign.get('code')))
+    if base is None:
+        return None
+    k = sign.get('sizeFactor') or (GANTRY_SIZE_FACTOR if sign.get('side') == 'over' else None) \
+        or (spec or {}).get('signSizeFactor') or 1.0
+    return base * float(k)
+
+
+def upright_aspect(photo):
+    """Height / width of the upright photo."""
+    w, h = photo.get('width') or 0, photo.get('height') or 0
+    if not w or not h:
+        return 9 / 16
+    if photo.get('orientation') == 'portrait' and w > h or photo.get('orientation') == 'landscape' and h > w:
+        w, h = h, w
+    return h / w
+
+
+def sighting_width(s, photo, sign, pad=BOX_PAD):
+    """(w, source): the sign's width in the photo as a fraction of the photo width. The sighting's own "w" (or "h",
+    its height as a fraction of the photo height, when the sign is cut at the side) as measured by the reader, else
+    the phone detector's box at that x (signHints; the same code preferred; of a sign's shape; less `pad`, the
+    detector's margin). None without either."""
+    shape = sign_shape(sign.get('code'))
+    if s.get('w'):
+        return float(s['w']), 'read'
+    if s.get('h'):
+        hw = float(s['h']) * upright_aspect(photo)        # in photo widths
+        return (hw / (math.sqrt(3) / 2) if shape == 'triangle' else hw), 'read (height)'
+    best = None
+    for hnt in photo.get('signHints') or []:
+        if hnt.get('w') is None or hnt.get('x') is None:
+            continue
+        if hnt.get('h'):   # a box of another shape (a lane board, two signs on one pole) gives no range
+            ratio = hnt['w'] / (hnt['h'] * upright_aspect(photo))
+            if not (0.75 <= ratio <= 1.45 if shape else True):
+                continue
+        dx = abs(hnt['x'] - s['x'])
+        if dx > max(0.02, 0.6 * hnt['w']):
+            continue
+        key = (0 if (hnt.get('code') or '') == (sign.get('code') or '') else 1, dx)
+        if best is None or key < best[0]:
+            best = (key, hnt)
+    return (max(0.5 * best[1]['w'], best[1]['w'] - pad), 'phone box') if best else None
+
+
+def sign_depth(width_m, w, photo):
+    """Distance along the camera axis to a sign of real width width_m seen w (fraction of the photo) wide. A sign
+    facing the camera is parallel to the image plane, so its width shows unforeshortened at f * W / Z."""
+    hf = photo.get('hFovDeg') or 69.1
+    return width_m / (2 * math.tan(math.radians(hf / 2)) * w)
+
+
+def locate_sign(sign, photos, default_d, gate=(3, 80), spec=None):
+    """(lat, lon, how) for a traffic sign from a forward camera. Each sighting gives a ray (bearing from x) and, when
+    the sign's width in the photo is known (sighting_width) and its real size too (sign_width_m), a range: the
+    distance along the travel direction. Rays and ranges are solved together by weighted least squares (a range
+    pins the along-road position the nearly parallel rays leave loose); one photo with a range is a full fix.
+    Without any range: locate() (rays, else the single-photo default distance)."""
+    lo, hi = gate
+    width_m = sign_width_m(sign, spec)
+    sights = [s for s in sign.get('sightings') or [] if photos[s['photo']].get('lat') is not None]
+    if not sights or width_m is None:
+        return locate(sign, photos, default_d, gate)
+    lat0, lon0 = photos[sights[0]['photo']]['lat'], photos[sights[0]['photo']]['lon']
+    obs, seen = [], []
+    for s in sights:
+        p = photos[s['photo']]
+        c = to_xy(p['lat'], p['lon'], lat0, lon0)
+        b = math.radians(bearing_of(p, s['x']))
+        u = (math.sin(b), math.cos(b))
+        ax = math.radians(p['cameraBearing'])
+        t = (math.sin(ax), math.cos(ax))
+        wd = sighting_width(s, p, sign, float((spec or {}).get('signBoxPad', BOX_PAD)))
+        z = sign_depth(width_m, wd[0], p) if wd and wd[0] > 0 else None
+        if z is not None and not 2 <= z <= 150:
+            z = None                                    # a box around something else
+        wpx = (wd[0] * max(p.get('width') or 0, p.get('height') or 0, 1) *
+               (1 if upright_aspect(p) <= 1 else 1 / upright_aspect(p))) if z is not None else 0
+        obs.append((c, u, t, z, p, wpx))
+        seen.append({'i': s['photo'], 'lat': p['lat'], 'lon': p['lon'], 'bearing': round(math.degrees(b) % 360, 1),
+                     **({'rangeM': round(z, 1), 'w': round(wd[0], 4), 'wFrom': wd[1]} if z is not None else {})})
+    # each range puts the sign at camera + z along the axis; with 3+ ranges one far from the others' median
+    # (more than 30 %, at least 5 m) was a box around something else
+    alongs = [(i, o[2][0] * o[0][0] + o[2][1] * o[0][1] + o[3]) for i, o in enumerate(obs) if o[3] is not None]
+    if len(alongs) >= 3:
+        med = sorted(a for _i, a in alongs)[len(alongs) // 2]
+        for i, a in alongs:
+            if abs(a - med) > max(5.0, 0.3 * obs[i][3]):
+                obs[i] = obs[i][:3] + (None,) + obs[i][4:5] + (0,)
+                for k in ('rangeM', 'w', 'wFrom'):
+                    seen[i].pop(k, None)
+                seen[i]['rangeDropped'] = True
+    nr = sum(1 for o in obs if o[3] is not None)
+    if not nr:
+        return locate(sign, photos, default_d, gate)
+    sol = None
+    for _round in range(3):
+        a11 = a12 = a22 = b1 = b2 = 0.0
+
+        def add(a, rhs, var):
+            nonlocal a11, a12, a22, b1, b2
+            w = 1.0 / var
+            a11 += w * a[0] * a[0]; a12 += w * a[0] * a[1]; a22 += w * a[1] * a[1]
+            b1 += w * a[0] * rhs; b2 += w * a[1] * rhs
+        for (px, py), (ux, uy), (tx, ty), z, p, wpx in obs:
+            acc2 = (p.get('accuracyM') or 5) ** 2
+            d = (z if z is not None else default_d) if sol is None else max(5.0, math.hypot(sol[0] - px, sol[1] - py))
+            n = (uy, -ux)                               # across the ray: n . P = n . c
+            add(n, n[0] * px + n[1] * py, (d * math.radians(RAY_ERR_DEG)) ** 2 + acc2)
+            if z is not None:                           # along the camera axis: t . P = t . c + z
+                rel = math.hypot(RANGE_REL_ERR, RANGE_PX_ERR / max(1.0, wpx))
+                add((tx, ty), tx * px + ty * py + z, (z * rel) ** 2 + acc2)
+        det = a11 * a22 - a12 * a12
+        if abs(det) < 1e-12:
+            return locate(sign, photos, default_d, gate)
+        sol = ((a22 * b1 - a12 * b2) / det, (a11 * b2 - a12 * b1) / det)
+    dist = [math.hypot(sol[0] - px, sol[1] - py) for (px, py), *_r in obs]
+    in_front = all((sol[0] - px) * tx + (sol[1] - py) * ty > 0 for (px, py), _u, (tx, ty), *_r in obs)
+    if not (in_front and lo <= min(dist) and max(dist) <= hi):
+        return locate(sign, photos, default_d, gate)
+    lat, lon = to_ll(sol[0], sol[1], lat0, lon0)
+    tr = a11 + a22
+    big = (tr + math.sqrt(max(tr * tr - 4 * det, 0))) / 2 / det
+    rays = f', {len(obs)} rays' if len(obs) > 1 else ''
+    return lat, lon, {'method': f'ranged from the sign size ({width_m:.2f} m) on {nr} photo{"s" if nr > 1 else ""}{rays}',
+                      'uncertaintyM': round(2 * math.sqrt(big), 1), 'sightings': seen}
+
+
+def _lane_widths(lanes):
+    """"lanes": a count (car lanes) or a list of kinds / widths in metres, from the right kerb leftwards."""
+    if lanes is None:
+        return []
+    if isinstance(lanes, (int, float)):
+        return [LANE_WIDTH_M['car']] * int(lanes)
+    return [float(x) if isinstance(x, (int, float)) else LANE_WIDTH_M.get(str(x).lower(), LANE_WIDTH_M['car'])
+            for x in lanes]
+
+
+def road_at(spec, i):
+    """The stretch of places.json "road" that covers photo i, else None."""
+    for seg in (spec or {}).get('road') or []:
+        if seg.get('fromPhoto', 0) <= i <= seg.get('toPhoto', 10 ** 9):
+            return seg
+    return None
+
+
+def layout_lines(seg):
+    """Lateral offsets (metres from the rider's track, + = right of travel) where the signs of one stretch stand:
+    {'right', 'left', 'leftIs', 'lanes': [centre of lane 1 (rightmost), 2, ...], 'centre'}.
+
+    seg (places.json "road" entry): "lanes" (count or kinds / widths from the right kerb: "moto" 2.75, "car" 3.5),
+    "riderLane" (1 = rightmost, default 1), "divider" (true: a median on the left), "medianWidthM" (default 1),
+    "oppositeLanes" (no divider: the other direction's lanes, default as many as "lanes"), "signSetbackM" (pole
+    outside the kerb, default 1). Measured offsets win: "rightKerbOffsetM", "medianOffsetM" (to the median's kerb),
+    "leftKerbOffsetM" (no divider: to the far kerb), all positive metres from the rider."""
+    widths = _lane_widths(seg.get('lanes'))
+    edges = [0.0]                                    # lane edges, metres from the right kerb
+    for w in widths:
+        edges.append(edges[-1] + w)
+    r = int(seg.get('riderLane') or 1)
+    rider = (edges[r - 1] + edges[r]) / 2 if 0 < r <= len(widths) else edges[-1] / 2
+    # the rider's distance to the right kerb: measured, else from the lanes
+    kerb = float(seg['rightKerbOffsetM']) if seg.get('rightKerbOffsetM') is not None else rider
+    setback = float(seg.get('signSetbackM', SIGN_SETBACK_M))
+    our_left = edges[-1] - kerb if widths else None  # rider -> left edge of the rider's direction
+    out = {'right': kerb + setback, 'lanes': [round(kerb - (a + b) / 2, 2) for a, b in zip(edges, edges[1:])]}
+    if seg.get('divider'):
+        far = float(seg['medianOffsetM']) if seg.get('medianOffsetM') is not None else our_left
+        if far is not None:
+            out['left'], out['leftIs'] = -(far + float(seg.get('medianWidthM', MEDIAN_WIDTH_M)) / 2), 'median'
+    else:
+        if seg.get('leftKerbOffsetM') is not None:
+            far = float(seg['leftKerbOffsetM'])
+        elif our_left is not None:
+            opp = seg.get('oppositeLanes')
+            far = our_left + sum(_lane_widths(opp if opp is not None else seg.get('lanes')))
+        else:
+            far = None
+        if far is not None:
+            out['left'], out['leftIs'] = -(far + setback), 'left kerb'
+    left_edge = (far if seg.get('divider') else our_left) if our_left is not None or seg.get('divider') else None
+    if left_edge is not None:
+        out['centre'] = round((kerb - left_edge) / 2, 2)  # middle of the rider's carriageway
+    return out
+
+
+def lane_offset(centres, lane):
+    """Lateral offset of lane `lane` (1 = rightmost; 2.5 = the line between lanes 2 and 3) from its centres."""
+    if lane is None or not centres or not 1 <= float(lane) <= len(centres):
+        return None
+    k = float(lane)
+    a = int(math.floor(k))
+    if a == k or a >= len(centres):
+        return centres[a - 1]
+    return centres[a - 1] + (centres[a] - centres[a - 1]) * (k - a)
+
+
+def ride_frame(lat, lon, photos):
+    """(photo, along, across): the ride photo nearest (lat, lon) with a travel bearing, and the point's position in
+    its frame (metres along travel and across, + = right)."""
+    near = [p for p in photos if p.get('lat') is not None and p.get('travelBearing') is not None]
+    if not near:
+        return None, 0.0, 0.0
+    c = min(near, key=lambda p: math.hypot(*to_xy(lat, lon, p['lat'], p['lon'])))
+    x, y = to_xy(lat, lon, c['lat'], c['lon'])
+    tb = math.radians(c['travelBearing'])
+    tx, ty = math.sin(tb), math.cos(tb)
+    return c, x * tx + y * ty, x * ty - y * tx
+
+
+def rays_on_line(sign, photos, c, target, line_err=1.0, bearing_err_deg=3.0):
+    """(along, uncertaintyM, n): where the sign's sighting rays cross the line `target` metres across (+ = right)
+    in the frame of ride photo c, combined by inverse variance; a ray within 8 deg of the line (it meets it far
+    and badly) or crossing it behind the camera or beyond 80 m does not count. None when none counts. Error per ray:
+    the line's place (line_err m) and the bearing (bearing_err_deg at the crossing) turned into along-road metres."""
+    tb = math.radians(c['travelBearing'])
+    tx, ty = math.sin(tb), math.cos(tb)
+    num = den = 0.0
+    n = 0
+    for s in sign.get('sightings') or []:
+        p = photos[s['photo']]
+        if p.get('lat') is None or p.get('cameraBearing') is None:
+            continue
+        x, y = to_xy(p['lat'], p['lon'], c['lat'], c['lon'])
+        pa, pc = x * tx + y * ty, x * ty - y * tx
+        b = math.radians(bearing_of(p, s['x']))
+        ua, uc = math.sin(b) * tx + math.cos(b) * ty, math.sin(b) * ty - math.cos(b) * tx
+        if abs(uc) < math.sin(math.radians(8)):
+            continue
+        t = (target - pc) / uc
+        if not 3 <= t <= 80:
+            continue
+        sd = math.hypot(line_err, t * math.radians(bearing_err_deg)) * abs(ua / uc)
+        num += (pa + t * ua) / sd ** 2
+        den += 1 / sd ** 2
+        n += 1
+    return (num / den, 2 / math.sqrt(den), n) if n else None
+
+
+def snap_sign(sign, lat, lon, how, photos, spec):
+    """Move a located sign across the road (its along-road position kept) onto the line its "side" puts it on, from
+    the road layout (places.json "road"): right -> right kerb, left -> median (divider) else left kerb, over -> the
+    centre of its "lane" (1 = rightmost; none given: the middle of the carriageway). (lat, lon, how) with the
+    estimate before the snap kept in how['unsnapped'] and what was done in how['snap'] and the method; a move larger
+    than "maxSnapM" (default 6 m) is not made but flagged. A sign without a range (a rectangle, no width read) also
+    gets its along-road position from where its rays cross that line (rays_on_line), when that is surer."""
+    side = sign.get('side')
+    if not (spec or {}).get('road') or side not in ('left', 'right', 'over') or sign.get('snap') is False:
+        return lat, lon, how
+    c, along, across = ride_frame(lat, lon, photos)
+    if c is None:
+        return lat, lon, how
+    seg = road_at(spec, c['idx'] if c.get('idx') is not None else sign.get('cover', 0))
+    if seg is None:
+        return lat, lon, how
+    lines = layout_lines(seg)
+    if side == 'over':
+        target, what = lane_offset(lines['lanes'], sign.get('lane')), f"over lane {sign.get('lane')}"
+        if target is None:
+            target, what = lines.get('centre'), 'over the middle of the carriageway'
+    elif side == 'right':
+        target, what = lines['right'], 'the right kerb line'
+    else:
+        target, what = lines.get('left'), f"the {lines.get('leftIs', 'left')} line"
+    if target is None:
+        return lat, lon, how
+    move = target - across
+    how = dict(how)
+    how['unsnapped'] = {'lat': round(lat, 6), 'lon': round(lon, 6), 'acrossM': round(across, 1),
+                        'method': how.get('method')}
+    limit = float(spec.get('maxSnapM') or MAX_SNAP_M)
+    rng = f"road layout photos {seg.get('fromPhoto', 0)}-{seg.get('toPhoto', '')}"
+    if abs(move) > limit:
+        how['snap'] = {'done': False, 'side': side, 'lineM': round(target, 1), 'moveM': round(move, 1),
+                       'why': f'{abs(move):.1f} m from {what} (> {limit:g} m): check the side or the position'}
+        how['method'] += f'; NOT snapped: {abs(move):.1f} m from {what}, check'
+        return lat, lon, how
+    tb = math.radians(c['travelBearing'])
+    tx, ty = math.sin(tb), math.cos(tb)
+    nx, ny = ty, -tx
+    how['snap'] = {'done': True, 'side': side, 'lineM': round(target, 1), 'moveM': round(move, 1), 'road': rng}
+    how['method'] += f"; snapped {abs(move):.1f} m {'right' if move > 0 else 'left'} onto {what} ({rng})"
+    if not str(how.get('unsnapped', {}).get('method', '')).startswith('ranged'):
+        # no range: the along-road position from where the sightings' rays cross the line (when that beats it)
+        cross = rays_on_line(sign, photos, c, target)
+        if cross and cross[1] < (how.get('uncertaintyM') or 1e9):
+            how['snap']['alongMovedM'] = round(cross[0] - along, 1)
+            along = cross[0]
+            how['uncertaintyM'] = round(cross[1], 1)
+            how['method'] += f'; along the road where {cross[2]} ray{"s cross" if cross[2] > 1 else " crosses"} that line'
+    la, lo = to_ll(along * tx + target * nx, along * ty + target * ny, c['lat'], c['lon'])
+    return la, lo, how
 
 
 def facade_snap(lat, lon, photos, d):
@@ -408,7 +752,8 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
         a, b = pl['photos']
         layer = pl['layer']
         if layer == 'sign':   # seen ahead, along the road: anywhere from a few metres to a block away
-            lat, lon, how = locate(pl, fwd, sign_d, gate=(3, 80))
+            lat, lon, how = locate_sign(pl, fwd, sign_d, gate=(3, 80), spec=spec)
+            lat, lon, how = snap_sign(pl, lat, lon, how, fwd, spec)
         else:
             lat, lon, how = locate(pl, photos, default_d)
         prefix = {'address': 'addr_', 'sign': 'sign_'}.get(layer, '')

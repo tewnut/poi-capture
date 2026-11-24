@@ -83,6 +83,11 @@ pavement, 20–35 m behind a service road or garden. Write `<work>/places.json`:
 On a house-number ride the phone reads each photo for numbers (ML Kit): `plates` in photos.json lists what it found
 ("106", "45/2A"). Use it to find the plates, not as the answer: it misses small or angled plates and may read a
 price or a date as a number; read every number yourself on the full-size photo.
+On a traffic-signs ride (app 0.18+) the phone runs a sign detector on each photo (ml/signs): `signHints` in photos.json
+lists `{code, group, label, score, x, w, h, box}` (x = box centre, w / h = its width / height as fractions of the
+photo's; build.py ranges a sign from w). Start with those photos, but read every sign yourself: about half the boxes are shop
+letters, logos or flags, the code is right on only about a third of the real signs, and it has no class for the blue
+pedestrian crossing (I.423), keep left, give way or most information signs. It also misses signs cut by the frame.
 
 It sets the least to read, not the most: a shops ride whose photos show plates may still get `"addresses"`.
 
@@ -103,20 +108,51 @@ It sets the least to read, not the most: a shops ride whose photos show plates m
   approaches (it slides outwards and grows), `confidence`, `note`. `x` is measured from the forward view: the script
   turns it into an angle off the travel bearing. A supplementary plate is the `extra` of its sign, not a sign of its
   own. Shops are not required on a signs ride (the camera did not look at them).
+  - **Range** (how far ahead): a circle, triangle or octagon sign has a standard size, so its width in the photo gives
+    its distance. build.py takes it from the phone's box at the sighting's x; give `w` on a sighting yourself (the
+    sign's width / the photo's width, measured on the full-size photo: crop it) when there is no box there, the box
+    is wrong (two signs in one box, a lane board, a sign cut by the frame) or it gave a position that does not fit
+    the photos; `h` (its height / the photo's height) instead when the sign is cut at the side. One sighting with a
+    width is enough; give it on the nearest sharp photo. Sizes (QCVN 41:2019, coefficient 1, urban roads): circle
+    0.70 m, triangle 0.70 m (side), octagon 0.60 m; a gantry sign 1.8x. `"signSizeFactor"` for the ride (1.25 on an
+    ordinary road outside towns), `sizeFactor` or `sizeM` (its real width in metres) per sign; a rectangle (lane
+    board R.4xx, indication I.xxx) has no standard size: no range unless `sizeM` is given.
+  - `lane` (gantry signs): the lane it hangs over, 1 = the rightmost of the rider's direction; 2.5 = over the line
+    between lanes 2 and 3.
+  - **`"road"`** (ride level): the cross-section, per stretch of photos, from looking at the road: count the lanes of
+    the rider's direction, which one the rider is in, whether a median divides the road. build.py moves each sign
+    across the road onto the line of its `side` (right kerb; median, or the far kerb without one; the centre of its
+    `lane`), keeping its along-road position, and keeps the estimate before that in `position.unsnapped`. A move over
+    `"maxSnapM"` (default 6 m) is not made but flagged in the method ("NOT snapped ... check": wrong side, or a sign
+    on a cross street). A sign without a range (a lane board) also gets its along-road position from where its
+    rays cross that line. Leave junctions, turns and side roads out of the stretches (no snap there).
+    `lanes`: a count (3.5 m car lanes) or a list from the right kerb of kinds (`"car"` 3.5, `"moto"` 2.75) or widths in
+    metres; `riderLane` (1 = rightmost, default 1); `divider` (true: a median on the left); `medianWidthM` (default
+    1; median signs stand in its middle); `oppositeLanes` (no divider: the other direction's lanes, default as many);
+    `signSetbackM` (a roadside pole outside the kerb, default 1). Measured distances from the rider's track win over
+    the lanes: `rightKerbOffsetM`, `medianOffsetM` (to the median's kerb), `leftKerbOffsetM`. Measure them on a
+    photo when you can (where the edge line, a lane line and the median meet the bottom rows: depth = camera
+    height x focal / rows below the horizon, the camera ~1.3 m up on a motorbike) and say how in `note`.
 
 ```json
 "addresses": [{"houseNumber": "106", "street": "Nguyễn Thanh Sơn", "unit": "", "photos": [33, 36], "cover": 34,
                "sightings": [{"photo": 34, "x": 0.41}, {"photo": 36, "x": 0.12}], "confidence": "high",
                "placeRef": "Bún Bò Huế Hương Cố Đô", "note": ""}],
 "signs": [{"code": "P.131a", "label": "Cấm đỗ xe", "group": "prohibitory", "extra": "6h-9h", "photos": [120, 123],
-           "cover": 122, "sightings": [{"photo": 120, "x": 0.66}, {"photo": 122, "x": 0.82}], "side": "right",
-           "confidence": "high", "note": ""}]
+           "cover": 122, "sightings": [{"photo": 120, "x": 0.66}, {"photo": 122, "x": 0.82, "w": 0.045}], "side": "right",
+           "confidence": "high", "note": ""},
+          {"code": "R.412", "label": "Làn đường dành riêng cho xe ô tô", "photos": [227, 233], "cover": 233,
+           "sightings": [{"photo": 233, "x": 0.07}], "side": "over", "lane": 4, "confidence": "high", "note": ""}],
+"road": [{"fromPhoto": 4, "toPhoto": 140, "lanes": [3.2, 3.2], "riderLane": 1, "divider": true,
+          "rightKerbOffsetM": 2.2, "medianOffsetM": 4.4, "note": "measured on #11: edge line 2.0 m right, barrier 4.4 m left"},
+         {"fromPhoto": 222, "toPhoto": 244, "lanes": ["moto", "car", "car", "car"], "riderLane": 1, "divider": true}]
 ```
 
 build.py makes a folder for each (`NN_addr_…`, `NN_sign_…`, numbered after the places) with its best photos, and
 result.json entries with `layer` `address` / `sign` (a sign: `sign {code, group, facingDeg, side}`, facing = the
-travel bearing at the cover; a sign with one sighting is put `"defaultSignDistanceM"` (default 15) ahead along it,
-so give two or three). The Google and website lookups skip them, and they get no visit tasks.
+travel bearing at the cover; its position from the ranges and rays together, then snapped onto the road layout; a
+sign with neither a range nor two rays is put `"defaultSignDistanceM"` (default 15) ahead along its ray, so give two
+or three sightings and a width). The Google and website lookups skip them, and they get no visit tasks.
 
 ## 3. Build the place folders
 
@@ -167,6 +203,8 @@ Check the results before reporting them:
 - a match for a `low` confidence place (name partly read) is a guess, possibly a good one ("CAF… ANH" → "CAT ANH TEA
   COFFEE" 57 m away): say it needs a look at the photo;
 - `distanceM` over ~100 m: maybe another branch or another unit of the same building;
+- a match that is plainly another shop (a generic sign such as "Sửa Đồng Hồ" matched a neighbour with another house
+  number): set `"notThisPlace": true` and `"note"` on the place.json's `googleMaps`, then `python <skill>/scripts/result.py <out>`;
 - `not found nearby`: look at `candidates` (a branch 900 m away is not this one). Places Google does not have nearby
   are the most valuable finds: list them.
 - Google often lists only today's opening hours (`openingHours` one line, `hoursSummary` "closes at …").
@@ -194,6 +232,32 @@ python <skill>/scripts/enrich.py <out> --from <work>/manual.json
 Both rewrite `index.html`, `places.csv` and `README.txt` with the results. A result whose `distanceM` is over ~100 m
 or `nameMatch` under ~0.5 is probably another branch or another shop: say so.
 
+## 4b. Privacy: blur faces and number plates
+
+Before the folder leaves the PC (cloud push, a zip for the web app, a publish), blur the people and vehicle plates in
+its photos. Needs `opencv-python` (`pip install --user opencv-python`); the three models (OpenCV model zoo, MIT /
+Apache 2.0) download once to `~/.cache/poi-capture/models`. `<check>` is a private folder **outside** `<out>` (it
+keeps the unblurred originals and crops), e.g. `<work>/blurcheck`:
+
+```
+python <skill>/scripts/blur.py detect <out> <check>
+```
+
+Faces (YuNet) and plates on a detected vehicle with a high score are blurred without asking. The rest worth a look go
+on crop sheets `<check>/plates_NN.jpg` (box outlined in red, labelled `bNNNN`): **look at every sheet** and write in
+`<check>/decisions.json` `"keep"` the ids that are not plates (a shop sign, a house number, a phone number, a facade).
+Everything else is blurred: when unsure, blur. Then:
+
+```
+python <skill>/scripts/blur.py apply <out> <check>
+```
+
+It pixelates from the originals (so it can be run again), writes `privacy` into each place.json and
+`<check>/after_NN.jpg` (the blurred photos, 3 x 3): look them over for a face or readable plate it missed and add
+it to `"add"` (`{"file", "box": [x0, y0, x1, y1] as fractions of the photo, "why"}`), then apply again. Plates
+washed out by the sun or too far to read need nothing. After a rebuild (step 3) run detect again. `cloud.py push`
+refuses a place folder that was not blurred. Website images (`WEB_*`) are public already and not touched.
+
 ## 5. Report
 
 Open the folder (`explorer.exe <out>` on Windows) and tell the user: number of places, how many `low` confidence and
@@ -209,7 +273,7 @@ admin page; the shared token is gone) set in the environment (never pass or prin
 ```
 python <skill>/scripts/cloud.py list                         # raw sessions from phones (type raw-session)
 python <skill>/scripts/cloud.py pull <id> <work>             # the session zip, for step 1; marks it "being processed by you"
-python <skill>/scripts/cloud.py push <out folder | zip>      # after step 5: the processed result (result.json + photos)
+python <skill>/scripts/cloud.py push <out folder | zip>      # after steps 4b and 5 (refuses unblurred photos): the processed result (result.json + photos)
 python <skill>/scripts/cloud.py processing                   # who is processing which ride
 python <skill>/scripts/cloud.py release <session id>         # giving up without a result (frees it for another agent)
 ```

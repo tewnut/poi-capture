@@ -432,5 +432,269 @@ class Targets(unittest.TestCase):
         self.assertEqual(self.run_build()['session']['target'], 'shops')
 
 
+class SignPositions(unittest.TestCase):
+    """Traffic signs (docs/sweep-targets.md section 4): the phone's boxes in signHints, a range from the sign's
+    standard size, the road layout and the snap across the road onto it."""
+
+    HF = 69.1
+    LAT0, LON0 = 10.78, 106.77
+
+    def ride(self, n=8, step=5.5):
+        """Riding north from (LAT0, LON0), a forward photo every `step` m."""
+        out = []
+        for i in range(n):
+            lat, lon = build.to_ll(0, i * step, self.LAT0, self.LON0)
+            out.append({'idx': i, 'lat': lat, 'lon': lon, 'accuracyM': 3, 'cameraBearing': 0, 'travelBearing': 0,
+                        'cameraBearingSource': 'forward', 'hFovDeg': self.HF, 'width': 3264, 'height': 1840,
+                        'orientation': 'landscape'})
+        return out
+
+    def seen(self, photos, i, east, north, width_m=0.70):
+        """(x, w) of a sign at (east, north) metres, `width_m` wide, facing the rider, in photo i."""
+        x0, y0 = build.to_xy(photos[i]['lat'], photos[i]['lon'], self.LAT0, self.LON0)
+        z, lat = north - y0, east - x0
+        f = 0.5 / build.math.tan(build.math.radians(self.HF / 2))
+        return 0.5 + f * lat / z, width_m * f / z
+
+    def err(self, lat, lon, east, north):
+        return build.math.hypot(*build.to_xy(lat, lon, *build.to_ll(east, north, self.LAT0, self.LON0)))
+
+    # --- prepare.py: the detector's box travels to photos.json ---
+
+    def test_sign_hints_keep_the_box(self):
+        item = {'signs': [{'code': 'P.130', 'group': 'prohibitory', 'label': 'Cấm dừng và đỗ xe', 'score': 0.92,
+                           'box': [0.142, 0.305, 0.19, 0.395]},
+                          {'code': 'P.102', 'label': 'x', 'score': 0.4}]}
+        h = prepare.sign_hints(item)
+        self.assertEqual(h[0], {'code': 'P.130', 'group': 'prohibitory', 'label': 'Cấm dừng và đỗ xe', 'score': 0.92,
+                                'x': 0.166, 'w': 0.048, 'h': 0.09, 'box': [0.142, 0.305, 0.19, 0.395]})
+        self.assertEqual((h[1]['x'], h[1]['w'], h[1]['box']), (None, None, None))   # no box: no position
+        self.assertIsNone(prepare.sign_hints({}))
+        self.assertIsNone(prepare.sign_hints({'signs': [{'box': [0.1, 'a', 0.2, 0.3]}]})[0]['w'])
+
+    # --- sizes ---
+
+    def test_standard_sizes(self):
+        self.assertEqual(build.sign_shape('P.130'), 'circle')
+        self.assertEqual(build.sign_shape('DP.135'), 'circle')
+        self.assertEqual(build.sign_shape('W.207b'), 'triangle')
+        self.assertEqual(build.sign_shape('R.122'), 'octagon')
+        self.assertEqual(build.sign_shape('R.302a'), 'circle')
+        for rect in ('R.412', 'R.415a', 'I.423b', 'S.508', 'W.245a', '', None):
+            self.assertIsNone(build.sign_shape(rect), rect)
+        self.assertAlmostEqual(build.sign_width_m({'code': 'P.127'}), 0.70)
+        self.assertAlmostEqual(build.sign_width_m({'code': 'R.122'}), 0.60)
+        self.assertAlmostEqual(build.sign_width_m({'code': 'P.127', 'side': 'over'}), 0.70 * 1.8)   # on a gantry
+        self.assertAlmostEqual(build.sign_width_m({'code': 'P.127'}, {'signSizeFactor': 1.25}), 0.875)
+        self.assertAlmostEqual(build.sign_width_m({'code': 'P.127', 'sizeFactor': 1.25, 'side': 'over'}), 0.875)
+        self.assertAlmostEqual(build.sign_width_m({'code': 'R.412', 'sizeM': 1.2}), 1.2)
+        self.assertIsNone(build.sign_width_m({'code': 'R.412'}))
+
+    def test_depth_from_width(self):
+        p = self.ride(1)[0]
+        _x, w = self.seen([p], 0, 3, 20)
+        self.assertAlmostEqual(build.sign_depth(0.70, w, p), 20, places=6)
+
+    # --- ranging ---
+
+    def test_one_photo_with_a_width_is_a_fix(self):
+        photos = self.ride()
+        x, w = self.seen(photos, 2, -5, 30)
+        sign = {'code': 'P.130', 'cover': 2, 'sightings': [{'photo': 2, 'x': x, 'w': w}]}
+        lat, lon, how = build.locate_sign(sign, photos, 15)
+        self.assertLess(self.err(lat, lon, -5, 30), 0.1)
+        self.assertTrue(how['method'].startswith('ranged from the sign size (0.70 m) on 1 photo'))
+        self.assertEqual((how['sightings'][0]['rangeM'], how['sightings'][0]['wFrom']), (19.0, 'read'))
+        # without a width: as before, the default distance ahead along the ray
+        del sign['sightings'][0]['w']
+        _la, _lo, how = build.locate_sign(sign, photos, 15)
+        self.assertTrue(how['method'].startswith('single-photo estimate'))
+        # a rectangle has no standard size: no range unless sizeM is given
+        sign = {'code': 'R.412', 'cover': 2, 'sightings': [{'photo': 2, 'x': x, 'w': w}]}
+        self.assertTrue(build.locate_sign(sign, photos, 15)[2]['method'].startswith('single-photo'))
+        sign['sizeM'] = 0.70
+        self.assertLess(self.err(*build.locate_sign(sign, photos, 15)[:2], -5, 30), 0.1)
+
+    def test_height_when_cut_at_the_side(self):
+        photos = self.ride()
+        _x, w = self.seen(photos, 0, 3, 25)
+        h = w / build.upright_aspect(photos[0])                 # a circle: as high as wide
+        self.assertAlmostEqual(build.sighting_width({'x': 0.99, 'h': h}, photos[0], {'code': 'P.127'})[0], w)
+        th = h * (3 ** 0.5 / 2)                                  # a triangle is 0.87 of its side high
+        self.assertAlmostEqual(build.sighting_width({'x': 0.99, 'h': th}, photos[0], {'code': 'W.207b'})[0], w)
+
+    def test_phone_boxes_range_a_sign_and_others_are_ignored(self):
+        photos = self.ride()
+        sights = []
+        for i in (0, 3, 5):
+            x, w = self.seen(photos, i, 3.5, 45)
+            wb, hb = w + build.BOX_PAD, (w + build.BOX_PAD) / build.upright_aspect(photos[i])
+            photos[i]['signHints'] = [
+                {'code': 'P.127', 'x': round(x, 4), 'w': wb, 'h': hb},
+                {'code': 'R.415a', 'x': round(x + 0.01, 4), 'w': 4 * wb, 'h': hb}]   # a lane board beside it
+            sights.append({'photo': i, 'x': x})
+        sign = {'code': 'P.127', 'cover': 5, 'sightings': sights}
+        lat, lon, how = build.locate_sign(sign, photos, 15)
+        self.assertLess(self.err(lat, lon, 3.5, 45), 0.5)
+        self.assertEqual([s.get('wFrom') for s in how['sightings']], ['phone box'] * 3)
+        # a box around something else on one photo (twice as wide): dropped, the other two still place it
+        photos[3]['signHints'][0]['w'] *= 2
+        photos[3]['signHints'][0]['h'] *= 2
+        lat, lon, how = build.locate_sign(sign, photos, 15)
+        self.assertTrue(how['sightings'][1].get('rangeDropped'))
+        self.assertLess(self.err(lat, lon, 3.5, 45), 1.0)
+        # the lane board alone (wrong shape for a circle) gives no range
+        for i in (0, 3, 5):
+            photos[i]['signHints'] = photos[i]['signHints'][1:]
+        self.assertFalse(build.locate_sign(sign, photos, 15)[2]['method'].startswith('ranged'))
+
+    def test_range_beats_nearly_parallel_rays(self):
+        """Rays from a forward camera barely diverge: with a 1 deg bearing error they put the sign tens of metres
+        off along the road; one range holds it."""
+        photos = self.ride()
+        sights = []
+        for i in (0, 2, 4):
+            x, w = self.seen(photos, i, 3, 60)
+            sights.append({'photo': i, 'x': x + 0.012, 'w': w})       # ~1 deg off
+        sign = {'code': 'P.127', 'cover': 4, 'sightings': sights}
+        lat, lon, how = build.locate_sign(sign, photos, 15)
+        self.assertLess(self.err(lat, lon, 3, 60), 3.0)
+        self.assertLess(how['uncertaintyM'], 15)
+        for s in sights:                                              # the same rays without the widths
+            del s['w']
+        lat, lon, _how = build.locate_sign(sign, photos, 15)
+        self.assertGreater(self.err(lat, lon, 3, 60), 10)
+
+    # --- layout and snap ---
+
+    def test_layout_lines(self):
+        two = build.layout_lines({'lanes': [3.2, 3.2], 'riderLane': 1, 'divider': True})
+        self.assertAlmostEqual(two['right'], 1.6 + 1.0)                   # kerb + sign setback
+        self.assertAlmostEqual(two['left'], -(4.8 + 0.5))                 # to the median + half its width
+        self.assertEqual((two['lanes'], two['leftIs']), ([0.0, -3.2], 'median'))
+        kinds = build.layout_lines({'lanes': ['moto', 'car', 'car'], 'riderLane': 2, 'divider': True,
+                                    'medianWidthM': 2})
+        self.assertAlmostEqual(kinds['right'], 2.75 + 1.75 + 1.0)
+        self.assertAlmostEqual(kinds['left'], -(1.75 + 3.5 + 1.0))
+        self.assertEqual(kinds['lanes'], [3.12, 0.0, -3.5])
+        # measured offsets win; no divider: the far kerb past the other direction's lanes
+        meas = build.layout_lines({'lanes': 2, 'rightKerbOffsetM': 2.2, 'medianOffsetM': 4.4, 'divider': True})
+        self.assertAlmostEqual(meas['right'], 3.2)
+        self.assertAlmostEqual(meas['left'], -4.9)
+        undiv = build.layout_lines({'lanes': 1, 'oppositeLanes': 1, 'signSetbackM': 0.5})
+        self.assertAlmostEqual(undiv['right'], 1.75 + 0.5)
+        self.assertAlmostEqual(undiv['left'], -(1.75 + 3.5 + 0.5))
+        self.assertEqual(undiv['leftIs'], 'left kerb')
+        self.assertAlmostEqual(build.lane_offset([1.0, -2.0, -5.0], 2.5), -3.5)
+        self.assertIsNone(build.lane_offset([1.0], 3))
+
+    def snapped(self, side, east, north, lane=None, road=None, method='ranged from the sign size'):
+        photos = self.ride()
+        spec = {'road': [road or {'fromPhoto': 0, 'toPhoto': 99, 'lanes': [3.2, 3.2], 'divider': True}]}
+        lat, lon = build.to_ll(east, north, self.LAT0, self.LON0)
+        sign = {'side': side, 'lane': lane, 'cover': 3}
+        la, lo, how = build.snap_sign(sign, lat, lon, {'method': method, 'uncertaintyM': 5}, photos, spec)
+        x, y = build.to_xy(la, lo, self.LAT0, self.LON0)
+        return x, y, how
+
+    def test_snap_keeps_the_along_road_position(self):
+        x, y, how = self.snapped('left', -2.5, 20)
+        self.assertAlmostEqual(x, -5.3, places=1)
+        self.assertAlmostEqual(y, 20, places=1)
+        self.assertEqual((how['unsnapped']['acrossM'], how['snap']['done'], how['snap']['side']), (-2.5, True, 'left'))
+        self.assertIn('snapped 2.8 m left onto the median line', how['method'])
+        x, _y, _h = self.snapped('right', 4.0, 20)
+        self.assertAlmostEqual(x, 2.6, places=1)
+        x, _y, how = self.snapped('over', 1.0, 20, lane=2)
+        self.assertAlmostEqual(x, -3.2, places=1)
+        self.assertIn('over lane 2', how['method'])
+        x, _y, how = self.snapped('over', 1.0, 20)                       # no lane: the middle of the carriageway
+        self.assertAlmostEqual(x, -1.6, places=1)
+
+    def test_a_large_move_is_flagged_not_made(self):
+        x, y, how = self.snapped('right', -6.0, 20)                      # 8.6 m from the right kerb line
+        self.assertAlmostEqual((x, y)[0], -6.0, places=1)
+        self.assertFalse(how['snap']['done'])
+        self.assertIn('NOT snapped', how['method'])
+
+    def test_no_layout_no_snap(self):
+        photos = self.ride()
+        lat, lon = build.to_ll(-2, 20, self.LAT0, self.LON0)
+        how = {'method': 'm'}
+        self.assertEqual(build.snap_sign({'side': 'left'}, lat, lon, how, photos, {}), (lat, lon, how))
+        spec = {'road': [{'fromPhoto': 50, 'toPhoto': 60, 'lanes': 2}]}      # another stretch
+        self.assertEqual(build.snap_sign({'side': 'left'}, lat, lon, how, photos, spec), (lat, lon, how))
+        self.assertEqual(build.snap_sign({'side': 'left', 'snap': False}, lat, lon, how, photos,
+                                         {'road': [{'lanes': 2, 'divider': True}]}), (lat, lon, how))
+
+    def test_rays_meet_the_line_without_a_range(self):
+        """A lane board (no standard size) placed 15 m ahead by default: snapped across, its along-road position
+        comes from where its rays cross the kerb line."""
+        photos = self.ride()
+        road = {'fromPhoto': 0, 'toPhoto': 99, 'lanes': [3.2, 3.2], 'divider': True}
+        sights = [{'photo': i, 'x': self.seen(photos, i, 2.6, 14)[0]} for i in (0, 1)]   # 10 and 17 deg off
+        sign = {'side': 'right', 'cover': 3, 'sightings': sights}
+        lat, lon = build.to_ll(2.0, 22, self.LAT0, self.LON0)            # where the default put it
+        la, lo, how = build.snap_sign(sign, lat, lon, {'method': 'single-photo estimate', 'uncertaintyM': 8},
+                                      photos, {'road': [road]})
+        self.assertLess(self.err(la, lo, 2.6, 14), 0.3)
+        self.assertIn('where 2 rays cross that line', how['method'])
+        self.assertLess(how['uncertaintyM'], 8)
+
+
 if __name__ == '__main__':
     unittest.main()
+
+
+class BlurTest(unittest.TestCase):
+    """blur.py without the models: the anchors, the pixelation, apply from the originals, and push refusing."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_plate_anchors_match_the_zoo_order(self):
+        import blur
+        p = blur.Plates.__new__(blur.Plates)
+        p.size = None
+        p._priors(64, 48)
+        # zoo order: cell by cell (row, column), each cell's sizes in turn; first map is stride 8
+        self.assertEqual(p.priors.shape[1], 4)
+        self.assertAlmostEqual(float(p.priors[0][0]), 0.5 * 8 / 64)
+        self.assertAlmostEqual(float(p.priors[1][2]), 16 / 64)        # same cell, second size
+        self.assertAlmostEqual(float(p.priors[3][0]), 1.5 * 8 / 64)   # next cell
+
+    def test_apply_blurs_from_originals_and_marks_the_place(self):
+        import blur, cloud
+        from PIL import Image
+        out, check = os.path.join(self.tmp, 'out'), os.path.join(self.tmp, 'check')
+        os.makedirs(os.path.join(out, '01_Cafe'))
+        json.dump({'place': {'name': 'Cafe'}}, open(os.path.join(out, '01_Cafe', 'place.json'), 'w'))
+        im = Image.new('RGB', (200, 100), (255, 255, 255))
+        for x in range(0, 200, 2):   # stripes: pixelation flattens them
+            for y in range(100):
+                im.putpixel((x, y), (0, 0, 0))
+        im.save(os.path.join(out, '01_Cafe', 'COVER_#1_p.jpg'), quality=95)
+        Image.new('RGB', (50, 50), (9, 9, 9)).save(os.path.join(out, '01_Cafe', 'WEB_1.jpg'))
+        self.assertEqual(cloud.unblurred(out), ['01_Cafe'])
+        os.makedirs(os.path.join(check, 'orig', '01_Cafe'))
+        shutil.copy(os.path.join(out, '01_Cafe', 'COVER_#1_p.jpg'), os.path.join(check, 'orig', '01_Cafe'))
+        rel = '01_Cafe/COVER_#1_p.jpg'
+        json.dump({'boxes': [{'id': 'b0001', 'file': rel, 'kind': 'face', 'box': [10, 10, 60, 60], 'state': 'auto'},
+                             {'id': 'b0002', 'file': rel, 'kind': 'plate', 'box': [120, 10, 180, 40], 'state': 'check'}]},
+                  open(os.path.join(check, 'boxes.json'), 'w'))
+        json.dump({'keep': ['b0002'], 'add': [{'file': rel, 'box': [0.6, 0.6, 0.9, 0.9]}]},
+                  open(os.path.join(check, 'decisions.json'), 'w'))
+        for _ in range(2):   # twice: always from the original
+            blur.apply(out, check)
+        res = Image.open(os.path.join(out, rel)).convert('L')
+        spread = lambda box: max(res.crop(box).getdata()) - min(res.crop(box).getdata())
+        self.assertLess(spread((20, 20, 50, 50)), 120)      # the face: flattened
+        self.assertGreater(spread((130, 15, 170, 35)), 200)  # kept (a sign): stripes still there
+        self.assertLess(spread((130, 65, 170, 85)), 120)    # added by hand
+        m = json.load(open(os.path.join(out, '01_Cafe', 'place.json')))
+        self.assertEqual((m['privacy']['faces'], m['privacy']['plates'], m['privacy']['added']), (1, 0, 1))
+        self.assertEqual(cloud.unblurred(out), [])
+        self.assertTrue(os.path.exists(os.path.join(check, 'after_00.jpg')))
