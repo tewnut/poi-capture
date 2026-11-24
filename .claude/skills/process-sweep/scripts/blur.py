@@ -340,6 +340,10 @@ def apply(out, check):
     unknown = keep - {b['id'] for b in data['boxes']}
     if unknown:
         raise SystemExit(f'decisions.json keeps unknown boxes: {sorted(unknown)}')
+    # only a box shown for checking can be kept: a sure face or vehicle plate is always blurred
+    sure = sorted(b['id'] for b in data['boxes'] if b['id'] in keep and b['state'] != 'check')
+    if sure:
+        raise SystemExit(f'decisions.json keeps boxes that were not up for checking (always blurred): {sure}')
     per_file = {}
     for b in data['boxes']:
         if b['id'] not in keep:

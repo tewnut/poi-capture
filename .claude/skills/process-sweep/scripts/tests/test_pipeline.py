@@ -699,6 +699,12 @@ class BlurTest(unittest.TestCase):
         self.assertEqual(cloud.unblurred(out), [])
         self.assertTrue(os.path.exists(os.path.join(check, 'after_00.jpg')))
         self.assertEqual(m['privacy']['files'], ['COVER_#1_p.jpg'])
+        # keeping a sure box (the face) is refused: only boxes up for checking can be kept
+        json.dump({'keep': ['b0001']}, open(os.path.join(check, 'decisions.json'), 'w'))
+        with self.assertRaises(SystemExit):
+            blur.apply(out, check)
+        json.dump({'keep': ['b0002'], 'add': [{'file': rel, 'box': [0.6, 0.6, 0.9, 0.9]}]},
+                  open(os.path.join(check, 'decisions.json'), 'w'))
         # a photo added after the blur: push refuses the folder (and a zip of it), apply refuses to run
         os.makedirs(os.path.join(out, '01_Cafe', 'more'))
         shutil.copy(os.path.join(check, 'orig', rel), os.path.join(out, '01_Cafe', 'more', 'p2.jpg'))
