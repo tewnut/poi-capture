@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -135,11 +136,20 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     // New session only lets Start through with a fresh GPS fix: recording begins as soon as the camera is open
     var autoStarted by rememberSaveable(sessionId) { mutableStateOf(false) }
     val notStarted = !autoStarted && !ui.running && captured == 0 && !ui.recording
+    val indoorMode = session?.kind == SessionKind.INDOOR
     // street sweep also waits for the light level: too dark for a fast shutter = no start (Place capture instead)
-    val lightOk = session?.kind == SessionKind.POI || (ui.exposureReady && !ui.tooDark)
-    LaunchedEffect(svc, ui.camera, ui.gpsFresh, lightOk) {
-        if (!autoStarted && svc != null && ui.camera == "on" && ui.gpsFresh && lightOk) { svc.start(); autoStarted = true }
+    val lightOk = session?.kind == SessionKind.POI || indoorMode || (ui.exposureReady && !ui.tooDark)
+    // indoors there is often no GPS at all: the walk starts from the building / the setup position
+    LaunchedEffect(svc, ui.camera, ui.gpsFresh, lightOk, indoorMode) {
+        if (!autoStarted && svc != null && ui.camera == "on" && (ui.gpsFresh || indoorMode) && lightOk) { svc.start(); autoStarted = true }
     }
+    // indoor: the walk's estimate, the map panel and "Tôi ở đây"
+    val iu: io.github.tewnut.poicapture.capture.IndoorUi = svc?.indoorState?.collectAsState()?.value ?: io.github.tewnut.poicapture.capture.IndoorUi()
+    val walked = remember(iu.trackVersion, iu.level, indoorMode) { if (indoorMode) svc?.indoorTrackOf(iu.level) ?: emptyList() else emptyList() }
+    var mapBig by rememberSaveable(sessionId) { mutableStateOf(false) }
+    var placing by remember { mutableStateOf(false) }                                   // ⌖: the next tap is "I am here"
+    var hereAt by remember { mutableStateOf<io.github.tewnut.poicapture.core.LatLon?>(null) }     // waiting for its confirmation
+    var directionFrom by remember { mutableStateOf<io.github.tewnut.poicapture.core.LatLon?>(null) } // next tap = walking direction
     val poiMode = session?.kind == SessionKind.POI
     val askRole = session?.photoRoles != null          // POI: the contributor picks the kind of each photo (off by default)
     val photoRoles = session?.photoRoles ?: PhotoRoles.DEFAULT
@@ -215,7 +225,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     val keyAction: (() -> Unit)? = when {
         svc == null || notStarted -> null
         poiMode -> { { shoot() } }
-        manual -> { { if (ui.camera == "on") svc.takePhoto("manual") } }
+        manual || indoorMode -> { { if (ui.camera == "on") svc.takePhoto("manual") } }
         else -> null
     }
     val latestKey = androidx.compose.runtime.rememberUpdatedState(keyAction)
@@ -235,11 +245,11 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
         Row(Modifier.fillMaxWidth().safeDrawingPadding().padding(10.dp), verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                StatusText(ui, session, poiMode)
+                if (indoorMode) IndoorStatus(ui, iu, session) else StatusText(ui, session, poiMode)
                 val alert = when {
                     ui.camera == "lost" -> stringResource(R.string.capture_camera_busy)
                     ui.error != null -> ui.error.text()
-                    !ui.gpsFresh && !notStarted -> stringResource(R.string.capture_gps_lost_banner)
+                    !ui.gpsFresh && !notStarted && !indoorMode -> stringResource(R.string.capture_gps_lost_banner)
                     else -> ui.warnings.firstOrNull()?.text()
                 }
                 if (alert != null) {
@@ -291,6 +301,10 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                     pauseButton(56.dp)
                     Shutter(stringResource(R.string.capture_shoot), enabled = ui.camera == "on", onClick = { svc?.takePhoto("manual") })
                 }
+                indoorMode -> {
+                    pauseButton(64.dp)
+                    DirectoryButton(ui.camera == "on") { svc?.takePhoto("directory") }
+                }
                 else -> pauseButton(64.dp)
             }
         }
@@ -305,6 +319,10 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 manual -> {
                     pauseButton(56.dp)
                     Shutter(stringResource(R.string.capture_shoot), enabled = ui.camera == "on", onClick = { svc?.takePhoto("manual") })
+                }
+                indoorMode -> {
+                    pauseButton(64.dp)
+                    DirectoryButton(ui.camera == "on") { svc?.takePhoto("directory") }
                 }
                 else -> pauseButton(64.dp)
             }
@@ -340,7 +358,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
         }
         Row(Modifier.align(Alignment.BottomStart).safeDrawingPadding().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp + aboveBar), verticalAlignment = Alignment.Bottom,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!poiMode && !notStarted) {
+            if (!poiMode && !indoorMode && !notStarted) {
                 Speed(ui)
                 ShadowText(stringResource(if (ui.running) R.string.capture_recording else R.string.capture_paused), color = if (ui.running) Color(0xFFFF6B6B) else Palette.AmberLight,
                     size = 16.sp, modifier = Modifier.padding(bottom = 6.dp))
@@ -355,8 +373,56 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                     .background(Color(0xCC0B6B4C), RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp))
         }
 
+        // ---------- indoor: the map of the walk, the level, "Tôi ở đây" ----------
+        if (indoorMode && !notStarted && session != null) {
+            val mapModifier = if (mapBig) Modifier.fillMaxSize().safeDrawingPadding().padding(top = 96.dp, bottom = aboveBar)
+                else if (upright) Modifier.align(Alignment.BottomStart).safeDrawingPadding().padding(start = 10.dp, bottom = 12.dp + aboveBar)
+                    .fillMaxWidth(0.58f).fillMaxHeight(0.3f)
+                else Modifier.align(Alignment.BottomStart).safeDrawingPadding().padding(start = 10.dp, bottom = 12.dp)
+                    .fillMaxWidth(0.36f).fillMaxHeight(0.55f)
+            MapFrame(mapBig, mapModifier) {
+                IndoorMap(session.settings.tileUrl, session.building, iu, walked, hereAt,
+                    onLongPress = { p -> placing = false; directionFrom = null; hereAt = p },
+                    onTap = { p ->
+                        val from = directionFrom
+                        when {
+                            placing -> { placing = false; hereAt = p }
+                            from != null -> { svc?.setWalkHeading(io.github.tewnut.poicapture.core.Geo.bearing(from, p)); directionFrom = null }
+                        }
+                    }, modifier = Modifier.fillMaxSize())
+                Column(Modifier.align(Alignment.TopEnd).padding(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    MapIcon(if (mapBig) "✕" else "⤢") { mapBig = !mapBig }
+                    MapIcon("⌖", active = placing) { placing = !placing; directionFrom = null }
+                }
+                val tip = when {
+                    placing -> stringResource(R.string.capture_here_pick)
+                    directionFrom != null -> stringResource(R.string.capture_here_direction)
+                    else -> null
+                }
+                if (tip != null) Row(Modifier.align(Alignment.BottomCenter).padding(6.dp).background(Color(0xE6000000), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(tip, color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f, fill = false))
+                    if (directionFrom != null) TextButton(onClick = { directionFrom = null }) { Text(stringResource(R.string.capture_here_skip), color = Palette.Lime) }
+                }
+            }
+            LevelPicker(iu, onPick = { svc?.pickLevel(it) },
+                // landscape: left of the right-hand rail (pause, directory)
+                modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(top = 64.dp, end = if (upright) 10.dp else 112.dp))
+            iu.floorPrompt?.let { f ->
+                FloorPrompt(iu.level, f, onAnswer = { yes -> svc?.answerFloor(yes) },
+                    modifier = Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 110.dp, start = 12.dp, end = 76.dp))
+            }
+        }
+        hereAt?.let { p ->
+            HereSheet(iu.level, iu.levels, onConfirm = { lvl, dir ->
+                svc?.anchorHere(p, lvl)
+                hereAt = null
+                if (dir) directionFrom = p
+            }, onCancel = { hereAt = null })
+        }
+
         // ---------- no GPS yet: the session cannot start (once started, GPS lost is only an alert at the top) ----------
-        if (session != null && !ui.gpsFresh && notStarted && ui.camera == "on") GpsLostCard(ui, Modifier.align(Alignment.Center),
+        if (session != null && !ui.gpsFresh && notStarted && ui.camera == "on" && !indoorMode) GpsLostCard(ui, Modifier.align(Alignment.Center),
             onEnd = { end(discardIfEmpty = true) })
 
         // ---------- street sweep in the dark: not started, say why and what to do ----------
@@ -453,6 +519,34 @@ private fun ShadowText(text: String, color: Color = Color.White, size: androidx.
     Text(text, color = color, fontSize = size, fontWeight = if (bold) FontWeight.Bold else FontWeight.Medium, maxLines = 1,
         overflow = TextOverflow.Ellipsis, modifier = modifier,
         style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, androidx.compose.ui.geometry.Offset(0f, 2f), 6f)))
+}
+
+/** Indoor: building and level, recording or paused, and how far the walker went since the last "Tôi ở đây". */
+@Composable
+private fun IndoorStatus(ui: CaptureUi, iu: io.github.tewnut.poicapture.capture.IndoorUi, session: Session?) {
+    val name = session?.building?.name ?: stringResource(R.string.setup_indoor_short)
+    ShadowText(name + " · " + stringResource(R.string.capture_indoor_level_name, io.github.tewnut.poicapture.core.Levels.name(iu.level)) +
+        " · " + stringResource(if (ui.running) R.string.capture_recording else R.string.capture_paused))
+    SinceAnchorLine(iu)
+    if (ui.running && ui.aimLow) ShadowText(stringResource(R.string.capture_aim_low_indoor), color = Color(0xFFFF6B6B), size = 13.sp)
+    else if (ui.running && ui.swinging) ShadowText(stringResource(R.string.capture_hand_swinging), color = Palette.AmberLight, size = 13.sp)
+    if (!iu.barometer) ShadowText(stringResource(R.string.capture_indoor_no_barometer), color = Palette.AmberLight, size = 12.sp, bold = false)
+}
+
+/** "Bảng chỉ dẫn": a photo of the mall's directory board (trigger "directory"), read later as a cross-check. */
+@Composable
+private fun DirectoryButton(enabled: Boolean, onClick: () -> Unit) {
+    Button(onClick = onClick, enabled = enabled, modifier = Modifier.height(52.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Palette.Black, contentColor = Palette.Lime)) {
+        Text("🗂 " + stringResource(R.string.capture_directory), fontWeight = FontWeight.Bold)
+    }
+}
+
+/** A small round button on the map panel. */
+@Composable
+private fun MapIcon(label: String, active: Boolean = false, onClick: () -> Unit) {
+    Box(Modifier.size(40.dp).background(if (active) Palette.Lime else Color(0xE6FFFFFF), CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center) { Text(label, fontSize = 20.sp, color = Palette.Ink, fontWeight = FontWeight.Bold) }
 }
 
 /** GPS, road and (riding) the camera direction on one or two lines of plain text. */

@@ -9,6 +9,7 @@ import { t, lang } from '../i18n'
 import { layerOf, type Dataset, type Place, type Review } from '../types'
 import { signSvg } from '../signArt'
 import { markerGroups } from '../signPosts'
+import { buildingRings, isIndoor, onLevel, shotsOn, trackOn } from '../indoor'
 
 const emit = defineEmits<{ select: [ds: string, place: string]; movePin: [lat: number, lon: number] }>()
 const el = ref<HTMLDivElement>()
@@ -84,12 +85,17 @@ function drawAll() {
 
 function drawDataset(d: Dataset, bounds: L.LatLngExpression[]) {
   const dim = state.open && state.open !== d.id
-  if (d.track.length > 1) L.polyline(d.track, { color: '#7d8c84', weight: 4, opacity: dim ? 0.25 : 0.55 }).addTo(base)
+  // an indoor walk: its building, and (open) only the level its chips picked: places, track, photos (indoor.ts)
+  const level = state.open === d.id && isIndoor(d) ? state.level : ''
+  if (isIndoor(d)) drawBuilding(d, dim)
+  for (const part of trackOn(d, level))
+    if (part.length > 1) L.polyline(part, { color: '#7d8c84', weight: 4, opacity: dim ? 0.25 : 0.55 }).addTo(base)
   if (state.open === d.id)
-    for (const s of d.shots) L.circleMarker([s[1], s[2]], { radius: 2.2, color: '#4b5a52', weight: 1, fillOpacity: 0.8 })
+    for (const s of shotsOn(d, level)) L.circleMarker([s[1], s[2]], { radius: 2.2, color: '#4b5a52', weight: 1, fillOpacity: 0.8 })
       .bindTooltip(t('photoN', { n: s[0] })).addTo(base)
   // the open session shows the layer its chips picked (App.vue)
-  const shown = d.places.filter((p) => !(state.open === d.id && state.layer && layerOf(p) !== state.layer))
+  const shown = d.places.filter((p) => !(state.open === d.id && state.layer && layerOf(p) !== state.layer)
+    && onLevel(p, level, reviewOf(d.id, p)))
   const num = new Map(d.places.map((p, k) => [p.id, String(k + 1)]))
   // the signs of one pole: one marker (signPosts.ts); everything else one marker each
   for (const group of markerGroups(shown, (p) => pinOf(p, reviewOf(d.id, p)))) {
@@ -105,10 +111,23 @@ function drawDataset(d: Dataset, bounds: L.LatLngExpression[]) {
       emit('select', d.id, group.find((x) => x.id === hit)?.id || p.id)
     })
   }
-  for (const tk of d.tasks.filter((x) => x.type !== 'visit')) {
+  for (const tk of d.tasks.filter((x) => x.type !== 'visit' && (!level || !x.level || x.level === level))) {
     L.marker([tk.lat, tk.lon], { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="rm">✕</div>' }) })
       .bindTooltip(t(tk.type === 'removal' ? 'removalTip' : 'verifyTip', { name: esc(tk.name) })).addTo(base)
   }
+}
+
+/** The building's footprint (outer rings, courtyard holes): a thin outline, the inside lightly filled. */
+function drawBuilding(d: Dataset, dim: boolean | '' | null) {
+  const { outer, holes } = buildingRings(d.building)
+  if (!outer.length) return
+  const style = { color: '#3d6b00', weight: 2, dashArray: '6 4', fillColor: '#7bcf00', fillOpacity: dim ? 0.03 : 0.07,
+    opacity: dim ? 0.35 : 0.8 }
+  // one outer ring: its holes cut out; several (a multipolygon): each drawn, the holes as outlines
+  const parts = outer.length === 1 ? [[outer[0], ...holes]] : outer.map((r) => [r])
+  for (const rings of parts)
+    L.polygon(rings as L.LatLngExpression[][], style).bindTooltip(esc(d.building?.name || t('building'))).addTo(base)
+  if (outer.length > 1) for (const h of holes) L.polygon(h, { ...style, fillOpacity: 0 }).addTo(base)
 }
 
 function drawSelected() {
@@ -158,7 +177,8 @@ function focusPlace() {
 function fitOpen() {
   const d = openDataset.value
   if (!d) return
-  const pts: L.LatLngExpression[] = [...d.track, ...d.places.map((p) => [pinOf(p, reviewOf(d.id, p)).lat, pinOf(p, reviewOf(d.id, p)).lon] as [number, number])]
+  const pts: L.LatLngExpression[] = [...d.track, ...d.places.map((p) => [pinOf(p, reviewOf(d.id, p)).lat, pinOf(p, reviewOf(d.id, p)).lon] as [number, number]),
+    ...buildingRings(d.building).outer.flat()]
   if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] })
 }
 
@@ -185,7 +205,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => { ro?.disconnect(); map?.remove() })
 
-watch(() => [state.datasets.length, state.shown.size, state.open, state.layer, state.reviews, lang.value], drawAll, { deep: true })
+watch(() => [state.datasets.length, state.shown.size, state.open, state.layer, state.level, state.reviews, lang.value], drawAll, { deep: true })
 watch(() => state.place, () => { drawAll(); focusPlace() })
 watch(() => [state.task, state.open], () => {
   drawAll()

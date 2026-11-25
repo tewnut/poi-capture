@@ -9,6 +9,9 @@ Writes into <workdir>:
                 photos gives each its own shape of cell), each labelled "#idx"
   crops/        on a house-number ride: plates_NN.jpg, a full-resolution tile around each number the phone read
                 (photos.json plateHints; crops.py plates), so plates are read without cropping by hand
+  indoor_track.json  an indoor walk (session.kind "indoor", docs/indoor.md): the walk recomputed from indoor.jsonl
+                (anchors, footprint), [[lat, lon, level], ...]; photos.json then has each photo's corrected position,
+                livePosition (the phone's), level, uncertaintyM, unitHints, and the sheets say the level
 Prints the ride's target (session.target: shops | addresses | signs; what to read, docs/sweep-targets.md).
 """
 import json, math, os, sys, zipfile
@@ -17,6 +20,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from safety import inside, safe_id, extract  # noqa: E402  (untrusted export: paths and ids are checked)
 from paths import arg_path  # noqa: E402
+import indoor  # noqa: E402
 
 
 def load(src, work):
@@ -146,10 +150,27 @@ def sheets(photos, out, per=4, width=1000):
         for p, im, (x, y, tw, th) in zip(photos[s:s + per], ims, boxes):
             im = im.resize((tw, th))
             d = ImageDraw.Draw(im)
-            d.rectangle([0, 0, 200, 50], fill='black')
-            d.text((8, 4), f"#{p['idx']}", fill='yellow', font=font)
+            lines = sheet_label(p)
+            if len(lines) == 1 and lines[0] == f"#{p['idx']}":
+                d.rectangle([0, 0, 200, 50], fill='black')
+            else:   # indoor: level, directory board, unit hints under the number
+                w = max([200] + [int(d.textlength(t, font=font)) + 16 for t in lines])
+                d.rectangle([0, 0, min(w, tw), 8 + 44 * len(lines)], fill='black')
+            for k, t in enumerate(lines):
+                d.text((8, 4 + 44 * k), t, fill='yellow' if k == 0 else 'white', font=font)
             sheet.paste(im, (x, y))
         sheet.save(os.path.join(out, f"sheet_{s:03d}.jpg"), quality=85)
+
+
+def sheet_label(p):
+    """The lines written on a photo's tile: "#idx"; on an indoor walk also its level ("#12  lvl 2"), "DIRECTORY"
+    for a directory-board photo, and the unit numbers the phone's text reader saw ("L2-15?": hints)."""
+    lines = [f"#{p['idx']}" + (f"  lvl {p['level']}" if p.get('level') not in (None, '') else '')]
+    if p.get('trigger') == 'directory':
+        lines.append('DIRECTORY')
+    if p.get('unitHints'):
+        lines.append(' '.join(u + '?' for u in p['unitHints'][:4]))
+    return lines
 
 
 def sign_hints(item):
@@ -200,11 +221,72 @@ def target_line(session):
     return 'target: ' + TARGETS.get(t, f'{t} (unknown: read it as shops)')
 
 
+def indoor_positions(src, work, session, items, photos):
+    """An indoor walk (docs/indoor.md): every photo's position recomputed from indoor.jsonl (indoor.recompute: the
+    walk split at the anchors, each stretch rotated / scaled onto them, kept inside the building), the phone's live
+    one kept as livePosition; level, uncertainty, unit hints. Writes <work>/indoor_track.json (the corrected walk
+    with levels, for the map). Without indoor.jsonl (or without anchors in it) the live positions stay.
+    -> a line for the report."""
+    log = indoor.find_log(src, work)
+    ev = indoor.load(log) if log else None
+    times = [i.get('elapsedNanos') for i in items]
+    fixes, track, summary = indoor.recompute(ev, times, session) if ev else ([None] * len(items), [], {})
+    moved, placed = [], 0
+    for i, p, f in zip(items, photos, fixes):
+        live = {'lat': i.get('lat'), 'lon': i.get('lon')} if i.get('lat') is not None else None
+        own = str(i['level']) if i.get('level') not in (None, '') else None
+        p['livePosition'] = live
+        p['fixLat'] = p['fixLon'] = None
+        p['level'] = indoor.level_at(ev, i['elapsedNanos'], own) if ev and i.get('elapsedNanos') is not None else own
+        p['sinceAnchorM'] = i.get('sinceAnchorM')
+        p['positionSource'] = i.get('positionSource')
+        p['unitHints'] = indoor.unit_hints(p.get('ocrText'))
+        p['roadName'] = None   # no road indoors
+        if f:
+            placed += 1
+            if live:
+                from build import to_xy
+                moved.append(math.hypot(*to_xy(f['lat'], f['lon'], live['lat'], live['lon'])))
+            p['lat'], p['lon'] = f['lat'], f['lon']
+            p['positionFrom'] = 'indoor walk: ' + f['how']
+            p['sinceAnchorM'], p['uncertaintyM'] = f['sinceAnchorM'], f['uncertaintyM']
+            p['clampedM'] = f['clampedM'] or None
+            if f['bearingDeltaDeg'] is not None and p.get('cameraBearing') is not None:
+                p['cameraBearingLive'] = p['cameraBearing']
+                p['cameraBearing'] = round((p['cameraBearing'] + f['bearingDeltaDeg']) % 360, 1)
+        else:
+            p['positionFrom'] = 'indoor walk: live estimate (phone)' if live else None
+            p['uncertaintyM'] = (round(max(indoor.MIN_UNC_M, indoor.UNC_PER_M * (p['sinceAnchorM'] or 0)), 1)
+                                 if live else None)
+        if p.get('uncertaintyM') is not None:
+            p['accuracyM'] = p['uncertaintyM']   # weighs the rays when a shop is triangulated (build.locate)
+    if not track:   # the live positions, in order
+        track = [[p['lat'], p['lon'], p['level']] for p in photos if p.get('lat') is not None]
+    json.dump({'track': track, 'summary': summary, 'log': bool(log)},
+              open(os.path.join(work, 'indoor_track.json'), 'w', encoding='utf-8'), ensure_ascii=False)
+    b = session.get('building') or {}
+    levels = {}
+    for p in photos:
+        levels[p['level']] = levels.get(p['level'], 0) + 1
+    if not log:
+        how = 'no indoor.jsonl: the live positions kept'
+    elif not placed:
+        how = f"indoor.jsonl not usable ({summary.get('why')}): the live positions kept"
+    else:
+        m = sorted(moved)
+        how = (f"{placed} photo positions recomputed from {summary['steps']} steps and {summary['anchors']} anchors "
+               f"({summary['stretches'] or 'translated only'})"
+               + (f"; moved from the live estimate median {m[len(m) // 2]:.1f} m, max {m[-1]:.1f} m" if m else ''))
+    return (f"indoor walk in {b.get('name') or 'no building'} ({b.get('osm') or 'no footprint'}): {how}\n"
+            f"levels (photos): {levels}; directory photos: {sum(1 for p in photos if p.get('trigger') == 'directory')}")
+
+
 def main():
     src, work = arg_path(sys.argv[1]), arg_path(sys.argv[2])
     os.makedirs(work, exist_ok=True)
     session, items = load(src, work)
-    track = load_track(src, work)
+    in_door = indoor.is_indoor(session)
+    track = [] if in_door else load_track(src, work)   # indoor: the live track is the phone's own estimate
     moved, how = [], {}
     photos = []
     for n, i in enumerate(items):
@@ -239,6 +321,7 @@ def main():
             'trigger': i.get('trigger'), 'signBoost': i.get('signBoost'),
             'signHints': sign_hints(i),
         })
+    indoor_line = indoor_positions(src, work, session, items, photos) if in_door else None
     json.dump(photos, open(os.path.join(work, 'photos.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     json.dump(session, open(os.path.join(work, 'session.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     sheets(photos, os.path.join(work, 'sheets'))
@@ -249,16 +332,21 @@ def main():
         plate_line = (f"plate hints: {t} tiles on {n} sheet(s) in {os.path.join(work, 'crops')} (plates_NN.jpg)"
                       + (f', {nobox} without a box' if nobox else '')
                       + '; crops.py band / boxes for the rest (SKILL.md)')
+    if indoor_line:
+        print(indoor_line)
     roads = {}
     for p in photos:
         roads[p['roadName']] = roads.get(p['roadName'], 0) + 1
     print(f"session {session.get('id')} | {session.get('kind')} | {session.get('name')}")
     print(target_line(session))
     print(f"{len(photos)} photos -> {(len(photos) + 3) // 4} sheets in {os.path.join(work, 'sheets')}")
-    print("roads:", sorted(roads.items(), key=lambda kv: -kv[1])[:5])
+    if not in_door:
+        print("roads:", sorted(roads.items(), key=lambda kv: -kv[1])[:5])
     if plate_line:
         print(plate_line)
-    if moved:
+    if in_door:
+        pass
+    elif moved:
         m = sorted(moved)
         print(f"photo positions from the GPS track by time: {how}, moved median {m[len(m) // 2]:.1f} m, max {m[-1]:.1f} m "
               f"({len(items) - len(moved)} kept at the fix)")

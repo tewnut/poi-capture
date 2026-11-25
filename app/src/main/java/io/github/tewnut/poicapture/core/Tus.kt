@@ -85,7 +85,7 @@ fun sessionUploadMetadata(s: Session, fileName: String, photoCount: Int, track: 
     "sessionId" to s.id,
     "name" to s.name,
     "kind" to s.kind.json,
-    "target" to (if (s.kind == SessionKind.SWEEP) s.target.json else null),
+    "target" to (if (s.kind == SessionKind.SWEEP || s.kind == SessionKind.INDOOR) s.target.json else null),
     "createdAt" to s.createdAt,
     "startedAt" to s.startedAt,
     "endedAt" to s.endedAt,

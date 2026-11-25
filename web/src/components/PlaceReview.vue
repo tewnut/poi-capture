@@ -14,6 +14,7 @@ import type { Dataset, Place, Review, FieldKey, PinSource, PhotoEdits, CropRect 
 import { FIELD_KEYS, layerOf } from '../types'
 import { signSvg } from '../signArt'
 import { overRoad, postOf, postSigns } from '../signPosts'
+import { isIndoorPlace } from '../indoor'
 
 const props = defineProps<{ ds: Dataset; place: Place }>()
 const emit = defineEmits<{ close: []; next: [] }>()
@@ -216,12 +217,15 @@ const G_LABEL = { found: 'gFound', new: 'gNew', todo: 'gTodo' } as const
 // an address or a sign (docs/sweep-targets.md) has its own fields and none of a shop's (Google, website, hours)
 const layer = computed(() => layerOf(props.place))
 const LAYER_KEYS: Record<'address' | 'sign', FieldKey[]> = { address: ['houseNumber', 'street', 'other'], sign: ['signCode', 'name', 'signText', 'other'] }
+// a shop inside a building (indoor walk): level and unit always, no street or house number unless read
+const indoorPlace = computed(() => layer.value === 'place' && isIndoorPlace(props.place))
 const keys = computed<FieldKey[]>(() => layer.value === 'place'
-  ? FIELD_KEYS.filter((k) => k !== 'signCode' && (props.place.fields[k] || r.value.fields[k] || ['phone', 'houseNumber', 'street', 'openingHours'].includes(k)))
+  ? FIELD_KEYS.filter((k) => k !== 'signCode' && (props.place.fields[k] || r.value.fields[k]
+    || (indoorPlace.value ? ['phone', 'openingHours', 'level', 'unit'] : ['phone', 'houseNumber', 'street', 'openingHours']).includes(k)))
   : LAYER_KEYS[layer.value])
 function fieldLabel(k: FieldKey) {
   if (layer.value === 'sign' && k === 'name') return t('field.signName')
-  if (k === 'other' && layer.value !== 'place') return t(layer.value === 'sign' ? 'field.extraPlate' : 'field.unit')
+  if (k === 'other' && layer.value !== 'place') return t(layer.value === 'sign' ? 'field.extraPlate' : 'field.alley')
   return t('field.' + k)
 }
 /** A sign's group, side and facing; an address's shop: shown, not edited. */
@@ -237,6 +241,12 @@ const layerInfo = computed(() => {
       out.push(t('postPos_' + postKind.value, { id: postOf(p), n: onPost.value.indexOf(p) + 1, of: onPost.value.length }))
   }
   if (layer.value === 'address' && p.placeRef) out.push(t('placeRef', { name: p.placeRef }))
+  if (indoorPlace.value) {
+    const b = p.building?.name || props.ds.building?.name
+    if (b) out.push(t('inBuilding', { name: b }) + (p.building?.address ? ` (${p.building.address})` : ''))
+    const e = p.directory
+    if (e) out.push(t('onDirectory', { what: [e.name, e.unit].filter(Boolean).join(' ') }))
+  }
   return out.join(' · ')
 })
 const pending = computed(() => pendingSuggestions(props.place, r.value))
@@ -261,6 +271,8 @@ function marks(k: FieldKey) {
   if (f.website === 'match') out.push({ cls: 'ok', tip: t('matchesWebsite') })
   if (f.website === 'differs') out.push({ cls: 'warn', tip: `Website: ${f.websiteValue || ''}` })
   if (f.source === 'ride') out.push({ cls: 'r', tip: t('fromRide') })
+  if (f.source === 'walk') out.push({ cls: 'r', tip: t('fromWalk') })
+  if (f.note === 'from the directory board') out.push({ cls: 'ok', tip: t('fromDirectory') })
   if (f.ride === 'differs') out.push({ cls: 'warn', tip: t('rideDiffers', { v: f.rideValue || '' }) })
   return out
 }
@@ -276,7 +288,7 @@ async function rejectAsDupe(d: Dupe) {
   await decide('rejected')
 }
 /** A value read on the photos: not one filled from Google / the website, nor the ride's road. */
-const fromPhoto = (k: FieldKey) => { const s = props.place.fields[k]?.source; return !!props.place.fields[k] && (!s || !['google', 'website', 'ride'].includes(s)) }
+const fromPhoto = (k: FieldKey) => { const s = props.place.fields[k]?.source; return !!props.place.fields[k] && (!s || !['google', 'website', 'ride', 'walk'].includes(s)) }
 
 // the other signs on the same post (signPosts.ts): a pole shares one position, a gantry one place along the road
 const onPost = computed(() => (layer.value === 'sign' ? postSigns(props.ds.places, props.place) : [props.place]))

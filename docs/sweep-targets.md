@@ -100,6 +100,12 @@ box}`.
 - An address with `placeRef`: its house number, read surely, counts in its shop's Google check (result.py
   `google_check`: Google's number must be the same; the same number supports a name match of 0.25-0.5).
 - No Google enrichment for addresses and signs (nothing to match).
+- An indoor walk (`session.kind: "indoor"`, docs/indoor.md): places with `indoor: true`, `level`, `levelFrom`
+  (`read` | `walk`), `unit`, `building {osm, name, addr, address}`, `directory` (the board entry that confirms it),
+  fields `level` (source `walk` when it is the walk's) and `unit`; no `street` field (the building's address
+  applies); top level `building`, `levels`, `trackLevels`, `directory`, a 5th element (level) in each shot, visit
+  tasks (with `level` / `unit`) for directory entries not seen on the walk. CSV / GeoJSON: `level`, `unit`,
+  `building`.
 
 ### Web: review and publish
 

@@ -114,7 +114,8 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                 val title = s.name?.takeIf { !it.startsWith(io.github.tewnut.poicapture.core.SessionNaming.UNNAMED_PREFIX) &&
                     !io.github.tewnut.poicapture.core.SessionNaming.isOldStyle(it) }
                     ?: TrackStats.sessionName(items, s.startedAt ?: s.createdAt,
-                        if (!s.road.auto && s.kind != SessionKind.POI) roadText(ctx, s.road) else ctx.getString(R.string.session_no_street),
+                        if (s.kind == SessionKind.INDOOR) s.building?.name ?: ctx.getString(R.string.setup_indoor_short)
+                        else if (!s.road.auto && s.kind != SessionKind.POI) roadText(ctx, s.road) else ctx.getString(R.string.session_no_street),
                         ways = s.road.ways)
                 SessionRow(s, title,
                     items.count { it.optString("kind") == "photo" },
@@ -298,7 +299,7 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
             Hint(listOfNotNull(
                 fmt(s.startedAt ?: s.createdAt),
                 duration(ctx, r.stats.durationMs).takeIf { r.stats.durationMs > 0 },
-                if (s.kind == SessionKind.POI) null else ctx.getString(if (s.sideOfTravel == Side.RIGHT) R.string.sessions_side_right else R.string.sessions_side_left)
+                if (s.kind != SessionKind.SWEEP) null else ctx.getString(if (s.sideOfTravel == Side.RIGHT) R.string.sessions_side_right else R.string.sessions_side_left)
                     .let { if (s.mount != null) ctx.getString(R.string.sessions_side_measured, it) else it },
                 if (s.kind == SessionKind.POI) null else ctx.getString(when (s.mode) {
                     Mode.PHOTO_AUTO -> R.string.sessions_mode_auto; Mode.PHOTO_MANUAL -> R.string.sessions_mode_manual; Mode.VIDEO -> R.string.sessions_mode_video }),
@@ -383,7 +384,7 @@ private fun Hero(r: SessionRow, recording: Boolean, empty: Boolean, up: UploadSt
         if (shown.isEmpty()) {
             Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Palette.GreenLight, Palette.Canvas))),
                 contentAlignment = Alignment.Center) {
-                Text(if (r.s.mode == Mode.VIDEO && !poi) "🎬" else if (poi) "📍" else "🛵", fontSize = 36.sp)
+                Text(if (r.s.mode == Mode.VIDEO && !poi) "🎬" else if (poi) "📍" else if (r.s.kind == SessionKind.INDOOR) "🏬" else "🛵", fontSize = 36.sp)
             }
         } else Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             shown.forEachIndexed { i, p ->
@@ -395,7 +396,10 @@ private fun Hero(r: SessionRow, recording: Boolean, empty: Boolean, up: UploadSt
         if (shown.isNotEmpty()) Box(Modifier.fillMaxWidth().height(52.dp)
             .background(Brush.verticalGradient(listOf(Color(0x59000000), Color.Transparent))))
         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Pill(if (poi) "📍 " + stringResource(R.string.sessions_kind_poi) else "🛵 " + stringResource(R.string.sessions_kind_sweep) + " · " +
+            Pill(if (poi) "📍 " + stringResource(R.string.sessions_kind_poi)
+                else if (r.s.kind == SessionKind.INDOOR) "🏬 " + stringResource(R.string.setup_indoor_short) +
+                    (r.s.building?.name?.let { " · $it" } ?: "")
+                else "🛵 " + stringResource(R.string.sessions_kind_sweep) + " · " +
                     when (r.s.target) {
                         io.github.tewnut.poicapture.core.SweepTarget.ADDRESSES -> "🔢 " + stringResource(R.string.setup_target_addresses_short)
                         io.github.tewnut.poicapture.core.SweepTarget.SIGNS -> "🚸 " + stringResource(R.string.setup_target_signs_short)

@@ -64,6 +64,9 @@ Scripts do everything deterministic; the language model only reads and judges ph
 
 ### 2a. Street sweep
 
+(An **indoor walk** through a mall, `kind: "indoor"`, goes the same way with its own positions, levels, units and
+directory boards: docs/indoor.md and the skill's "Indoor walks".)
+
 1. **Prepare**: unpack, contact sheets in riding order (`prepare.py`).
 2. **Read the photos** (language model): every business on the photos, and for each one everything readable:
    name (with Vietnamese accents), category, sign text, phone(s), house number / address, opening hours, website,

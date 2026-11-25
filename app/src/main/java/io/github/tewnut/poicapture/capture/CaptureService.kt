@@ -89,6 +89,11 @@ import io.github.tewnut.poicapture.core.SignBoost
 import io.github.tewnut.poicapture.core.PoiStatus
 import io.github.tewnut.poicapture.core.Pois
 import io.github.tewnut.poicapture.core.FootTracker
+import io.github.tewnut.poicapture.core.Pdr
+import io.github.tewnut.poicapture.core.LocalFrame
+import io.github.tewnut.poicapture.core.Levels
+import io.github.tewnut.poicapture.core.SessionNaming
+import io.github.tewnut.poicapture.core.facadeFields
 import io.github.tewnut.poicapture.core.PlacePosition
 import io.github.tewnut.poicapture.core.SessionKind
 import io.github.tewnut.poicapture.core.Remeasure
@@ -132,6 +137,10 @@ const val HAND_MIN_ELEVATION_DEG = -35.0
 const val HAND_SWING_RADS = 1.2
 /** Signs ride: how often the preview is checked for signs (the detector takes ~0.1-0.3 s on a mid-range phone). */
 const val SCAN_EVERY_NS = 250_000_000L
+/** Indoor: slower than this (no step for a while) is standing: the frames' slide is people passing, not new fronts. */
+const val INDOOR_MIN_SPEED_MPS = 0.3
+/** Indoor: a floor change the walker did not answer is taken as guessed after this long. */
+const val FLOOR_GUESS_MS = 30_000L
 
 /** What the capture screen shows. */
 data class CaptureUi(
@@ -181,6 +190,22 @@ data class CaptureUi(
     val readNote: UiText? = null,        // e.g. a sign photo with no readable text: shoot closer
 )
 
+/** Indoor mode (docs/indoor.md): what the capture screen shows of the walk. */
+data class IndoorUi(
+    val level: Int = 0,                   // OSM level number (0 = ground = "1")
+    val levels: IntRange = 0..0,          // offered by the level picker
+    val position: LatLon? = null,         // live dead-reckoning estimate
+    val uncertaintyM: Double = 0.0,
+    val sinceAnchorM: Double = 0.0,       // "đã đi N m từ lần định vị cuối"
+    val anchored: Boolean = false,        // false: the start is only a guess, the walker should say where they are
+    val headingDeg: Double? = null,
+    val floorPrompt: Int? = null,         // the barometer suggests this level: "Lên tầng? / Xuống tầng?"
+    val anchors: Int = 0,
+    val trackVersion: Int = 0,            // the walked track changed (the map redraws it)
+    val stepSource: String = "",
+    val barometer: Boolean = true,
+)
+
 /**
  * The capture engine as a foreground service (camera + location), so a session keeps recording when the screen
  * turns off or another app comes on top. It must be started while the capture screen is visible (Android only lets
@@ -218,6 +243,16 @@ class CaptureService : LifecycleService() {
     lateinit var session: Session; private set
     /** street sweep held by a passenger ([Holding.HAND]) */
     private val hand get() = session.kind == SessionKind.SWEEP && session.holding == Holding.HAND
+    /** indoor mode: on foot, in the hand, position from the steps (docs/indoor.md) */
+    private val indoor get() = session.kind == SessionKind.INDOOR
+    private var indoorTracker: IndoorTracker? = null
+    private val _indoor = MutableStateFlow(IndoorUi())
+    val indoorState: StateFlow<IndoorUi> = _indoor
+    private val indoorTrack = HashMap<Int, MutableList<MutableList<LatLon>>>()   // per level: segments (a new one after a jump)
+    @Volatile private var lastIndoorTrackNs = 0L
+    private val recentSteps = ArrayDeque<Long>()                                  // indoor: times of the last steps (speed)
+    private val levelsSeen = linkedSetOf<String>()
+    private var floorPromptJob: Job? = null
     private lateinit var store: SessionStore
     private lateinit var fp: FixProcessor
     // street sweep: a photo each time the scene slid ~30–45 % of the frame (measured on the camera frames)
@@ -315,14 +350,17 @@ class CaptureService : LifecycleService() {
             fp.cameraYawSource = "forward"
             fp.cameraYawDeg = 0.0
         }
-        if (s.kind == SessionKind.POI) {
+        if (s.kind == SessionKind.INDOOR) {
+            fp.facadeDistanceM = null      // the photo position comes from the steps (indoorMeta)
+            _state.update { it.copy(mount = "hand") }
+        } else if (s.kind == SessionKind.POI) {
             fp.facadeDistanceM = null      // a place is pinned on its building: no facade estimate from the street
             val pois = store.pois(s.id)
             _state.update { it.copy(poiNumber = pois.size) }
         } else if (s.holding == Holding.HAND) {
             _state.update { it.copy(mount = "hand") }   // no mount angle: each photo is measured ([HandBearing])
         }
-        _state.update { it.copy(roadData = if (s.road.auto && s.road.ways.isEmpty()) "loading" else "ok") }
+        _state.update { it.copy(roadData = if (s.road.auto && s.road.ways.isEmpty() && s.kind != SessionKind.INDOOR) "loading" else "ok") }
         pm = getSystemService(POWER_SERVICE) as PowerManager
         wake = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "poicapture:capture")?.apply { acquire(12 * 3600_000L) }
         startSensors()
@@ -350,7 +388,8 @@ class CaptureService : LifecycleService() {
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(getString(R.string.notif_recording, roadText(this, session.road)))
+            .setContentText(getString(R.string.notif_recording, if (indoor) session.building?.name ?: getString(R.string.setup_indoor_short)
+                else roadText(this, session.road)))
             .setOngoing(true)
             .setContentIntent(open)
             .build()
@@ -400,7 +439,7 @@ class CaptureService : LifecycleService() {
         }.getOrNull()
         var unusable = false
         val blurry = synchronized(sharpnessRecent) {
-            unusable = session.kind == SessionKind.SWEEP && BlurCheck.unusable(sharp, sharpnessRecent.toList())
+            unusable = (session.kind == SessionKind.SWEEP || indoor) && BlurCheck.unusable(sharp, sharpnessRecent.toList())
             val v = BlurCheck.judge(motion, maxMotion, sharp, sharpnessRecent.toList())
             if (sharp != null) { sharpnessRecent.addLast(sharp); while (sharpnessRecent.size > 15) sharpnessRecent.removeFirst() }
             blurRecent.addLast(v); while (blurRecent.size > BlurCheck.SOFT_RUN) blurRecent.removeFirst()
@@ -503,8 +542,9 @@ class CaptureService : LifecycleService() {
         }
         // on foot (Place capture): steps and direction carry the position when the GPS cannot be trusted
         val ft = if (session.kind == SessionKind.POI) FootTracker().also { foot = it } else null
+        if (indoor) startIndoor()
         imu = ImuRecorder(getSystemService(SENSOR_SERVICE) as SensorManager, store.imuFile(session.id),
-            if (hand) null else mountEstimator,
+            if (hand || indoor) null else mountEstimator,
             onStep = ft?.let { t -> { ns: Long -> t.onHeading(imu?.walkHeadingDeg()); t.onStep(ns) } }).also { it.start() }
         if (session.mode == Mode.PHOTO_AUTO && framesLog == null) framesLog = runCatching {
             val f = store.framesFile(session.id)
@@ -525,6 +565,7 @@ class CaptureService : LifecycleService() {
         )
         // Doppler speed only (position-derived speeds are too noisy for acceleration)
         mountEstimator.onFix(l.elapsedRealtimeNanos, if (l.hasSpeed()) l.speed.toDouble() else null, if (l.hasBearing()) l.bearing.toDouble() else null)
+        if (indoor) { onIndoorFix(f, l); return }
         if (session.kind != SessionKind.POI) checkMount()   // on foot / between shops: not a mounted camera
         // another type of road (alley → main road…): the expected distance to the fronts, so the photo spacing, follows
         if (session.kind != SessionKind.POI) {
@@ -696,17 +737,19 @@ class CaptureService : LifecycleService() {
                 val provider = fut.get()
                 val st = session.settings
                 val pb = Preview.Builder()
+                // (indoor: walking pace and closer fronts need no 1/500 s, and malls are darker than the street)
                 val g = if (session.kind == SessionKind.SWEEP) ShutterGuard { gs -> onShutter(gs) } else null
                 guard = g
                 g?.watch(pb, io)
                 val pv = pb.build()
                 preview = pv
                 val useCases = mutableListOf<UseCase>(pv)
-                val fw = if (session.kind == SessionKind.SWEEP)
+                val fw = if (session.kind == SessionKind.SWEEP || indoor)
                     FrameWatcher(onFrame = { fr -> onFrame(fr) }, onBrightness = { b -> guard?.brightness(b) }).also { it.portrait = portrait }
                     else null
                 watcher = fw
                 fw?.let { useCases += it.analysis(); it.setRotation(targetRotation) }
+                if (g == null) _state.update { it.copy(exposureReady = true) }
                 if (fw != null && signs) {
                     // signs ride: look for signs on the preview a few times a second, to shoot denser near them
                     fw.wantColor = { _state.value.running && !_state.value.hot && !signScanBusy.get() &&
@@ -820,17 +863,19 @@ class CaptureService : LifecycleService() {
         val steady = (sharpMedian == null || fr.sharpness >= 0.9 * sharpMedian) && (gyro == null || gyroMedian == null || gyro <= gyroMedian)
         // the camera at the road (phone being mounted, taken down, or held low) or, by hand, swinging round: wait
         val elevation = imu?.cameraElevationDeg()
-        val aimLow = elevation != null && elevation < (if (hand) HAND_MIN_ELEVATION_DEG else MOUNT_MIN_ELEVATION_DEG)
-        val swinging = hand && gyro != null && gyro > HAND_SWING_RADS
+        val handHeld = hand || indoor
+        val aimLow = elevation != null && elevation < (if (handHeld) HAND_MIN_ELEVATION_DEG else MOUNT_MIN_ELEVATION_DEG)
+        val swinging = handHeld && gyro != null && gyro > HAND_SWING_RADS
         if (aimLow != _state.value.aimLow || swinging != _state.value.swinging) _state.update { it.copy(aimLow = aimLow, swinging = swinging) }
         frameSharpness.add(fr.sharpness)
         gyro?.let { gyroRecent.add(it) }
         if (!_state.value.running || session.mode != Mode.PHOTO_AUTO) { accountedNs = fr.tNs; return }
         val dt = (fr.tNs - accountedNs) / 1e9
         accountedNs = fr.tNs
-        val speed = if (freshFix() != null) fp.speedMps else null
+        val speed = if (indoor) indoorSpeedMps(fr.tNs) else if (freshFix() != null) fp.speedMps else null
         val used = when {
-            speed != null && speed < 0.7 -> "wait"                           // waiting (lights, traffic): passing vehicles are not new facade
+            indoor && speed != null && speed < INDOOR_MIN_SPEED_MPS -> "wait"   // standing: people passing are not new fronts
+            !indoor && speed != null && speed < 0.7 -> "wait"                           // waiting (lights, traffic): passing vehicles are not new facade
             signs -> {   // looking ahead: no slide across the frame; denser while a sign is in view
                 val k = boost.speedUp(fr.tNs)
                 if ((k > 1.0) != _state.value.signBoost) _state.update { it.copy(signBoost = k > 1.0) }
@@ -882,7 +927,7 @@ class CaptureService : LifecycleService() {
         // a GPS fix is needed to start; once started, GPS lost (inside a building, under an arcade) only raises an
         // alert: the photo keeps the last fix and says how old it is (gpsStale, gpsAgeS) for the processing step
         val fresh = freshFix()
-        if (fresh == null) {
+        if (fresh == null && !indoor) {   // indoors the position comes from the steps
             _state.update { it.copy(gpsFresh = false) }
             if (fp.fix == null || session.startedAt == null) return
         }
@@ -898,13 +943,14 @@ class CaptureService : LifecycleService() {
             .put("gpsAgeS", fp.fix?.elapsedNanos?.let { Math.round((en - it) / 1e8) / 10.0 } ?: JSONObject.NULL)
         val motion = imu?.snapshot(en)
         motion?.let { meta.put("motion", it) }
+        if (indoor) indoorMeta(meta)
         if (poiId == null && hand) {
             // held by a passenger: this photo's own direction, gyro set to north by the compass; the compass alone
             // until the fusion has enough readings (the first seconds)
             val fused = motion?.optDouble("fusedAzimuthDeg")?.takeIf { !it.isNaN() }
             val compass = motion?.optDouble("cameraAzimuthDeg")?.takeIf { !it.isNaN() }
             HandBearing.apply(meta, fused ?: compass, if (fused != null) "gyroCompass" else "compass", fp.facadeDistanceM)
-        } else if (poiId == null) {   // street sweep on a mount: the compass at each photo feeds the mount estimate (CompassYaw)
+        } else if (poiId == null && !indoor) {   // street sweep on a mount: the compass at each photo feeds the mount estimate (CompassYaw)
             compassYaw.add(motion?.optDouble("cameraAzimuthDeg")?.takeIf { !it.isNaN() }, fp.travelBearing, fp.speedMps)
             checkMount()
             if (signs) meta.put("sideOfWay", JSONObject.NULL)   // looking ahead: the signs on both sides and overhead
@@ -1172,11 +1218,213 @@ class CaptureService : LifecycleService() {
         tasks.set(t.id, FieldTask.DONE, iso(System.currentTimeMillis()), "$poiId in ${session.id}")
     }
 
+    // ---------- indoor mode (docs/indoor.md) ----------
+
+    private data class IndoorSnap(val ll: LatLon, val uncertaintyM: Double, val sinceAnchorM: Double, val anchored: Boolean,
+                                  val headingDeg: Double?, val anchors: Int, val level: Int)
+
+    /** Steps, yaw and floors into [Pdr]; the start is the setup position (an anchor when it was a good fix outside). */
+    @SuppressLint("MissingPermission")
+    private fun startIndoor() {
+        val b = session.building
+        val st = session.indoor?.optJSONObject("start")
+        val start = st?.let { LatLon(it.getDouble("lat"), it.getDouble("lon")) }
+        val startAcc = st?.optDouble("accuracyM")?.takeIf { !it.isNaN() }
+        val last = runCatching { lm?.getLastKnownLocation(LocationManager.GPS_PROVIDER) }.getOrNull()
+        val origin = start ?: last?.let { LatLon(it.latitude, it.longitude) } ?: b?.center ?: LatLon(0.0, 0.0)
+        val step = session.indoor?.optDouble("stepLengthM")?.takeIf { !it.isNaN() && it > 0 } ?: Pdr.DEFAULT_STEP_M
+        val pdr = Pdr(LocalFrame(origin), step, b?.outer ?: emptyList(), anchored = false)
+        val level = 0
+        val permitted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACTIVITY_RECOGNITION) == PackageManager.PERMISSION_GRANTED
+        val t = IndoorTracker(getSystemService(SENSOR_SERVICE) as SensorManager, store.indoorFile(session.id), pdr, b, level, permitted,
+            onMove = { onIndoorMove() }, onFloor = { l -> onFloorSuggested(l) })
+        indoorTracker = t
+        t.start()
+        // a good satellite fix outside the building (not a remembered or Wi-Fi position) is the first anchor
+        if (start != null && st.optBoolean("gps") && startAcc != null && startAcc <= IndoorTracker.GPS_ANCHOR_ACC_M &&
+            (b == null || !b.contains(start)))
+            t.anchor(start, level, "gps")
+        levelsSeen += Levels.name(level)
+        _indoor.update { it.copy(stepSource = t.stepSource, barometer = t.hasBarometer) }
+        publishIndoor(newSegment = true)
+    }
+
+    private fun stopIndoor() {
+        val t = indoorTracker ?: return
+        t.stop()
+        floorPromptJob?.cancel()
+        session.indoor = (session.indoor ?: JSONObject())
+            .put("stepLengthM", Math.round(t.pdr.stepLengthM * 1000) / 1000.0).put("anchors", t.pdr.anchors)
+            .put("steps", t.pdr.steps).put("walkedM", Math.round(t.pdr.walkedM * 10) / 10.0)
+            .put("offsetDeg", Math.round(t.pdr.offsetDeg * 10) / 10.0).put("stepSource", t.stepSource)
+            .put("barometer", t.hasBarometer)
+        session.building = session.building?.copy(levelsSeen = levelsSeen.sortedBy { Levels.parse(it) ?: 0 })
+        indoorTracker = null
+    }
+
+    /** "{building} {stamp}" ("Vincom Thảo Điền 2026-11-25 14h32"). */
+    private fun indoorName(): String {
+        val name = session.building?.name ?: getString(R.string.setup_indoor_short)
+        val stamp = runCatching { java.time.format.DateTimeFormatter.ofPattern(SessionNaming.STAMP)
+            .withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.parse(session.startedAt ?: session.createdAt)) }.getOrNull()
+        return SessionNaming.name(listOf(name), stamp, name)
+    }
+
+    /** A GPS fix indoors: never the photos' position; outdoors (good, outside the footprint) an anchor. */
+    private fun onIndoorFix(f: Fix, l: Location) {
+        fp.onFix(f)
+        if (indoorTracker?.onFix(f) == true) publishIndoor(newSegment = true)
+        val hot = pm?.let { (it.getThermalHeadroom(10).takeIf { h -> !h.isNaN() } ?: 0f) >= 1f || it.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE } ?: false
+        _state.update {
+            it.copy(gps = if (fp.gpsGood) "good" else "weak", gpsFresh = true, accuracyM = f.accuracyM.roundToInt(),
+                // no speed, road or GPS warnings indoors: the GPS is wrong in there and there is no road
+                warnings = lightWarnings() + (if (hot) listOf(UiText(R.string.service_hot)) else emptyList()),
+                error = if (it.error?.res == R.string.service_gps_permission) null else it.error,
+                hot = hot, simulated = it.simulated || isSimulated(l))
+        }
+    }
+
+    /** A step moved the position (sensor thread). */
+    private fun onIndoorMove() {
+        val now = SystemClock.elapsedRealtimeNanos()
+        synchronized(recentSteps) { recentSteps.addLast(now); while (recentSteps.size > 12) recentSteps.removeFirst() }
+        publishIndoor(newSegment = false)
+        // no camera frames (no analysis stream): the photos follow the steps
+        if (_state.value.running && session.mode == Mode.PHOTO_AUTO && now - lastFrameNs > 1_000_000_000L)
+            ContextCompat.getMainExecutor(this).execute {
+                val n = SystemClock.elapsedRealtimeNanos()
+                if (n - lastFrameNs <= 1_000_000_000L || !_state.value.running) return@execute
+                trigger.addSpeed(indoorSpeedMps(n) ?: 0.0, (n - accountedNs) / 1e9, coverageM)
+                accountedNs = n
+                maybeShoot(steady = false)
+            }
+    }
+
+    /**
+     * Walking speed from the steps of the last 3 s (0 when standing); null when no step came for 10 s: the steps may
+     * not be detected at all on this phone, and then the frames alone time the photos (never no photos).
+     */
+    private fun indoorSpeedMps(nowNs: Long): Double? {
+        val (n, last) = synchronized(recentSteps) { recentSteps.count { nowNs - it in 0..3_000_000_000L } to recentSteps.lastOrNull() }
+        if (last == null || nowNs - last > 10_000_000_000L) return null
+        return n * (indoorTracker?.pdr?.stepLengthM ?: Pdr.DEFAULT_STEP_M) / 3.0
+    }
+
+    private fun levelRange(level: Int): IntRange {
+        val b = session.building
+        val r = Levels.range(b?.levels, b?.underground, level)
+        // levels unknown: one more each way than where the walker is
+        return if (b?.levels == null) minOf(r.first, level - 1)..maxOf(r.last, level + 1) else r
+    }
+
+    /** The live estimate to the screen, the map's track of the level and track.jsonl (≤ 1 point a second). */
+    private fun publishIndoor(newSegment: Boolean) {
+        val t = indoorTracker ?: return
+        val en = SystemClock.elapsedRealtimeNanos()
+        val p = synchronized(t) {
+            IndoorSnap(t.pdr.latLon, t.pdr.uncertaintyM, t.pdr.sinceAnchorM, t.pdr.anchored, t.pdr.headingDeg, t.pdr.anchors, t.level)
+        }
+        synchronized(indoorTrack) {
+            val segs = indoorTrack.getOrPut(p.level) { mutableListOf() }
+            if (newSegment || segs.isEmpty()) segs += mutableListOf<LatLon>()
+            segs.last() += p.ll
+        }
+        if (newSegment || en - lastIndoorTrackNs >= 1_000_000_000L) {
+            lastIndoorTrackNs = en
+            val line = JSONObject().put("t", System.currentTimeMillis()).put("lat", p.ll.lat).put("lon", p.ll.lon)
+                .put("acc", Math.round(p.uncertaintyM * 10) / 10.0).put("alt", JSONObject.NULL)
+                .put("spd", Math.round((indoorSpeedMps(en) ?: 0.0) * 100) / 100.0)
+                .put("hdg", p.headingDeg?.let { Math.round(it * 10) / 10.0 } ?: JSONObject.NULL).put("en", en)
+                .put("source", "pdr").put("level", Levels.name(p.level)).put("sinceAnchorM", Math.round(p.sinceAnchorM * 10) / 10.0)
+                .toString()
+            val sid = session.id
+            io.execute { runCatching { store.trackFile(sid).appendText(line + "\n") } }
+            _state.update { it.copy(trackPoints = it.trackPoints + 1) }
+        }
+        _indoor.update {
+            it.copy(level = p.level, levels = levelRange(p.level), position = p.ll, uncertaintyM = p.uncertaintyM,
+                sinceAnchorM = p.sinceAnchorM, anchored = p.anchored, headingDeg = p.headingDeg, anchors = p.anchors,
+                trackVersion = it.trackVersion + 1)
+        }
+    }
+
+    /** Photo position indoors (docs/indoor.md §5): the live estimate, its level, the yaw as the camera bearing. */
+    private fun indoorMeta(meta: JSONObject) {
+        val t = indoorTracker ?: return
+        val en = meta.optLong("elapsedNanos", SystemClock.elapsedRealtimeNanos())
+        fun r1(d: Double) = Math.round(d * 10) / 10.0
+        synchronized(t) {
+            val p = t.pdr
+            val ll = p.latLon
+            val hdg = p.headingDeg
+            meta.put("gpsLat", meta.opt("lat")).put("gpsLon", meta.opt("lon")).put("gpsAccuracyM", meta.opt("accuracyM"))
+                .put("lat", ll.lat).put("lon", ll.lon).put("accuracyM", r1(p.uncertaintyM))
+                .put("level", Levels.name(t.level)).put("positionSource", "pdr").put("sinceAnchorM", r1(p.sinceAnchorM))
+                .put("cameraBearing", hdg?.let { r1(it) } ?: JSONObject.NULL).put("cameraBearingSource", "pdr-yaw")
+                .put("speedMps", indoorSpeedMps(en)?.let { Math.round(it * 100) / 100.0 } ?: JSONObject.NULL)
+                .put("travelBearing", JSONObject.NULL).put("cameraYawToTravelDeg", JSONObject.NULL)
+                .put("wayId", JSONObject.NULL).put("roadName", JSONObject.NULL).put("distanceToRoadM", JSONObject.NULL)
+                .put("segmentBearing", JSONObject.NULL).put("travel", JSONObject.NULL)
+                .put("sideOfTravel", JSONObject.NULL).put("sideOfWay", JSONObject.NULL)
+                .put("building", session.building?.osm ?: JSONObject.NULL)
+            facadeFields(ll, hdg, facadeNow)?.let { fj -> for (k in fj.keys()) meta.put(k, fj.get(k)) }
+            if (meta.has("facadeLat")) meta.put("facadeSource", "indoor")
+        }
+    }
+
+    private fun onFloorSuggested(level: Int) = ContextCompat.getMainExecutor(this).execute {
+        if (activeSession.value == null || indoorTracker == null) return@execute
+        _indoor.update { it.copy(floorPrompt = level, levels = levelRange(level)) }
+        floorPromptJob?.cancel()
+        // not answered (phone in a pocket on the escalator): taken as the barometer says, marked "guessed"
+        floorPromptJob = lifecycleScope.launch { delay(FLOOR_GUESS_MS); if (_indoor.value.floorPrompt == level) changeLevel(level, "guessed") }
+    }
+
+    /** "Lên tầng 2?" answered: yes = that level, no = the walker is still on this one (the pressure now is its own). */
+    fun answerFloor(yes: Boolean) {
+        val l = _indoor.value.floorPrompt ?: return
+        floorPromptJob?.cancel()
+        if (yes) changeLevel(l, "confirmed") else { indoorTracker?.keepLevel(); _indoor.update { it.copy(floorPrompt = null) } }
+    }
+
+    /** The level picker. */
+    fun pickLevel(level: Int) {
+        floorPromptJob?.cancel()
+        changeLevel(level, "picked")
+    }
+
+    private fun changeLevel(level: Int, how: String) {
+        val t = indoorTracker ?: return
+        t.setLevel(level, how)
+        levelsSeen += Levels.name(level)
+        _indoor.update { it.copy(floorPrompt = null) }
+        publishIndoor(newSegment = true)
+    }
+
+    /** "Tôi ở đây": the walker is at [at] on [level]; with [headingDeg] (second tap) the walking direction too. */
+    fun anchorHere(at: LatLon, level: Int, headingDeg: Double? = null) {
+        val t = indoorTracker ?: return
+        t.anchor(at, level, "tap", headingDeg)
+        levelsSeen += Levels.name(level)
+        _indoor.update { it.copy(floorPrompt = null) }
+        publishIndoor(newSegment = true)
+    }
+
+    /** The walking direction now (second tap after an anchor). */
+    fun setWalkHeading(deg: Double) {
+        indoorTracker?.setHeading(deg, "drag")
+        publishIndoor(newSegment = false)
+    }
+
+    /** The walked track of one level, as segments (copied). */
+    fun indoorTrackOf(level: Int): List<List<LatLon>> = synchronized(indoorTrack) { indoorTrack[level]?.map { it.toList() } ?: emptyList() }
+
     // ---------- session control ----------
 
     fun start() {
         if (_state.value.running) return
-        if (session.startedAt == null && freshFix() == null) return   // the first start waits for GPS; resuming does not
+        // the first start waits for GPS (resuming does not); indoors the walk starts from the building or a tap
+        if (session.startedAt == null && freshFix() == null && !indoor) return
         if (session.startedAt == null) session.startedAt = iso(System.currentTimeMillis())
         store.save(session)
         _state.update { it.copy(running = true) }
@@ -1202,12 +1450,13 @@ class CaptureService : LifecycleService() {
         watcher?.release()
         gnss?.let { session.gnss = it.summary(); it.stop() }
         imu?.stop()
+        stopIndoor()
         framesLog?.let { runCatching { it.close() } }
         framesLog = null
         val ui = _state.value
         session.endedAt = iso(System.currentTimeMillis())
         // saved with its name: the street it was recorded on and the day
-        session.name = runCatching { TrackStats.sessionName(store.items(session.id),
+        session.name = if (indoor) indoorName() else runCatching { TrackStats.sessionName(store.items(session.id),
             session.startedAt ?: session.createdAt, getString(R.string.session_no_street),
             ways = session.road.ways + cellWays.values.flatten()) }.getOrNull()
         session.counts = JSONObject().put("photos", ui.photos).put("videos", ui.videos).put("trackPoints", ui.trackPoints)

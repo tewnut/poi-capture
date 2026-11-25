@@ -6,21 +6,22 @@ export type LatLon = { lat: number; lon: number }
 /** A value read on the photos, or filled from the website / Google when the photos lack it (source "website" /
  *  "google"); compared with a matched Google place: google = "match" | "differs" (then googleValue is Google's).
  *  A street nobody gives is the road the photos were taken on (source "ride", a suggestion: fields.ts); ride =
- *  "differs" + rideValue when another source names a different street. */
+ *  "differs" + rideValue when another source names a different street. An indoor walk's level not read on a sign is
+ *  the walk's (source "walk": barometer / the walker's pick, docs/indoor.md). */
 export type Field = {
   value: string; photo?: number | string | null; sure?: 'high' | 'medium' | 'low'
-  source?: 'photo' | 'google' | 'website' | 'ride'; google?: 'match' | 'differs'; googleValue?: string; note?: string | null
+  source?: 'photo' | 'google' | 'website' | 'ride' | 'walk'; google?: 'match' | 'differs'; googleValue?: string; note?: string | null
   website?: 'match' | 'differs'; websiteValue?: string
   ride?: 'match' | 'differs'; rideValue?: string
   /** an unclear photo reading made clear by the source; photoValue = what the photo showed */
   clarified?: boolean; photoValue?: string
 }
 
-export const FIELD_KEYS = ['name', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'signText', 'other', 'signCode'] as const
+export const FIELD_KEYS = ['name', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'signText', 'other', 'signCode', 'level', 'unit'] as const
 export type FieldKey = (typeof FIELD_KEYS)[number]
 export const FIELD_LABEL: Record<FieldKey, string> = {
   name: 'Name', phone: 'Phone', houseNumber: 'House number', street: 'Street / area', openingHours: 'Opening hours',
-  website: 'Website', signText: 'Sign text', other: 'Other text', signCode: 'Sign code',
+  website: 'Website', signText: 'Sign text', other: 'Other text', signCode: 'Sign code', level: 'Level', unit: 'Unit',
 }
 
 /** What a result entry is (docs/sweep-targets.md): a place (shop), a house number, or a traffic sign. Missing = place. */
@@ -59,6 +60,29 @@ export type Place = {
   /** An address, optional (newer processing): where the number was read (plate | sign | painted | other), the old
    *  number on the same plate, other numbers on the gate, read only in part. Read by addresses.ts addressExtras. */
   numbering?: { source?: string | null; oldNumber?: string | null; altNumbers?: string[] | null; partial?: boolean } | null
+  /** A shop on an indoor walk (docs/indoor.md): its level as the building names it ("B1", "G", "2"; levelFrom
+   *  read on a sign, or the walk's), its unit ("L2-15" as read), the building it is in, and the directory-board entry
+   *  that confirms it. The reviewed values are the level / unit fields (indoor.ts placeLevel). */
+  indoor?: boolean
+  level?: string | null
+  levelFrom?: 'read' | 'walk' | null
+  unit?: string | null
+  building?: { osm?: string | null; name?: string | null; address?: string | null; addr?: Record<string, string> | null } | null
+  directory?: DirectoryEntry | null
+}
+
+/** A shop read on a mall's directory board (docs/indoor.md). place = the folder of the place it matched, null when
+ *  no place did (then a visit task; lat / lon = where it probably is). */
+export type DirectoryEntry = { level?: string | null; unit?: string | null; name?: string | null; by?: 'unit' | 'name' | null
+  photo?: string | number | null; photoIndex?: number | null; place?: string | null; lat?: number; lon?: number; where?: string }
+
+/** The building of an indoor walk, as the phone loaded it from OpenStreetMap (session.building). Rings are
+ *  [[lat, lon], ...]: outer (one or more rings) and holes when given, else footprint. addr = its addr:* tags
+ *  ("addr:street": ..., the prefix may be left out). */
+export type Building = {
+  osm?: string | null; name?: string | null; levels?: number | null; underground?: number | null
+  footprint?: [number, number][] | null; outer?: [number, number][][] | null; holes?: [number, number][][] | null
+  levels_seen?: string[] | null; indoorMapped?: boolean; addr?: Record<string, string> | null
 }
 
 export const layerOf = (p: Place): Layer => p.layer || 'place'
@@ -71,15 +95,27 @@ export type Task = {
   lon: number
   why: string
   photo?: string | null
+  /** Indoor walks: the level / unit of the shop to visit. */
+  level?: string | null
+  unit?: string | null
 }
+
+export type Shot = [number, number, number, number | null] | [number, number, number, number | null, string | null]
 
 export type Dataset = {
   id: string                       // session id (+ "-raw" for a raw zip)
   source: 'result' | 'raw'
   importedAt: string
-  session: { id: string; name?: string; kind?: 'sweep' | 'poi'; holding?: string | null; startedAt?: string; street?: string | null; target?: Target }
+  session: { id: string; name?: string; kind?: 'sweep' | 'poi' | 'indoor'; holding?: string | null; startedAt?: string; street?: string | null; target?: Target }
   track: [number, number][]
-  shots: [number, number, number, number | null][]   // [photo index, lat, lon, camera bearing]
+  /** [photo index, lat, lon, camera bearing, level (indoor walks only)] */
+  shots: Shot[]
+  /** Indoor walks (docs/indoor.md): the building, its levels lowest first, the level of each track point, the
+   *  shops read on its directory boards. */
+  building?: Building | null
+  levels?: string[]
+  trackLevels?: (string | null)[]
+  directory?: DirectoryEntry[]
   shotFiles?: Record<number, string>                  // raw zips: photo index -> file path
   places: Place[]
   tasks: Task[]

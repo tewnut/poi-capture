@@ -43,7 +43,7 @@ const FOLDERS: [string, (r: Row) => boolean][] = [
 
 /** The main fields as "key: value" lines (KML description, GPX desc). */
 function summary(r: Row) {
-  return (['category', 'signCode', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'fromGoogle', 'comment'] as const)
+  return (['category', 'signCode', 'status', 'phone', 'houseNumber', 'street', 'building', 'level', 'unit', 'openingHours', 'website', 'fromGoogle', 'comment'] as const)
     .filter((k) => r[k] != null && r[k] !== '').map((k) => `${k}: ${r[k]}`).join('\n')
 }
 
@@ -85,7 +85,7 @@ export function gpx(places: Published[], removed: Removed[]) {
 export const DBF_FIELDS: Record<(typeof CSV_COLS)[number], string> = {
   id: 'id', change: 'change', name: 'name', category: 'category', layer: 'layer', signCode: 'sign_code', signPost: 'sign_post',
   signOrder: 'sign_order', status: 'status',
-  phone: 'phone', houseNumber: 'house_no', street: 'street', openingHours: 'open_hours', website: 'website',
+  phone: 'phone', houseNumber: 'house_no', street: 'street', level: 'level', unit: 'unit', building: 'building', openingHours: 'open_hours', website: 'website',
   fromGoogle: 'from_ggl', lat: 'lat', lon: 'lon', pinSource: 'pin_source', session: 'session', sessionName: 'sess_name',
   captured: 'captured', reviewer: 'reviewer', reviewedAt: 'reviewed', comment: 'comment', photos: 'photos',
 }

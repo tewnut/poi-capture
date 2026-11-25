@@ -19,6 +19,7 @@ export const state = reactive({
   place: null as string | null,        // selected place id
   task: null as number | null,         // selected task (index in the open dataset's tasks)
   layer: '' as '' | Layer,             // the open session's layer chip (places / addresses / signs); '' = all
+  level: '' as string,                 // an indoor walk's level chip (indoor.ts): its places, track and photos; '' = all
   missing: '' as string,               // a link to a session that is not in this browser
   reviews: {} as Record<string, Review>,          // `${dataset}|${place}`
   removals: {} as Record<string, RemovalReview>,  // `${dataset}|${task index}`

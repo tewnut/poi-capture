@@ -5,7 +5,7 @@ usage: python merge_places.py <work>/places.json <part1.json> <part2.json> [...]
 Each reader read a range of photos (e.g. 0-87, 84-173, 170-254: ranges overlap by a few photos so that a sign at a
 boundary is seen whole by one of them) and wrote a places.json part with the same format. This joins them:
 - ride-level keys ("street", "defaultFacadeDistanceM", "bearingOffsetDeg", ...) from the first part that has them;
-  "road" and "streets" stretches and "removals" are joined;
+  "road" and "streets" stretches, "removals" and an indoor walk's "directory" entries (each once) are joined;
 - places, addresses and signs are joined, and the same thing read by two readers in the overlap is merged into one
   (a sign's "post" gets its part's number in front, "2.p1", so two readers' "p1" stay apart; a post merged in the
   overlap takes one id for all its signs):
@@ -94,7 +94,7 @@ def merge_two(a, b):
         if a.get(k) or b.get(k):
             out[k] = list(dict.fromkeys((a.get(k) or []) + (b.get(k) or [])))
     for k in ('oldNumber', 'source', 'placeRef', 'street', 'unit', 'agentPin', 'signText', 'extra', 'side', 'lane',
-              'post', 'order'):
+              'post', 'order', 'level'):
         if not out.get(k) and second.get(k):
             out[k] = second[k]
     notes = [n for n in (first.get('note'), second.get('note')) if n]
@@ -130,7 +130,7 @@ def merge(parts):
     out, report = {}, []
     for p in parts:
         for k, v in p.items():
-            if k in ('places', 'addresses', 'signs', 'removals') + LISTS:
+            if k in ('places', 'addresses', 'signs', 'removals', 'directory') + LISTS:
                 continue
             out.setdefault(k, v)
     for k in LISTS:
@@ -175,6 +175,14 @@ def merge(parts):
                 keys.add(k)
                 rem.append(r)
     out['removals'] = rem
+    # an indoor walk's directory boards (SKILL.md "Indoor walks"): every reader's entries, each once
+    seen = set()
+    for p in parts:
+        for e in p.get('directory') or []:
+            k = (str(e.get('level')), _key(e.get('unit')), _key(e.get('name')))
+            if k not in seen:
+                seen.add(k)
+                out.setdefault('directory', []).append(e)
     return out, report
 
 

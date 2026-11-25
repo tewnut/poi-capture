@@ -28,23 +28,35 @@ object OverpassClient {
 
     fun cached(q: String): List<Way>? = synchronized(cache) { cache[q] }
 
-    suspend fun ways(url: String, q: String): List<Way> = lock.withLock {
+    suspend fun ways(url: String, q: String): List<Way> {
         cached(q)?.let { return it }
+        val ways = Overpass.parseWays(body(url, q))
+        synchronized(cache) { cache[q] = ways }
+        return ways
+    }
+
+    private val bodies = HashMap<String, String>()
+
+    /** The raw JSON answer to any query (indoor mode: buildings, shops inside), same mirrors and rate limit, cached. */
+    suspend fun body(url: String, q: String): String = lock.withLock {
+        synchronized(bodies) { bodies[q] }?.let { return it }
         var lastError: Exception? = null
         for (u in (listOf(url) + MIRRORS).distinct()) {
             val wait = 1500 - (System.currentTimeMillis() - last)
             if (wait > 0) delay(wait)
             last = System.currentTimeMillis()
             try {
-                val ways = withContext(Dispatchers.IO) { post(u, q) }
-                synchronized(cache) { cache[q] = ways }
-                return ways
+                val b = withContext(Dispatchers.IO) { post(u, q) }
+                org.json.JSONObject(b)   // a busy server may answer 200 with an HTML page: try the next one
+                // way lists are kept parsed (smaller); other answers as text
+                if (!q.contains("[highway]")) synchronized(bodies) { bodies[q] = b }
+                return b
             } catch (e: Exception) { lastError = e }
         }
         throw RoadDataUnavailable(lastError)
     }
 
-    private fun post(url: String, q: String): List<Way> {
+    private fun post(url: String, q: String): String {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.requestMethod = "POST"
@@ -55,7 +67,7 @@ object OverpassClient {
             c.setRequestProperty("User-Agent", "poi-capture-android/0.8")
             c.outputStream.use { it.write(("data=" + URLEncoder.encode(q, "UTF-8")).toByteArray()) }
             if (c.responseCode != 200) error("HTTP ${c.responseCode}")
-            return Overpass.parseWays(c.inputStream.bufferedReader().readText())
+            return c.inputStream.bufferedReader().readText()
         } finally { c.disconnect() }
     }
 }

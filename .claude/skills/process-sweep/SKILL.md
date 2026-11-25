@@ -29,7 +29,8 @@ python <skill>/scripts/prepare.py <session.zip | folder> <work>
 
 Prints the session, the photo count and the roads, and how far the photo positions moved: the app stamps each photo
 with the latest GPS fix (up to ~1 s old, ~6 m at 25 km/h), so prepare.py places it by time between the fixes in
-`track.jsonl` (the phone's elapsed-time clock, which both carry; `positionFrom` and `fixLat`/`fixLon` in photos.json). `kind` must be `sweep`; for `poi` (Place capture) the places are
+`track.jsonl` (the phone's elapsed-time clock, which both carry; `positionFrom` and `fixLat`/`fixLon` in photos.json). `kind` must be `sweep`, or
+`indoor` (a walk through a mall: see "Indoor walks" below, it changes positions, sheets and places.json); for `poi` (Place capture) the places are
 already grouped: say so and stop unless the user wants the enrichment only. On a house-number ride it also makes
 the plate crop sheets `<work>/crops/plates_NN.jpg` (see "Reading by target"; `--no-crops` skips them).
 
@@ -266,6 +267,54 @@ algorithm / Google / agent, photos, and the task list: visits for Place capture,
 for the maps) and `removals.json`; `index.html` has a map, and the parent folder an `index.html` over all
 sessions. `--doors <place capture session>` adds the doors captured on site for comparison. The web app (`web/`,
 docs/pipeline.md) opens it from the server for review and publishing: push it with `cloud.py push` (below).
+
+## Indoor walks (`kind: "indoor"`)
+
+A walk on foot through a mall, market, airport… (docs/indoor.md): no GPS inside, no road. The phone dead-reckons
+(steps + gyro heading + barometer) and the walker re-positions now and then ("Tôi ở đây": an **anchor**). What
+changes:
+
+- **prepare.py** recomputes every photo's position from `indoor.jsonl` (scripts/indoor.py): the walk is split at
+  the anchors, each stretch between two anchors rotated and scaled so it starts and ends on them (the drift spread
+  along it; a stretch that is a loop or under 3 m is translated and its end gap spread by distance walked), before
+  the first / after the last anchor translated only, and every point kept inside the building's footprint
+  (`session.building`; moved onto the nearest wall, slid along it), except within 15 m walked of an anchor outside
+  it (the entrance). photos.json then has the corrected `lat`/`lon`, `livePosition` (the phone's), `level`,
+  `uncertaintyM` (max 3 m, 5 % of the distance walked to the nearest anchor; also used as `accuracyM`),
+  `sinceAnchorM`, `cameraBearing` turned with its stretch (`cameraBearingLive` the phone's), `unitHints` (unit-like
+  text the phone's reader saw: "L2-15"), `roadName` null. `<work>/indoor_track.json` is the corrected walk with
+  levels. No `indoor.jsonl`, or no anchor in it: the live positions stay (said in the printout) — positions are
+  then the phone's, 5–10 % of the distance walked off: say so in the report.
+- **Contact sheets** say the level on each photo (`#12  lvl 2`), `DIRECTORY` on a directory-board photo (the
+  walker's button on the capture screen, trigger `directory`), and the unit hints (`L2-15?`: hints, check them).
+- **Reading**: every shop as on a street (name, category, phone, hours…), plus in places.json:
+  - `"level"` only when a sign or the unit says it (`"2"`, `"B1"`, `"G"`, as the building names its levels:
+    `session.building.levels_seen`); otherwise leave it out: the walk's level at the cover photo is used
+    (`levelFrom: "walk"`, a suggestion the reviewer checks). A level change on an escalator can lag a few photos:
+    when the shops say otherwise, write the level.
+  - `"unit"`: the unit number as read on the shopfront ("L2-15", "B1-03", "K-05"). build.py notes a unit that
+    names another level than the place's.
+  - `"directory": [{"level": "2", "unit": "L2-15", "name": "Highlands Coffee", "photo": 37}, …]` at the top of
+    places.json: every shop listed on the directory boards, per level, as written (`photo` = the board's photo).
+    Read the whole board, also shops you did not pass.
+  - Shops face a corridor: `defaultFacadeDistanceM` defaults to 6 m indoors (set it for wide atriums). `x`
+    sightings and triangulation work as outdoors (the camera bearing is the phone's yaw); no facade snap, no
+    `street` / `streets` / `road`.
+- **build.py**: each place gets `level`, `unit` (fields `level` / `unit` too), `indoor: true` and the building
+  (`place.building`: name, OSM id, its address from the building's own `addr:*` tags; `place.address` the same):
+  **no street from the phone** and no ride-road suggestion. Each place is kept inside the footprint ("moved … back
+  inside the building" in its method). The directory is matched to the places (same level and unit — the unit's own
+  number when one side has no level prefix — else a similar name on the same level): a matched place gets
+  `place.directory` and a note ("on the directory board…"; the board's unit when it had none, or "the board says
+  unit X" when they differ); an entry no place matches becomes a **visit task** (level, unit, placed next to the
+  shop with the nearest unit number on its level, else the middle of that level's shops, else the building's
+  middle). Directory photos are copied to `<out>/_directory/`. result.json has `building`, `levels`, `trackLevels`,
+  `directory`, and a 5th element (level) in each shot; places.csv / places.geojson have `level`, `unit`,
+  `building`.
+- **Google**: the lookup works as outdoors (a mall's Google listings often carry the unit in the address); the
+  house-number check has no number to compare indoors.
+- **Report**: the anchors and how much the positions moved from the live estimate, the levels walked, the
+  directory entries not found on the walk (the visit tasks).
 
 ## 4. Enrich from Google Maps
 

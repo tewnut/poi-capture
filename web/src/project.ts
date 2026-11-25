@@ -144,7 +144,7 @@ export type ProjectInput = {
   missing?: Set<string>                        // stored photo paths that could not be read (marked, and warned)
 }
 
-type Src = 'photo' | 'google' | 'website' | 'ride'
+type Src = 'photo' | 'google' | 'website' | 'ride' | 'walk'   // walk: an indoor walk's level (docs/indoor.md)
 export type ProjectField = {
   value: string | null                         // the reviewed value; null when the reviewer rejected it
   state: 'ok' | 'edited' | 'rejected'

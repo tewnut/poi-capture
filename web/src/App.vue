@@ -27,6 +27,7 @@ import { humanSize, type CloudItem } from './cloud'
 import { conn, connected, canRead, canRelease, stopProcessing, connect, refresh, rows, pull, loadSaved, saveToServer, type Row } from './connection'
 import { swipeStep, neighbour, blocksSwipe, type Step } from './swipe'
 import { LAYERS, layerOf, type Dataset, type Layer, type Place } from './types'
+import { defaultLevel, isIndoor, levelsOf, onLevel, placeLevel } from './indoor'
 
 type View = 'sessions' | 'allTasks' | 'places' | 'tasks'
 const view = ref<View>('sessions')
@@ -86,7 +87,13 @@ watch(fKind, (k) => { if (k === 'poi') fHold.value = '' })
 watch(() => route.fullPath, applyRoute)
 watch(() => state.loading, applyRoute)
 watch(() => conn.items, applyRoute)
-watch(() => state.open, () => { q.value = ''; fDecision.value = ''; fGoogle.value = ''; state.layer = '' })
+watch(() => state.open, () => { q.value = ''; fDecision.value = ''; fGoogle.value = ''; state.layer = ''; state.level = openLevel() })
+/** An indoor walk opens on the level with the most places (indoor.ts); outdoors there is no level. */
+function openLevel() {
+  const d = openDataset.value
+  return (d && defaultLevel(d, (p) => reviewOf(d.id, p))) || ''
+}
+watch(() => openDataset.value?.id, (id, old) => { if (id && id !== old && !state.level) state.level = openLevel() })
 onMounted(async () => { await load(); await connect() })
 
 // sessions: the server's (processed, or still waiting for the agent) and the ones downloaded into this browser
@@ -106,6 +113,7 @@ function kindLabel(x: Row | Dataset) {
   const d = 'session' in x ? x : dsOf(x)
   const kind = d ? d.session.kind : (x as Row).kind
   if (kind === 'poi') return t('kindPoi')
+  if (kind === 'indoor') return t('kindIndoor')
   // not downloaded yet: the server does not say how the phone was held
   const hold = d ? d.session.holding || 'mount' : (x as Row).item?.metadata.holding ?? (x as Row).raw?.metadata.holding
   return hold == null ? t('sweep') : t(hold === 'hand' ? 'kindSweepHand' : 'kindSweepMount')
@@ -197,12 +205,19 @@ const places = computed(() => {
   const s = q.value.trim().toLowerCase()
   return d.places.map((p, i) => ({ p, i })).filter(({ p }) => {
     const r = reviewOf(d.id, p)
-    return (!state.layer || layerOf(p) === state.layer) &&
+    return (!state.layer || layerOf(p) === state.layer) && onLevel(p, state.level, r) &&
       (!s || `${p.name} ${p.category || ''} ${p.fields.signText?.value || ''}`.toLowerCase().includes(s)) &&
       (!fDecision.value || r.decision === fDecision.value) && (!fGoogle.value || gstat(p) === fGoogle.value)
   })
 })
-function clearPlaceFilters() { q.value = ''; fDecision.value = ''; fGoogle.value = ''; state.layer = '' }
+function clearPlaceFilters() { q.value = ''; fDecision.value = ''; fGoogle.value = ''; state.layer = ''; state.level = '' }
+/** An indoor walk's levels with their place counts (the level chips; indoor.ts). */
+const levelCounts = computed(() => {
+  const d = openDataset.value
+  if (!d || !isIndoor(d)) return []
+  const rv = (p: Place) => reviewOf(d.id, p)
+  return levelsOf(d, rv).map((l) => ({ l, n: d.places.filter((p) => placeLevel(p, rv(p)) === l).length }))
+})
 /** The open session's layers with their counts; chips only when there is more than one. */
 const layerCounts = computed(() => {
   const d = openDataset.value
@@ -213,7 +228,8 @@ function placeLine(p: Place) {
   const l = layerOf(p)
   if (l === 'sign') return [p.fields.signCode?.value || p.sign?.code, p.fields.other?.value].filter(Boolean).join(' · ')
   if (l === 'address') return p.placeRef ? t('placeRef', { name: p.placeRef }) : ''
-  return `${p.category || ''}${p.fields.phone ? ' · ' + p.fields.phone.value : ''}`
+  const where = p.indoor || p.unit ? [placeLevel(p) ? t('levelN', { l: placeLevel(p) }) : '', p.fields.unit?.value || p.unit || ''].filter(Boolean).join(' · ') : ''
+  return [where, `${p.category || ''}${p.fields.phone ? ' · ' + p.fields.phone.value : ''}`].filter(Boolean).join(' · ')
 }
 function selectPlace(ds: string, id: string) { router.push(to.place(ds, id)) }
 function selectTask(ds: string, i: number) { router.push(to.task(ds, i)) }
@@ -221,7 +237,7 @@ function nextPlace() {
   const d = openDataset.value
   if (!d) return
   // the next one to do in the layer shown
-  const list = d.places.filter((p) => !state.layer || layerOf(p) === state.layer)
+  const list = d.places.filter((p) => (!state.layer || layerOf(p) === state.layer) && onLevel(p, state.level, reviewOf(d.id, p)))
   const i = list.findIndex((p) => p.id === state.place)
   const next = list.slice(i + 1).find((p) => reviewOf(d.id, p).decision === 'todo') || list.find((p) => reviewOf(d.id, p).decision === 'todo')
   router.push(next ? to.place(d.id, next.id) : to.session(d.id))
@@ -510,6 +526,11 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
             </template>
           </div>
           <template v-else>
+            <nav v-if="levelCounts.length" class="seg levels" :aria-label="t('levelsAria')">
+              <button :class="{ on: !state.level }" @click="state.level = ''">{{ t('levelAll') }} <span class="n">{{ openDataset.places.length }}</span></button>
+              <button v-for="x in levelCounts" :key="x.l" :class="{ on: state.level === x.l }" @click="state.level = x.l">{{ x.l }} <span class="n">{{ x.n }}</span></button>
+            </nav>
+            <p v-if="openDataset.building?.name" class="muted small building">{{ t('inBuilding', { name: openDataset.building.name }) }}</p>
             <nav v-if="layerCounts.length > 1" class="seg layers">
               <button :class="{ on: !state.layer }" @click="state.layer = ''">{{ t('layerAll') }} <span class="n">{{ openDataset.places.length }}</span></button>
               <button v-for="x in layerCounts" :key="x.l" :class="['ly-' + x.l, { on: state.layer === x.l }]" @click="state.layer = x.l">{{ t('layer_' + x.l) }} <span class="n">{{ x.n }}</span></button>

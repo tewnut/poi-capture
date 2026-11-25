@@ -38,9 +38,10 @@ export function pendingSuggestions(place: Place, review: Review): FieldKey[] {
 }
 
 /** No street at all: nothing read, suggested or typed, or the reviewer rejected it without typing another.
- *  A traffic sign has no address. */
+ *  A traffic sign has no address; a shop on an indoor walk has its building's (docs/indoor.md). */
 export function missingStreet(place: Place, review: Review): boolean {
   if (place.layer === 'sign') return false
+  if (place.indoor || place.level != null || place.unit != null) return false
   const r = review.fields.street
   if (r) return r.state === 'rejected' || !r.value
   return !place.fields.street?.value

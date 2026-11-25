@@ -1,7 +1,7 @@
 // Turn dropped files (a folder from the agentic processing, or a zip of it, or a raw session zip from the phone)
 // into a Dataset plus its photo files. Nothing leaves the browser.
 import { unzipSync, strFromU8 } from 'fflate'
-import { LAYERS, type Dataset, type Place, type Target, type Task } from './types'
+import { LAYERS, type Dataset, type Place, type Shot, type Target, type Task } from './types'
 
 export type Imported = { dataset: Dataset; files: Map<string, Blob> }
 
@@ -85,6 +85,9 @@ function fromResult(r: any, files: Map<string, Blob>): Imported {
     dataset: {
       id: r.session.id, source: 'result', importedAt: new Date().toISOString(), session: { ...r.session, target: targetOf(r.session.target) },
       track: r.track || [], shots: r.shots || [], places, tasks, files: [...kept.keys()],
+      // indoor walks (docs/indoor.md)
+      ...(r.session.kind === 'indoor' ? { building: r.building || null, levels: r.levels || [], trackLevels: r.trackLevels || [],
+        directory: r.directory || [] } : {}),
     },
     files: kept,
   }
@@ -95,17 +98,30 @@ async function fromRaw(m: any, files: Map<string, Blob>): Promise<Imported> {
   const s = m.session
   const photos = (m.items || []).filter((i: any) => i.kind === 'photo')
   let track: [number, number][] = []
+  let trackLevels: (string | null)[] = []
+  const indoor = s.kind === 'indoor'
   const tj = await text(files.get(m.trackFile || 'track.geojson'))
   if (tj) {
     const g = JSON.parse(tj)
     for (const f of g.features || [g]) {
       const geom = f.geometry || f
       if (geom.type === 'LineString') track.push(...geom.coordinates.map((c: number[]) => [c[1], c[0]] as [number, number]))
-      if (geom.type === 'Point') track.push([geom.coordinates[1], geom.coordinates[0]])
+      if (geom.type === 'Point') {
+        track.push([geom.coordinates[1], geom.coordinates[0]])
+        trackLevels.push(f.properties?.level != null ? String(f.properties.level) : null)
+      }
     }
   }
-  if (!track.length) track = photos.filter((p: any) => p.lat != null).map((p: any) => [p.lat, p.lon])
-  const shots = photos.map((p: any, i: number) => [i, p.lat, p.lon, p.cameraBearing ?? null] as [number, number, number, number | null])
+  if (trackLevels.length !== track.length) trackLevels = []
+  if (!track.length) {
+    const located = photos.filter((p: any) => p.lat != null)
+    track = located.map((p: any) => [p.lat, p.lon])
+    trackLevels = located.map((p: any) => (p.level != null ? String(p.level) : null))
+  }
+  // indoor walks: each photo's level as the 5th element (the live estimate: not processed yet)
+  const shots = photos.map((p: any, i: number) => (indoor
+    ? [i, p.lat, p.lon, p.cameraBearing ?? null, p.level != null ? String(p.level) : null]
+    : [i, p.lat, p.lon, p.cameraBearing ?? null]) as Shot)
     .filter((x: any) => x[1] != null)
   const shotFiles: Record<number, string> = {}
   photos.forEach((p: any, i: number) => (shotFiles[i] = p.file))
@@ -131,6 +147,7 @@ async function fromRaw(m: any, files: Map<string, Blob>): Promise<Imported> {
       id: `${s.id}-raw`, source: 'raw', importedAt: new Date().toISOString(),
       session: { id: s.id, name: s.name, kind: s.kind, holding: s.holding, startedAt: s.startedAt, target: targetOf(s.target) },
       track, shots, shotFiles, places, tasks: [], files: [...kept.keys()],
+      ...(indoor ? { building: s.building || null, trackLevels: trackLevels.some((l) => l != null) ? trackLevels : [] } : {}),
     },
     files: kept,
   }

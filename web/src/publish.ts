@@ -5,6 +5,7 @@ import type { Dataset, Place, Review, FieldKey, RemovalReview, Task } from './ty
 import { FIELD_KEYS, layerOf } from './types'
 import { exportNames } from './photos'
 import { overRoad, postOf, trafficSignValue } from './signPosts'
+import { buildingAddr, isIndoorPlace, levelNames, normLevel, osmLevel } from './indoor'
 
 export type Published = {
   dataset: Dataset
@@ -38,6 +39,8 @@ export function record(x: Published) {
     ...(layer === 'sign' && postOf(place) ? { signPost: postOf(place), signOrder: place.sign?.order ?? null } : {}),
     status: place.status,
     phone: v.phone, houseNumber: v.houseNumber, street: v.street, openingHours: v.openingHours, website: v.website,
+    // indoor walks (docs/indoor.md): the reviewed level and unit, and the building the shop is in
+    level: normLevel(v.level), unit: v.unit, building: isIndoorPlace(place) ? place.building?.name || dataset.building?.name || null : null,
     lat: +pin.lat.toFixed(7), lon: +pin.lon.toFixed(7),
     pinSource: review.pin?.source || (place.pins.agent ? 'agent' : place.pins.algorithm ? 'algorithm' : 'contributor'),
     session: dataset.session.id, sessionName: dataset.session.name || '', captured: dataset.session.startedAt || '',
@@ -65,7 +68,8 @@ export function geojson(places: Published[], removed: Removed[]) {
   return JSON.stringify({ type: 'FeatureCollection', features: feats }, null, 1)
 }
 
-export const CSV_COLS = ['id', 'change', 'name', 'category', 'layer', 'signCode', 'signPost', 'signOrder', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
+export const CSV_COLS = ['id', 'change', 'name', 'category', 'layer', 'signCode', 'signPost', 'signOrder', 'status', 'phone', 'houseNumber', 'street',
+  'level', 'unit', 'building', 'openingHours', 'website',
   'fromGoogle', 'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment', 'photos'] as const
 
 /** A CSV cell. Text starting with = + - @ (or a tab / return) is prefixed with ' so spreadsheets do not run it
@@ -139,6 +143,22 @@ function signTags(codes: string[], p: Place): Record<string, string> | null {
   return tags
 }
 
+/** A shop inside a building (Simple Indoor Tagging): level=* and addr:unit=* as reviewed; the address is the
+ *  building's own (its OSM addr:* tags), never a street or house number from the phone or the photos. */
+export function indoorTags(r: Record<string, any>, x: Published): Record<string, string> {
+  const tags: Record<string, string> = {}
+  if (r.level) {
+    const n = osmLevel(r.level, levelNames(x.dataset))
+    if (n != null) tags.level = String(n)
+    tags['level:ref'] = String(r.level)   // the building's own name for it ("1", "B1", "G")
+  }
+  if (r.unit) tags['addr:unit'] = String(r.unit).trim()
+  const a = buildingAddr(x.dataset.building)
+  if (!Object.keys(a).length && x.place.building?.addr) Object.assign(a, buildingAddr({ addr: x.place.building.addr }))
+  for (const [k, v] of Object.entries(a)) if (v && !['unit', 'floor', 'door', 'flats'].includes(k)) tags[`addr:${k}`] = v
+  return tags
+}
+
 /** New nodes (negative ids) for JOSM: open it, check against what is already mapped, then upload by hand. */
 export function osm(places: Published[]) {
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>',
@@ -183,8 +203,11 @@ export function osm(places: Published[]) {
     }
     const tags: Record<string, string> = { name: r.name, ...(OSM_TAGS[r.category || ''] || {}) }
     if (r.phone) tags.phone = r.phone.split(/[,;]\s*/).map((p: string) => p.replace(/^0/, '+84 ').replace(/\s+/g, ' ')).join(';')
-    if (r.houseNumber && !partlyRead(r.houseNumber)) tags['addr:housenumber'] = r.houseNumber
-    if (r.street) tags['addr:street'] = r.street.split(',')[0].trim()
+    if (isIndoorPlace(x.place)) Object.assign(tags, indoorTags(r, x))
+    else {
+      if (r.houseNumber && !partlyRead(r.houseNumber)) tags['addr:housenumber'] = r.houseNumber
+      if (r.street) tags['addr:street'] = r.street.split(',')[0].trim()
+    }
     const oh = osmHours(r.openingHours)
     if (oh) tags.opening_hours = oh
     if (r.website && /\./.test(r.website) && !/\s/.test(r.website)) tags.website = r.website.startsWith('http') ? r.website : `https://${r.website}`

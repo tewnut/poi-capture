@@ -89,6 +89,8 @@ import io.github.tewnut.poicapture.core.SessionKind
 import io.github.tewnut.poicapture.core.Side
 import io.github.tewnut.poicapture.core.Vehicle
 import io.github.tewnut.poicapture.core.Way
+import io.github.tewnut.poicapture.core.Building
+import io.github.tewnut.poicapture.core.BuildingQuery
 import io.github.tewnut.poicapture.core.iso
 import io.github.tewnut.poicapture.core.matchRoad
 import io.github.tewnut.poicapture.core.uid
@@ -155,6 +157,10 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     var roadSource by remember { mutableStateOf("") }
     var packSuggestion by remember { mutableStateOf<RoadSource.Entry?>(null) }
     var roadReload by remember { mutableIntStateOf(0) }   // a pack was just installed: look the road up again
+    var askedSteps by remember { mutableStateOf(false) }
+    // the step permission answered (either way): start
+    val startRef = remember { arrayOfNulls<() -> Unit>(1) }
+    val stepsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { startRef[0]?.invoke() }
 
     // load the road data around the rider (shared cache: the capture service reuses it) to show the current road
     val cell = live?.let { RoadCells.cellOf(LatLon(it.lat, it.lon)) }
@@ -196,8 +202,37 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     // spacing and speed as the capture will start: from the type of this road (see CapturePlan.facadeForRoad)
     val plan = CapturePlan.of(CapturePlan.facadeForRoad(currentWay?.highway), target = target)
 
-    // the same rule as the capture: Start only with a GPS fix from the last 5 s
-    val ready = live != null
+    // ---------- indoor: the building under / nearest to the walker (docs/indoor.md §4) ----------
+    var building by remember { mutableStateOf<Building?>(null) }
+    var noBuilding by remember { mutableStateOf(false) }          // the walker chose to go without one
+    var buildingStatus by remember { mutableStateOf<Int?>(null) }  // loading / none found / offline, null = shown
+    var lookupAt by remember { mutableStateOf<Pair<LatLon, Double>?>(null) }   // where to look, how far (m)
+    var lookupTick by remember { mutableIntStateOf(0) }                          // "Find the building" again
+    val indoor = kind == SessionKind.INDOOR
+    val anyFix = loc.fix
+    LaunchedEffect(indoor, anyFix != null) {
+        if (indoor && lookupAt == null && building == null && anyFix != null)
+            lookupAt = LatLon(anyFix.lat, anyFix.lon) to BuildingQuery.NEAR_M.toDouble()
+    }
+    LaunchedEffect(lookupAt, lookupTick) {
+        val (at, maxM) = lookupAt ?: return@LaunchedEffect
+        buildingStatus = R.string.setup_building_loading
+        try {
+            val all = BuildingQuery.parseBuildings(OverpassClient.body(settings.overpassUrl, BuildingQuery.buildingsQuery(at)))
+            val b = BuildingQuery.pick(all, at, maxM)
+            if (b == null) { if (building == null) buildingStatus = R.string.setup_building_none_found else buildingStatus = null; return@LaunchedEffect }
+            building = b; noBuilding = false; buildingStatus = null
+            // what is already mapped inside: shown per level while walking (optional: the walk works without it)
+            val features = runCatching { BuildingQuery.parseFeatures(OverpassClient.body(settings.overpassUrl, BuildingQuery.featuresQuery(b)), b) }
+                .getOrNull()
+            if (features != null && building?.osm == b.osm) building = b.copy(features = features)
+        } catch (e: Exception) {
+            buildingStatus = R.string.setup_building_offline
+        }
+    }
+
+    // the same rule as the capture: Start only with a GPS fix from the last 5 s; indoors a position or a building
+    val ready = if (indoor) anyFix != null || building != null else live != null
 
     androidx.activity.compose.BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
@@ -212,7 +247,10 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
         // ---------- map ----------
         Box(Modifier.weight(0.38f).heightIn(min = 150.dp).fillMaxWidth()) {
             LiveMap(settings.tileUrl, loc.fix, if (showCoverage) mine else CoverLayer(), tasks,
-                { taskFocus = it; tasksOpen = true }, Modifier.fillMaxSize().clipToBounds())
+                { taskFocus = it; tasksOpen = true }, Modifier.fillMaxSize().clipToBounds(),
+                building = if (indoor && !noBuilding) building else null,
+                // indoor: a tap picks the building there (the guess was wrong)
+                onTap = if (indoor) { p -> lookupAt = p to 30.0 } else null)
             val openTasks = tasks.count { it.open }
             if (openTasks > 0) androidx.compose.material3.AssistChip(onClick = { taskFocus = null; tasksOpen = true },
                 label = { Text("📋 " + stringResource(R.string.setup_tasks_chip, openTasks), fontSize = 12.sp) },
@@ -255,7 +293,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     // three quick choices, short labels only: what each means is behind the (i) button
                     Choice(stringResource(R.string.setup_kind_label), listOf(
                         SessionKind.SWEEP to stringResource(R.string.setup_sweep_short),
-                        SessionKind.POI to stringResource(R.string.setup_place_short)), kind) { kind = it }
+                        SessionKind.POI to stringResource(R.string.setup_place_short),
+                        SessionKind.INDOOR to stringResource(R.string.setup_indoor_short)), kind) { kind = it }
                     if (kind == SessionKind.SWEEP) {
                         Choice(stringResource(R.string.setup_target_label), listOf(
                             SweepTarget.SHOPS to "🏪 " + stringResource(R.string.setup_target_shops_short),
@@ -265,7 +304,11 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             io.github.tewnut.poicapture.core.Holding.MOUNT to stringResource(R.string.setup_holding_mount_short),
                             io.github.tewnut.poicapture.core.Holding.HAND to stringResource(R.string.setup_holding_hand)), holding) { holding = it; Prefs.saveHolding(ctx, it) }
                     }
-                    Column {
+                    // indoor: shops only, in the hand: no target or holding to pick; the building instead of the road
+                    if (indoor) BuildingCard(building.takeIf { !noBuilding }, buildingStatus,
+                        onNone = { noBuilding = true },
+                        onFind = { noBuilding = false; lookupTick++; anyFix?.let { lookupAt = LatLon(it.lat, it.lon) to BuildingQuery.NEAR_M.toDouble() } })
+                    if (!indoor) Column {
                         Hint(stringResource(R.string.setup_you_are_on))
                         Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
                             fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink, maxLines = 1,
@@ -279,24 +322,28 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     }
                 }
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    if (live == null) Hint(stringResource(R.string.setup_need_gps), Modifier.padding(bottom = 6.dp), Palette.Amber)
-                    Button(
-                        enabled = ready,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        onClick = {
+                    if (!ready) Hint(stringResource(R.string.setup_need_gps), Modifier.padding(bottom = 6.dp), Palette.Amber)
+                    val onStartClick: () -> Unit = start@{
                             if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED ||
                                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                                 permLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION,
                                     Manifest.permission.ACCESS_COARSE_LOCATION))
-                                return@Button
+                                return@start
                             }
                             if (CaptureService.activeSession.value != null) {
                                 Toast.makeText(ctx, ctx.getString(R.string.setup_session_running), Toast.LENGTH_LONG).show()
-                                return@Button
+                                return@start
+                            }
+                            // indoor: steps from the step detector need this permission (asked once; refused = accelerometer)
+                            if (indoor && !askedSteps && ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+                                askedSteps = true
+                                stepsLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                                return@start
                             }
                             val now = System.currentTimeMillis()
                             val s = Session(id = uid("s_", now), createdAt = iso(now), contributor = contributor, note = "",
                                 // a sweep always shoots by itself (no hand on the phone while riding), a place is shot by hand
+                                // indoor: on foot, auto photos like a sweep
                                 vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else Mode.PHOTO_AUTO,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
                                 settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M,
@@ -304,12 +351,20 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                                     photoLongEdge = if (kind == SessionKind.SWEEP && target == SweepTarget.ADDRESSES)
                                         maxOf(settings.photoLongEdge, SweepTarget.ADDRESSES_LONG_EDGE) else settings.photoLongEdge), device = deviceJson(ctx), kind = kind, email = "",
                                 photoRoles = if (kind == SessionKind.POI && Prefs.askPhotoRole(ctx)) Prefs.photoRoles(ctx) else null,
-                                holding = if (kind == SessionKind.SWEEP) holding else io.github.tewnut.poicapture.core.Holding.MOUNT,
-                                target = if (kind == SessionKind.SWEEP) target else SweepTarget.SHOPS)
+                                holding = when (kind) { SessionKind.SWEEP -> holding; SessionKind.INDOOR -> io.github.tewnut.poicapture.core.Holding.HAND
+                                    else -> io.github.tewnut.poicapture.core.Holding.MOUNT },
+                                target = if (kind == SessionKind.SWEEP) target else SweepTarget.SHOPS,
+                                building = if (indoor && !noBuilding) building else null,
+                                indoor = if (!indoor) null else JSONObject().put("stepLengthM", io.github.tewnut.poicapture.core.Pdr.DEFAULT_STEP_M)
+                                    .put("start", anyFix?.let { f -> JSONObject().put("lat", f.lat).put("lon", f.lon)
+                                        .put("accuracyM", f.accuracyM.toDouble()).put("gps", f.gps && f.freshGps()) } ?: JSONObject.NULL))
                             CaptureService.store(ctx).create(s)
                             onStart(s.id)
-                        },
-                    ) { Text(stringResource(R.string.setup_start), fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                        }
+                    startRef[0] = onStartClick
+                    Button(enabled = ready, modifier = Modifier.fillMaxWidth().height(56.dp), onClick = onStartClick) {
+                        Text(stringResource(R.string.setup_start), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
@@ -349,7 +404,8 @@ fun Hint(t: String, modifier: Modifier = Modifier, color: Color = Palette.Muted)
 /** Map centred on the rider: blue dot with an accuracy circle, re-centre on request. */
 @Composable
 private fun LiveMap(tileUrl: String, me: LiveLocation?, mine: CoverLayer,
-                    tasks: List<io.github.tewnut.poicapture.core.FieldTask>, onTask: (String) -> Unit, modifier: Modifier) {
+                    tasks: List<io.github.tewnut.poicapture.core.FieldTask>, onTask: (String) -> Unit, modifier: Modifier,
+                    building: Building? = null, onTap: ((LatLon) -> Unit)? = null) {
     val ctx = LocalContext.current
     val map = remember {
         MapView(ctx).apply {
@@ -387,8 +443,14 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, mine: CoverLayer,
             setSize((20 * density).toInt(), (20 * density).toInt())
         }
     }
+    val tap = androidx.compose.runtime.rememberUpdatedState(onTap)
     AndroidView({ map }, modifier) { m ->
         m.overlays.clear()
+        if (onTap != null) m.overlays.add(org.osmdroid.views.overlay.MapEventsOverlay(object : org.osmdroid.events.MapEventsReceiver {
+            override fun singleTapConfirmedHelper(p: GeoPoint): Boolean { tap.value?.invoke(LatLon(p.latitude, p.longitude)); return tap.value != null }
+            override fun longPressHelper(p: GeoPoint): Boolean = false
+        }))
+        building?.let { b -> drawBuilding(m, b) }
         for ((layer, color) in listOf(mine to 0xAA12B76A.toInt())) {
             for (line in layer.lines) m.overlays.add(Polyline(m).apply {
                 setPoints(line.map { GeoPoint(it.lat, it.lon) })
@@ -476,6 +538,8 @@ private fun SetupInfo(photoEveryM: Double, maxSpeedKmh: Int, onClose: () -> Unit
             Item("🏪", stringResource(R.string.setup_place_title), stringResource(R.string.setup_poi_hint))
             Text(stringResource(R.string.guide_intro), color = Palette.Muted, fontSize = 14.sp, lineHeight = 20.sp)
             PlaceGuideList()
+            Section(stringResource(R.string.setup_indoor_title))
+            Item("🏬", stringResource(R.string.setup_indoor_title), stringResource(R.string.setup_indoor_info))
             Section(stringResource(R.string.setup_info_both))
             Item("🛣️", stringResource(R.string.setup_you_are_on), stringResource(R.string.setup_road_auto_hint))
             Item("🛰️", stringResource(R.string.setup_info_gps_title), stringResource(R.string.setup_info_gps))

@@ -183,9 +183,9 @@ class PostsInTheBuild(unittest.TestCase):
         self.assertNotIn('signPost', props['Cấm dừng xe và đỗ xe'])
         with open(os.path.join(self.out, 'places.csv'), encoding='utf-8-sig') as f:
             rows = f.read().splitlines()
-        self.assertTrue(rows[0].endswith(',sign post,sign order'))
-        self.assertTrue(any(',Cấm xe máy,' in r and r.endswith(',p1,1') for r in rows))
-        self.assertTrue(any(',Cấm dừng xe và đỗ xe,' in r and r.endswith(',,') for r in rows))
+        self.assertTrue(rows[0].endswith(',sign post,sign order,level,unit,building'))
+        self.assertTrue(any(',Cấm xe máy,' in r and r.endswith(',p1,1,,,') for r in rows))
+        self.assertTrue(any(',Cấm dừng xe và đỗ xe,' in r and r.endswith(',,,,,') for r in rows))
 
 
 class PostsInMergedParts(unittest.TestCase):

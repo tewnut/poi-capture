@@ -3,8 +3,13 @@
     python result.py <out>      (re)write <out>/result.json from the place folders; build.write_indexes calls it
 
 result.json (schema "poi-result/1"):
-  session   id, name, kind (sweep | poi), target (shops | addresses | signs; missing = shops), holding, startedAt, street
+  session   id, name, kind (sweep | poi | indoor), target (shops | addresses | signs; missing = shops), holding,
+            startedAt, street
   track     [[lat, lon], ...] the ride (sweeps), shots [[photoIndex, lat, lon, cameraBearing], ...]
+  indoor walks only (docs/indoor.md): building {osm, name, levels, underground, footprint, outer, holes, addr, ...}
+            (session.building as the phone had it), levels ["B1", "G", "1", ...] (lowest first), trackLevels [level
+            of each track point], shots get a 5th element (the photo's level), directory [{level, unit, name, by,
+            photo (file), photoIndex, place (folder) | null, lat?, lon?, where?}] (the shops on the directory boards)
   places    one per place folder (docs/sweep-targets.md for the layers):
             layer (place | address | sign), placeRef (address: the shop it is on),
             sign {code, group, facingDeg, side, lane?, post?, order?} (sign; post: the id of the pole / gantry
@@ -20,11 +25,15 @@ result.json (schema "poi-result/1"):
                   agent: {lat, lon, why} | null},
             google {the review block; merge {merged, why, addressNumbers?}: addressNumbers = the sure house numbers
                     of the shop's own address entries (placeRef), used in the check (google_check)},
-            review {status: todo}
-  tasks     [{type: visit | verify_removal | removal, place (id) | null, name, lat, lon, why, photo}]
+            review {status: todo},
+            indoor walks: indoor true, level, levelFrom (read | walk), unit, building {osm, name, addr, address},
+            directory (the board entry that confirms it) | null; fields level / unit (level source "walk" when it is
+            the walk's, not read)
+  tasks     [{type: visit | verify_removal | removal, place (id) | null, name, lat, lon, why, photo, level?, unit?}]
             visit: new to Google (no result close enough to merge: google_mergeable), changed, or partly read ->
             Place capture; removal: closed / for rent / gone seen
-            on the photos; verify_removal: gone but the facade was not clearly in view
+            on the photos; verify_removal: gone but the facade was not clearly in view; indoors also a visit for each
+            directory-board entry no place matches (place null)
 """
 import json, os, sys
 from datetime import datetime, timezone
@@ -468,6 +477,8 @@ def place_entry(folder, m, session_id):
     layer = layer_of(m)
     extra = ({'placeRef': p.get('placeRef'), 'numbering': p.get('numbering')} if layer == 'address'
              else {'sign': p.get('sign')} if layer == 'sign' else {})
+    if p.get('indoor'):
+        extra.update({'indoor': True, **{k: p.get(k) for k in ('level', 'levelFrom', 'unit', 'building', 'directory')}})
     g = m.get('googleMaps')
     nums = address_numbers(m) if layer == 'place' else []
     if g and g.get('name') and layer == 'place':
@@ -481,7 +492,9 @@ def place_entry(folder, m, session_id):
         'fields': add_ride_street(
             merge_google(merge_source(m.get('fields') or {}, _web_fields(m.get('website'), m.get('fields') or {},
                                                                          m.get('googleMaps'), nums), 'website'),
-                         m.get('googleMaps'), nums), place_road(m) if layer != 'sign' else None), 'note': p.get('note'),
+                         m.get('googleMaps'), nums),
+            # no ride road indoors: the building's address applies (docs/indoor.md)
+            place_road(m) if layer != 'sign' and not p.get('indoor') else None), 'note': p.get('note'),
         'website': {k: (m.get('website') or {}).get(k) for k in ('status', 'url', 'title', 'description', 'address')}
                    if m.get('website') else None,
         'photos': [{'file': f"{folder}/{x['file']}", 'index': x.get('sweepIndex'), 'cover': x.get('cover'),
@@ -494,7 +507,7 @@ def place_entry(folder, m, session_id):
     }
 
 
-def tasks_for(places, removals):
+def tasks_for(places, removals, directory=None):
     out = []
     for p in places:
         if (p.get('layer') or 'place') != 'place':
@@ -519,7 +532,16 @@ def tasks_for(places, removals):
             why.append('name only partly read')
         if why:
             out.append({'type': 'visit', 'place': p['id'], 'name': p['name'], 'lat': pin['lat'], 'lon': pin['lon'],
-                        'why': '; '.join(why), 'photo': cover})
+                        'why': '; '.join(why), 'photo': cover,
+                        **({'level': p.get('level'), 'unit': p.get('unit')} if p.get('indoor') else {})})
+    for e in directory or []:
+        if e.get('place') is None and e.get('lat') is not None:   # on a board, but not seen on the walk
+            at = ', '.join(x for x in (f"level {e['level']}" if e.get('level') else None, e.get('unit')) if x)
+            out.append({'type': 'visit', 'place': None, 'name': e.get('name') or e.get('unit') or 'shop',
+                        'lat': e['lat'], 'lon': e['lon'],
+                        'why': f"on the directory board ({at}) but not seen on the walk" if at else
+                               'on the directory board but not seen on the walk',
+                        'photo': e.get('photo'), 'level': e.get('level'), 'unit': e.get('unit')})
     for r in removals:
         t = 'removal' if r.get('inView', True) and r.get('status') in STATUS_GONE else 'verify_removal'
         out.append({'type': t, 'place': None, 'name': r.get('name'), 'lat': r.get('lat'), 'lon': r.get('lon'),
@@ -547,9 +569,13 @@ def write(out):
             elif has_addresses:
                 m['place'].pop('addressNumbers', None)
     places = [place_entry(d, m, ses.get('id')) for d, m in metas]
+    ind = sw.get('indoor') or {}
     res = {'schema': 'poi-result/1', 'generatedAt': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
            'session': ses, 'track': sw.get('track') or [], 'shots': sw.get('photos') or [],
-           'places': places, 'tasks': tasks_for(places, removals)}
+           'places': places, 'tasks': tasks_for(places, removals, ind.get('directory'))}
+    if sw.get('indoor') is not None:
+        res.update({'building': ind.get('building'), 'levels': ind.get('levels') or [],
+                    'trackLevels': sw.get('trackLevels') or [], 'directory': ind.get('directory') or []})
     f = os.path.join(out, 'result.json')
     json.dump(res, open(f, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     return f

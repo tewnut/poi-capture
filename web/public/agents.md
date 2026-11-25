@@ -61,6 +61,12 @@ All commands are `python -E -P -X utf8 .claude/skills/process-sweep/scripts/clou
 
 Place-capture rides (`kind: poi`, "Chụp điểm") are already grouped by place on the phone.
 
+Indoor walks (`kind: indoor`, "Trong nhà": a mall, market, airport on foot; docs/indoor.md) read like `shops`, plus
+each shop's **unit** ("L2-15" as written) and, when a sign says it, its **level**, and every shop on the mall's
+**directory boards** (photos marked `DIRECTORY` on the sheets) into `directory` in places.json. Positions come from
+the walk (`prepare.py` recomputes them from `indoor.jsonl`), not GPS; never write a street from the phone for them:
+the building's own address applies. The skill's "Indoor walks" section has the details.
+
 ## 4. Rules that are never bent
 
 - **Privacy:** no unblurred photo of a face or a number plate leaves your computer; keep the originals local.

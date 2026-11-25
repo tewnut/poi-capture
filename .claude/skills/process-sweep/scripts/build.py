@@ -48,15 +48,25 @@ Signs on one pole or gantry share a "post" (an id) with an "order" (1 = top): a 
 signs' sightings, a gantry's boards share one along-road position, each over its lane (locate_post).
 A place that an address names (its "placeRef") gets place.addressNumbers: that address's sure house number, for its
 Google check (result.google_check).
+
+An indoor walk (session.kind "indoor", docs/indoor.md; SKILL.md "Indoor walks"): a place may carry "level" (as the
+building names it: "2", "B1", "G"; default: the level of its cover photo, from the walk) and "unit" ("L2-15" as
+read); "directory": [{"level", "unit", "name", "photo"}] lists the shops read on the mall's directory boards
+(photos with trigger "directory"). Each place is kept inside the building's footprint, gets the building (name,
+address from its OSM tags; no street from the phone) and, when a directory entry matches it (same level and unit,
+or a similar name on the same level), a note; a directory entry no place matches becomes a "visit" task.
+defaultFacadeDistanceM defaults to 6 m indoors.
 """
 import csv, html, json, math, os, re, shutil, sys, tempfile, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # its own folder, also under python -P
+import indoor
 import mapview
 import result
 from paths import arg_path, folder_no, layer_of, place_folders
 
-FIELDS = ('name', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'signText', 'other')
+FIELDS = ('name', 'phone', 'houseNumber', 'street', 'openingHours', 'website', 'signText', 'other', 'level', 'unit')
+INDOOR_FACADE_M = 6.0   # indoors a shopfront is a corridor's width away, not a street's
 SIGN_GROUPS = {'P': 'prohibitory', 'W': 'danger', 'R': 'mandatory', 'I': 'indication', 'S': 'supplementary'}
 
 
@@ -929,6 +939,78 @@ def ground_truth(pl, lat, lon, door_pos, door_session):
             'accuracyM': q.get('accuracyM'), 'errorM': round(math.hypot(x, y), 1)}
 
 
+def indoor_place(pl, photos):
+    """An indoor place's level and unit, as fields: the level read (places.json "level") or the walk's at its cover
+    photo (source "walk": the barometer / the walker's pick); the unit as read. A unit that names another level than
+    the place's ("L2-15" on level 3) is said in the note."""
+    pl = dict(pl)
+    fields = dict(pl.get('fields') or {})
+    walk = photos[pl['cover']].get('level')
+    if pl.get('level') not in (None, ''):
+        pl['level'], pl['levelFrom'] = indoor.norm_level(pl['level']), 'read'
+        fields.setdefault('level', _read(pl['level'], pl))
+    elif walk not in (None, ''):
+        pl['level'], pl['levelFrom'] = str(walk), 'walk'
+        fields.setdefault('level', {'value': str(walk), 'photo': pl['cover'], 'sure': 'medium', 'source': 'walk'})
+    else:
+        pl['level'], pl['levelFrom'] = None, None
+    unit = str(pl['unit']).strip() if pl.get('unit') not in (None, '') else None
+    pl['unit'] = unit
+    if unit:
+        fields.setdefault('unit', _read(unit, pl))
+        ul = indoor.unit_level(unit)
+        if ul and pl['level'] and ul != indoor.norm_level(pl['level']):
+            pl['note'] = '; '.join(x for x in (pl.get('note'), f"unit {unit} names level {ul}, "
+                                                f"the {'reading' if pl['levelFrom'] == 'read' else 'walk'} says {pl['level']}") if x)
+    pl['fields'] = fields
+    return pl
+
+
+def directory_notes(pitems, directory):
+    """Directory entries matched to the indoor places (indoor.match_directory): a matched place gets
+    place.directory and a note (and the board's unit when it has none); -> the entries, each with `match` (the
+    place item) or None."""
+    entries = indoor.match_directory(directory, [{'name': p['name'], 'level': p.get('level'), 'unit': p.get('unit')}
+                                                 for p in pitems])
+    for e in entries:
+        if e['match'] is None:
+            continue
+        pl = pitems[e['match']]
+        e['match'] = pl
+        what = ' '.join(str(x) for x in (e.get('name'), e.get('unit')) if x)
+        notes = [f"on the directory board (photo #{e.get('photo')}, level {e.get('level')}): {what}, by {e['by']}"]
+        if e.get('unit') and not pl.get('unit'):
+            pl['fields']['unit'] = {'value': str(e['unit']), 'photo': e.get('photo'), 'sure': 'medium',
+                                    'note': 'from the directory board'}
+            pl['unit'] = str(e['unit'])
+        elif e.get('unit') and indoor.norm_unit(e['unit']) != indoor.norm_unit(pl.get('unit')):
+            notes.append(f"the board says unit {e['unit']}")
+        pl['note'] = '; '.join(x for x in [pl.get('note')] + notes if x)
+        pl['directory'] = {k: e.get(k) for k in ('level', 'unit', 'name', 'photo', 'by')}
+    return entries
+
+
+def directory_task_pos(e, placed, fp, photos):
+    """Where a directory entry nobody saw probably is: next to the place on its level whose unit number is
+    nearest; else the middle of the places on that level; else the building's middle; else the board's photo."""
+    lv = indoor.norm_level(e.get('level'))
+    same = [(pl, ll) for pl, ll in placed if lv is None or indoor.norm_level(pl.get('level')) == lv]
+    num = lambda u: int(re.match(r'\d+', indoor.unit_tail(u) or 'x').group(0)) if re.match(r'\d', indoor.unit_tail(u) or '') else None
+    n = num(e.get('unit'))
+    near = [(abs(num(pl.get('unit')) - n), ll) for pl, ll in same if n is not None and num(pl.get('unit')) is not None]
+    if near:
+        return min(near, key=lambda x: x[0])[1], 'next to the place with the nearest unit number on its level'
+    if same:
+        return (sum(ll[0] for _p, ll in same) / len(same), sum(ll[1] for _p, ll in same) / len(same)), \
+            'the middle of the places on its level'
+    if fp is not None and fp.ok:
+        return fp.centre(), "the building's middle"
+    ph = photos[e['photo']] if isinstance(e.get('photo'), int) and 0 <= e['photo'] < len(photos) else None
+    if ph and ph.get('lat') is not None:
+        return (ph['lat'], ph['lon']), "where the board's photo was taken"
+    return None, None
+
+
 def build(work, out, best_n=2, keep_all=False, door_folder=None):
     photos = json.load(open(os.path.join(work, 'photos.json'), encoding='utf-8'))
     session = json.load(open(os.path.join(work, 'session.json'), encoding='utf-8'))
@@ -943,7 +1025,11 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             j = min(known, key=lambda k: abs(k - i))
             p['cameraBearing'] = photos[j]['cameraBearing']
             p['cameraBearingSource'] = (photos[j].get('cameraBearingSource') or 'assumed') + '+neighbour'
-    default_d = float(spec.get('defaultFacadeDistanceM') or 30)
+    in_door = indoor.is_indoor(session)
+    building = session.get('building') if in_door else None
+    fp = indoor.Footprint(building) if in_door else None
+    bblock = indoor.building_block(building) if in_door and building else None
+    default_d = float(spec.get('defaultFacadeDistanceM') or (INDOOR_FACADE_M if in_door else 30))
     best_n = int(spec.get('bestPhotos') or best_n)
     global BEARING_OFFSET, BEARING_ALL
     BEARING_OFFSET, bearing_note = bearing_correction(photos, spec)
@@ -988,6 +1074,14 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
         for o, (k, fix) in enumerate(zip(ks, locate_post(members, pid, fwd, sign_d, spec)), 1):
             sign_items[k]['post'], sign_items[k]['order'] = pid, o
             at_post[id(sign_items[k])] = fix
+    directory = []
+    if in_door:   # level and unit of each place; the directory boards matched to them
+        items = [indoor_place(x, photos) if x['layer'] == 'place' else x for x in items]
+        for x in items:
+            if x['layer'] == 'place' and (x.get('agentPin') or {}).get('snap'):
+                x.pop('agentPin')   # no street facade to snap onto indoors
+        directory = directory_notes([x for x in items if x['layer'] == 'place'], spec.get('directory'))
+    placed = []   # (indoor place item, (lat, lon)): where the unseen directory entries probably are
     # house numbers read on a shop's own address entry (placeRef): its Google check uses them (result.google_check)
     shop_nums = result.shop_numbers([x for x in items if x['layer'] == 'address'])
     for n, pl in enumerate(items, 1):
@@ -1000,6 +1094,17 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             lat, lon, how = snap_sign(pl, lat, lon, how, fwd, spec)
         else:
             lat, lon, how = locate(pl, photos, default_d)
+        if in_door and layer == 'place':
+            # the walk's own uncertainty on top of the shop's; kept inside the building
+            cu = photos[pl['cover']].get('uncertaintyM')
+            if cu:
+                how['uncertaintyM'] = round(math.hypot(how.get('uncertaintyM') or 0, cu), 1)
+            if fp is not None and fp.ok:
+                lat, lon, moved = fp.clamp(lat, lon)
+                if moved:
+                    how['method'] += f'; moved {moved:.1f} m back inside the building'
+                    how['clampedM'] = round(moved, 1)
+            placed.append((pl, (lat, lon)))
         prefix = {'address': 'addr_', 'sign': 'sign_'}.get(layer, '')
         d = os.path.join(out, f"{n:02d}_{prefix}{safe(pl['name'])}")
         os.makedirs(d)
@@ -1037,7 +1142,8 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
         # the road it was photographed from (phone's roadName), not the ride's street
         # (a stretch of places.json "streets" wins: the ride turned into another street, or the road changed its
         # name, while the phone kept the first road's name)
-        road, road_from = ((street_at(spec, pl['cover']), 'streets in places.json') if street_at(spec, pl['cover'])
+        road, road_from = ((None, None) if in_door   # no road indoors: the building's address applies
+                           else (street_at(spec, pl['cover']), 'streets in places.json') if street_at(spec, pl['cover'])
                            else result.pick_road(cover.get('roadName'),
                                                  [photos[i].get('roadName') for i in range(a, b + 1)], spec.get('street')))
         extra = {}
@@ -1052,6 +1158,9 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
                               **({'post': pl['post'], 'order': pl['order']} if pl.get('post') else {})}}
         elif layer == 'place' and shop_nums.get(result.ref_key(pl['name'])):
             extra = {'addressNumbers': shop_nums[result.ref_key(pl['name'])]}
+        if in_door and layer == 'place':
+            extra.update({'indoor': True, 'level': pl.get('level'), 'levelFrom': pl.get('levelFrom'),
+                          'unit': pl.get('unit'), 'building': bblock, 'directory': pl.get('directory')})
         meta = {
             'place': {'layer': layer, **extra,
                       'name': pl['name'], 'category': pl.get('category'), 'signText': pl.get('signText'),
@@ -1059,7 +1168,8 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
                       'status': pl.get('status') or 'open',
                       'readBy': 'vision model, from the photos in this folder',
                       'street': road, 'streetFrom': road_from,
-                      'address': None, 'phone': None, 'openingHours': None, 'website': None,
+                      'address': (bblock or {}).get('address') if in_door else None,
+                      'phone': None, 'openingHours': None, 'website': None,
                       'position': {'lat': round(lat, 6), 'lon': round(lon, 6), **how,
                                    'cameraBearing': 'forward: the travel bearing' if layer == 'sign' else bearing_note,
                                    'googleMaps': gmaps(lat, lon),
@@ -1093,15 +1203,52 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             shutil.copy2(p['file'], os.path.join(out, '_removals', fn))
             r['photo'] = f'_removals/{fn}'
         rem.append(r)
+    # directory entries no place matches: a visit each, where the shop probably is (directory_task_pos)
+    folder_of = {}
+    for n, pl in enumerate(items, 1):
+        folder_of[id(pl)] = f"{n:02d}_{safe(pl['name'])}"
+    dir_out, copied = [], {}
+    for e in directory:
+        x = {k: e.get(k) for k in ('level', 'unit', 'name', 'by')}
+        x['photoIndex'] = e.get('photo')
+        if isinstance(e.get('photo'), int) and 0 <= e['photo'] < len(photos):
+            if e['photo'] not in copied:
+                ph = photos[e['photo']]
+                fn = f"DIRECTORY_#{e['photo']:02d}_{ph['id']}.jpg"
+                os.makedirs(os.path.join(out, '_directory'), exist_ok=True)
+                shutil.copy2(ph['file'], os.path.join(out, '_directory', fn))
+                copied[e['photo']] = f'_directory/{fn}'
+            x['photo'] = copied[e['photo']]
+        if e['match'] is not None:
+            x['place'] = folder_of.get(id(e['match']))
+        else:
+            ll, where = directory_task_pos(e, placed, fp, photos)
+            x['place'] = None
+            if ll:
+                x['lat'], x['lon'], x['where'] = round(ll[0], 6), round(ll[1], 6), where
+        dir_out.append(x)
     shutil.rmtree(web_keep, ignore_errors=True)
     json.dump(rem, open(os.path.join(out, 'removals.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     # the ride for the map: every photo's camera position, in order
     shots = [[p['idx'], round(p['lat'], 6), round(p['lon'], 6),
-              None if p.get('cameraBearing') is None else round(p['cameraBearing'], 1)] for p in photos if p.get('lat') is not None]
-    json.dump({'session': {**{k: session.get(k) for k in ('id', 'name', 'kind', 'holding', 'startedAt', 'endedAt')},
-                           'target': target},
-               'street': spec.get('street'), 'track': [[x[1], x[2]] for x in shots], 'photos': shots},
-              open(os.path.join(out, 'sweep.json'), 'w', encoding='utf-8'), ensure_ascii=False)
+              None if p.get('cameraBearing') is None else round(p['cameraBearing'], 1)]
+             + ([p.get('level')] if in_door else []) for p in photos if p.get('lat') is not None]
+    sw = {'session': {**{k: session.get(k) for k in ('id', 'name', 'kind', 'holding', 'startedAt', 'endedAt')},
+                      'target': target},
+          'street': spec.get('street'), 'track': [[x[1], x[2]] for x in shots], 'photos': shots}
+    if in_door:
+        sw['street'] = None
+        tf = os.path.join(work, 'indoor_track.json')
+        walk = json.load(open(tf, encoding='utf-8')).get('track') if os.path.isfile(tf) else None
+        if walk:   # the corrected walk (prepare.py), finer than the photo positions
+            sw['track'] = [[round(t[0], 6), round(t[1], 6)] for t in walk]
+            sw['trackLevels'] = [t[2] if len(t) > 2 else None for t in walk]
+        else:
+            sw['trackLevels'] = [x[4] for x in shots]
+        levels = {str(x) for x in sw['trackLevels'] if x not in (None, '')}
+        levels |= {str(pl['level']) for pl in items if pl.get('level') not in (None, '')}
+        sw['indoor'] = {'building': building, 'levels': sorted(levels, key=indoor.level_key), 'directory': dir_out}
+    json.dump(sw, open(os.path.join(out, 'sweep.json'), 'w', encoding='utf-8'), ensure_ascii=False)
     write_indexes(out, session)
 
 
@@ -1133,6 +1280,22 @@ def sign_post(m):
     return sg.get('post'), sg.get('order')
 
 
+def indoor_props(m):
+    """GeoJSON properties of a place on an indoor walk: its level, unit and building; {} outdoors."""
+    p = m['place']
+    if not p.get('indoor'):
+        return {}
+    f = m.get('fields') or {}
+    return {'level': (f.get('level') or {}).get('value') or p.get('level'),
+            'unit': (f.get('unit') or {}).get('value') or p.get('unit'),
+            'building': (p.get('building') or {}).get('name')}
+
+
+def indoor_cols(m):
+    q = indoor_props(m)
+    return [q.get('level'), q.get('unit'), q.get('building')]
+
+
 def address_cols(m):
     p = address_props(m)
     return [p.get('houseNumber'), p.get('numberSource'), p.get('oldNumber'), ' | '.join(p.get('altNumbers') or [])]
@@ -1150,21 +1313,21 @@ def write_indexes(out, session=None):
                     'review link',
                     'google name', 'google address', 'google phone', 'google hours', 'google website', 'google link',
                     'google distance m', 'folder', 'house number', 'number source', 'old number', 'other numbers',
-                    'sign post', 'sign order'])
+                    'sign post', 'sign order', 'level', 'unit', 'building'])
         for d, m in rows:
             p = m['place']; pos = p['position']
             w.writerow([csv_cell(x) for x in [folder_no(d), layer_of(m), p['name'], p['category'], sign_code(m),
                         p['confidence'], len(m['photos']), pos['lat'], pos['lon'],
                         pos['method'], pos['googleMaps'], g(m, 'name'), g(m, 'address'), g(m, 'phone'),
                         ' | '.join(g(m, 'openingHours') or []), g(m, 'website'), g(m, 'url'), g(m, 'distanceM'), d]
-                        + address_cols(m) + list(sign_post(m))])
+                        + address_cols(m) + list(sign_post(m)) + indoor_cols(m)])
     feats = [{'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [m['place']['position']['lon'], m['place']['position']['lat']]},
               'properties': {'folder': d, 'layer': layer_of(m), 'name': m['place']['name'],
                              'category': m['place']['category'], 'confidence': m['place']['confidence'],
                              'googleName': g(m, 'name'),
                              **({'signCode': sign_code(m)} if layer_of(m) == 'sign' else {}),
                              **({'signPost': sign_post(m)[0], 'signOrder': sign_post(m)[1]} if sign_post(m)[0] else {}),
-                             **address_props(m)}} for d, m in rows]
+                             **address_props(m), **indoor_props(m)}} for d, m in rows]
     json.dump({'type': 'FeatureCollection', 'features': feats}, open(os.path.join(out, 'places.geojson'), 'w', encoding='utf-8'),
               ensure_ascii=False, indent=1)
     lines = [f"{folder_no(d):>2}  {m['place']['name']:<38} {len(m['photos']):>2} photos  {m['place']['position']['googleMaps']}"
@@ -1195,7 +1358,7 @@ def write_indexes(out, session=None):
         tline = (f'<p class="t">Door captured on site ({e(tr["label"])}): <b>{tr["errorM"]} m</b> from the estimate</p>'
                  if tr else '')
         cards.append(f'''<section class="place" id="{e(d)}"><h2 title="show on the map">{e(folder_no(d))} · {e(p["name"])} <span class="c {e(p.get("confidence") or "")}">{e(p.get("confidence") or "")}</span></h2>
-<p>{e(p.get("category") or "")}{" · " + e(p["note"]) if p.get("note") else ""}</p>
+<p>{e(p.get("category") or "")}{e(' · level ' + str(indoor_props(m)['level'])) if indoor_props(m).get('level') else ''}{e(' · unit ' + str(indoor_props(m)['unit'])) if indoor_props(m).get('unit') else ''}{" · " + e(p["note"]) if p.get("note") else ""}</p>
 <a href="{u(d, cover["file"])}" target="_blank"><img class="cover" src="{u(d, cover["file"])}"></a>
 <div class="thumbs">{thumbs}</div>
 <p><a href="{e(pos["googleMaps"])}" target="_blank">Estimated position</a> ({e(pos["method"])}, ±{e(str(pos.get("uncertaintyM")))} m) ·
