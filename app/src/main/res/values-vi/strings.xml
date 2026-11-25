@@ -628,12 +628,12 @@
     <string name="setup_target_shops">Cửa hàng</string>
     <string name="setup_target_shops_sub">Camera nhìn ngang sang dãy cửa hàng. Như trước.</string>
     <string name="setup_target_addresses">Cửa hàng + số nhà</string>
-    <string name="setup_target_addresses_sub">Camera nhìn ngang. Ảnh gấp đôi, lớn hơn, chạy chậm hơn.</string>
+    <string name="setup_target_addresses_sub">Camera nhìn ngang, điện thoại xoay ngang. Ảnh gấp đôi, lớn hơn, chạy chậm hơn.</string>
     <string name="setup_target_signs">Biển báo giao thông</string>
     <string name="setup_target_signs_sub">Camera nhìn về PHÍA TRƯỚC, dọc con đường. Cứ 8 m một ảnh.</string>
     <string name="setup_target_signs_hint">Xoay điện thoại nhìn về phía trước, qua tay lái, trước khi bắt đầu.</string>
     <string name="setup_target_shops_info">Biển hiệu cửa hàng cùng số điện thoại, giờ mở cửa và địa chỉ. Camera nhìn sang dãy cửa hàng.</string>
-    <string name="setup_target_addresses_info">Mọi thứ của chuyến cửa hàng, thêm mọi biển số nhà, dù có cửa hàng hay không. Biển số nhỏ nên ứng dụng chụp khoảng gấp đôi số ảnh, ở cỡ lớn nhất, và nhắc bạn chạy chậm hơn.</string>
+    <string name="setup_target_addresses_info">Mọi thứ của chuyến cửa hàng, thêm mọi biển số nhà, dù có cửa hàng hay không. Biển số nhỏ nên ứng dụng chụp khoảng gấp đôi số ảnh, ở cỡ lớn nhất, và nhắc bạn chạy chậm hơn (20 km/h). Cầm điện thoại nằm ngang: mỗi biển số nhà sẽ có mặt trên nhiều ảnh hơn.</string>
     <string name="setup_target_signs_info">Mọi biển báo giao thông: loại biển, biển phụ và vị trí đặt. Camera phải nhìn về phía trước dọc con đường; ứng dụng chụp mỗi 8 m và cảnh báo khi điện thoại bị xoay ngang.</string>
     <string name="service_mount_side_signs">Camera đang nhìn NGANG: để ghi biển báo, xoay camera nhìn về phía trước dọc con đường</string>
     <plurals name="capture_plates_seen">

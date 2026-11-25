@@ -96,6 +96,7 @@ import io.github.tewnut.poicapture.core.CompassYaw
 import io.github.tewnut.poicapture.core.Side
 import io.github.tewnut.poicapture.core.Fix
 import io.github.tewnut.poicapture.core.BlurCheck
+import io.github.tewnut.poicapture.core.HouseNumbers
 import io.github.tewnut.poicapture.core.toJson
 import io.github.tewnut.poicapture.core.TrackStats
 import io.github.tewnut.poicapture.core.FixProcessor
@@ -257,7 +258,7 @@ class CaptureService : LifecycleService() {
     private var guard: ShutterGuard? = null                 // street sweep: shutter 1/500 s or faster
     @Volatile private var lastBlurryMs = 0L                 // a recent photo came out blurry (live warning)
     private val sharpnessRecent = ArrayDeque<Double>()      // the session's recent photos, to judge a soft one
-    private val blurRecent = ArrayDeque<Boolean>()
+    private val blurRecent = ArrayDeque<BlurCheck.Verdict>()
     private var facadeNow = CapturePlan.UNKNOWN_ROAD_FACADE_M   // from the type of the road being ridden
     private var roadTypeNow: String? = null
     private var orientation: OrientationEventListener? = null
@@ -376,16 +377,18 @@ class CaptureService : LifecycleService() {
     }
 
     /**
-     * How sharp a photo is (see BlurCheck): motion smear from speed × exposure, and edge detail measured on a small
-     * copy of the image against the session's recent photos. 2 of the last 3 blurry → live warning.
+     * How sharp a photo is (see BlurCheck): motion smear from speed × exposure against the ride target's budget, and
+     * edge detail measured on a small copy of the image against the session's recent photos. Live warning: see
+     * BlurCheck.warnRider (too fast on 2 of the last 3, or soft 3 in a row; not one passing truck).
      */
     private fun blurOf(meta: JSONObject, file: java.io.File): JSONObject {
         val w = meta.optInt("width", 0).takeIf { it > 0 } ?: 2560
         val exposure = meta.optDouble("exposureS").takeIf { !it.isNaN() }
         val speed = meta.optDouble("speedMps").takeIf { !it.isNaN() }
         val hFov = meta.optDouble("hFovDeg").takeIf { !it.isNaN() } ?: CapturePlan.DEFAULT_HFOV
-        val motion = if (exposure != null && speed != null && session.kind != SessionKind.POI)
-            BlurCheck.motionPx(speed, exposure, hFov, w, facadeNow) else null
+        val sweep = session.kind != SessionKind.POI
+        val motion = if (exposure != null && speed != null && sweep) BlurCheck.motionPx(speed, exposure, hFov, w, facadeNow) else null
+        val maxMotion = if (sweep) BlurCheck.maxMotionPx(w, hFov, facadeNow, session.target) else BlurCheck.maxMotionPx(w)
         val sharp = runCatching {
             val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = maxOf(1, w / 480) }
             val bmp = android.graphics.BitmapFactory.decodeFile(file.path, opts) ?: return@runCatching null
@@ -398,17 +401,21 @@ class CaptureService : LifecycleService() {
         var unusable = false
         val blurry = synchronized(sharpnessRecent) {
             unusable = session.kind == SessionKind.SWEEP && BlurCheck.unusable(sharp, sharpnessRecent.toList())
-            val b = BlurCheck.blurry(motion, w, sharp, sharpnessRecent.toList())
+            val v = BlurCheck.judge(motion, maxMotion, sharp, sharpnessRecent.toList())
             if (sharp != null) { sharpnessRecent.addLast(sharp); while (sharpnessRecent.size > 15) sharpnessRecent.removeFirst() }
-            blurRecent.addLast(b); while (blurRecent.size > 3) blurRecent.removeFirst()
-            if (blurRecent.count { it } >= 2 || (session.kind == SessionKind.POI && b)) lastBlurryMs = System.currentTimeMillis()
-            b
+            blurRecent.addLast(v); while (blurRecent.size > BlurCheck.SOFT_RUN) blurRecent.removeFirst()
+            if (if (sweep) BlurCheck.warnRider(blurRecent.toList()) else v.blurry) lastBlurryMs = System.currentTimeMillis()
+            v
         }
+        val smear = if (exposure != null && speed != null && sweep) BlurCheck.smearMm(speed, exposure) else null
         return JSONObject().put("motionPx", motion?.let { Math.round(it * 10) / 10.0 } ?: JSONObject.NULL)
-            .put("maxMotionPx", Math.round(BlurCheck.maxMotionPx(w) * 10) / 10.0)
+            .put("maxMotionPx", Math.round(maxMotion * 10) / 10.0)
+            // speed × exposure on the wall, mm (house numbers: ≤ 12 small print readable, ≤ 16 the number itself)
+            .put("smearMm", smear?.let { Math.round(it * 10) / 10.0 } ?: JSONObject.NULL)
+            .put("cause", when { blurry.motion -> "motion"; blurry.soft -> "soft"; else -> JSONObject.NULL })
             .put("sharpness", sharp?.let { Math.round(it) } ?: JSONObject.NULL)
             .put("manualShutter", _state.value.manualShutter)
-            .put("blurry", blurry)
+            .put("blurry", blurry.blurry)
             .put("unusable", unusable)
     }
 
@@ -958,7 +965,8 @@ class CaptureService : LifecycleService() {
                     return
                 }
                 store.appendItem(session.id, meta)
-                if (session.kind == SessionKind.SWEEP && session.target == SweepTarget.ADDRESSES) readPlates(id, file)
+                if (session.kind == SessionKind.SWEEP && session.target == SweepTarget.ADDRESSES)
+                    readPlates(id, file, meta.optString("roadName").takeIf { it.isNotBlank() })
                 if (signs) findSigns(id, file)
                 shooting = false
                 _state.update {
@@ -984,20 +992,29 @@ class CaptureService : LifecycleService() {
     private val plateBusy = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /**
-     * House-number ride: find the house numbers on a photo on the phone (ML Kit, ~1 s). The item gets `plates`
-     * ([{text, box}]) as a hint for the agent (which photos to read closely), and the rider a live count.
+     * House-number ride: find the house numbers on a photo on the phone (ML Kit, ~1 s), sorted by HouseNumbers. The
+     * item gets `plates`: [{text, heightPx, box, kind ("number" | "doubt"), why, line, hFrac, yFrac, src ("plate" |
+     * "sign")}], likely house numbers first, as a hint for the agent (which photos to read closely); and
+     * `platesDropped`: the same for what was read as a number but is not one (price, phone, date, vehicle plate,
+     * the street's name...), with the reason. The rider's live count is of photos with a likely house number.
      */
-    private fun readPlates(itemId: String, file: java.io.File) {
+    private fun readPlates(itemId: String, file: java.io.File, roadName: String?) {
         if (!plateBusy.compareAndSet(false, true)) return
         val sid = session.id
         ocr.execute {
             try {
-                val plates = runCatching { SignText.plates(SignOcr.lines(file)) }.getOrNull() ?: return@execute
-                store.patchItem(sid, itemId, JSONObject().put("plates", org.json.JSONArray().apply {
-                    plates.forEach { p -> put(JSONObject().put("text", p.text).put("heightPx", p.heightPx)
-                        .apply { p.box?.let { put("box", org.json.JSONArray(it.toList())) } }) }
-                }))
-                if (plates.isNotEmpty()) _state.update { it.copy(platesSeen = it.platesSeen + 1, lastPlate = plates.maxBy { p -> p.heightPx }.text) }
+                val page = runCatching { SignOcr.page(file) }.getOrNull() ?: return@execute
+                val hints = HouseNumbers.read(page.lines.map { HouseNumbers.Line(it.text, it.box, it.block) }, page.height, roadName)
+                fun json(h: HouseNumbers.Hint) = JSONObject().put("text", h.text).put("heightPx", h.heightPx)
+                    .apply { h.box?.let { put("box", org.json.JSONArray(it.toList())) } }
+                    .put("kind", h.kind.json).put("why", h.why ?: JSONObject.NULL).put("line", h.line)
+                    .put("hFrac", h.hFrac ?: JSONObject.NULL).put("yFrac", h.yFrac ?: JSONObject.NULL).put("src", h.src)
+                val (dropped, kept) = hints.partition { it.kind == HouseNumbers.Kind.DROP }
+                store.patchItem(sid, itemId, JSONObject()
+                    .put("plates", org.json.JSONArray().apply { kept.forEach { put(json(it)) } })
+                    .put("platesDropped", org.json.JSONArray().apply { dropped.forEach { put(json(it)) } }))
+                val best = kept.firstOrNull { it.kind == HouseNumbers.Kind.NUMBER }
+                if (best != null) _state.update { it.copy(platesSeen = it.platesSeen + 1, lastPlate = best.text) }
             } finally { plateBusy.set(false) }
         }
     }

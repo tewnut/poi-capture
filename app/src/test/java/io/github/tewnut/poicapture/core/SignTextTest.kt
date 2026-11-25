@@ -16,14 +16,6 @@ class SignTextTest {
         assertTrue(SignText.phones("12345678901234").isEmpty())
     }
 
-    @Test fun numberPlatesOnAPhoto() {
-        fun lines(vararg t: String) = t.map { TextLine(it, 40, intArrayOf(0, 0, 10, 10)) }
-        assertEquals(listOf("106", "45/2A", "12", "7B"),
-            SignText.plates(lines("106", "45/2a", "Số 12", "SN 7B", "Phở Hà Nội", "6:00 - 22:00", "0912 345 678", "50.000đ")).map { it.text })
-        assertEquals(listOf("88"), SignText.plates(lines("88 Trường Sa", "88")).map { it.text })   // the same number once
-        assertTrue(SignText.plates(lines("CÀ PHÊ", "0")).isEmpty())
-    }
-
     @Test fun houseNumbers() {
         assertEquals("12", SignText.houseNumber("Số 12 Phố Huế"))
         assertEquals("45/3", SignText.houseNumber("ĐC: 45/3 Đường Lê Lợi, Q.1"))

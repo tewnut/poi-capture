@@ -15,10 +15,12 @@ class SweepTargetTest {
 
     @Test fun houseNumbersAllowUpTo20KmhOnACityStreet() {
         val n = CapturePlan.of(6.0, target = SweepTarget.ADDRESSES)
-        assertEquals(SweepTarget.ADDRESSES_SPEED_CAP_KMH, n.maxSpeedKmh)            // 7 px at 6 m allows more: capped
-        val close = CapturePlan.of(3.0, target = SweepTarget.ADDRESSES)
-        assertTrue(close.maxSpeedKmh in 10..20, "${close.maxSpeedKmh}")          // close fronts: the blur budget decides
-        assertEquals(close.blurLimitKmh, close.maxSpeedKmh)
+        assertEquals(SweepTarget.ADDRESSES_SPEED_CAP_KMH, n.maxSpeedKmh)            // 16 mm at 1/500 s allows 29: capped
+        assertEquals(29, n.blurLimitKmh)
+        // the budget is a smear on the wall: the same for close fronts, portrait or landscape
+        val close = CapturePlan.of(3.0, CapturePlan.DEFAULT_HFOV_PORTRAIT, 2250, target = SweepTarget.ADDRESSES)
+        assertEquals(29, close.blurLimitKmh)
+        assertEquals(SweepTarget.ADDRESSES_SPEED_CAP_KMH, close.maxSpeedKmh)
     }
 
     @Test fun signsAreShotByDistance() {

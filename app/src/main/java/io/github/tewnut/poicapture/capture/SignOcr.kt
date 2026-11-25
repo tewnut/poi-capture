@@ -25,7 +25,13 @@ object SignOcr {
     fun read(file: File): SignReading = SignText.read(lines(file))
 
     /** The text lines of a photo, boxes in the photo's pixels. Blocking. */
-    fun lines(file: File): List<TextLine> {
+    fun lines(file: File): List<TextLine> = page(file).lines
+
+    /** Lines read on a photo, and the photo's size as their boxes see it (upright). */
+    class Page(val lines: List<TextLine>, val width: Int, val height: Int)
+
+    /** The text lines of a photo with their block (TextLine.block), and the upright size. Blocking. */
+    fun page(file: File): Page {
         val rotation = when (runCatching { ExifInterface(file).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1) }.getOrDefault(1)) {
             ExifInterface.ORIENTATION_ROTATE_90 -> 90
             ExifInterface.ORIENTATION_ROTATE_180 -> 180
@@ -35,13 +41,15 @@ object SignOcr {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeFile(file.path, it) }
         val sample = if (maxOf(bounds.outWidth, bounds.outHeight) > 3200) 2 else 1
         val bmp = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: return emptyList()
+            ?: return Page(emptyList(), 0, 0)
         try {
             val text = Tasks.await(recognizer.process(InputImage.fromBitmap(bmp, rotation)), 30, TimeUnit.SECONDS)
-            return text.textBlocks.flatMap { it.lines }.map { l ->
+            val lines = text.textBlocks.flatMapIndexed { k, block -> block.lines.map { l ->
                 val b = l.boundingBox
-                TextLine(l.text, (b?.height() ?: 0) * sample, b?.let { intArrayOf(it.left * sample, it.top * sample, it.right * sample, it.bottom * sample) })
-            }
+                TextLine(l.text, (b?.height() ?: 0) * sample, b?.let { intArrayOf(it.left * sample, it.top * sample, it.right * sample, it.bottom * sample) }, k)
+            } }
+            val sideways = rotation == 90 || rotation == 270
+            return Page(lines, (if (sideways) bmp.height else bmp.width) * sample, (if (sideways) bmp.width else bmp.height) * sample)
         } finally {
             bmp.recycle()
         }
