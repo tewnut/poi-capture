@@ -191,7 +191,10 @@ package's README warnings first.
 Project decision (2026-11-15): Google Maps data is used in place records, against Google's terms, as a choice the
 project owns. Matched fields are compared (`match` / `differs`, the photo wins when they differ, as it is newer);
 fields the photos lack are filled from Google with `source: "google"`, only from a match within 100 m whose name
-matches the sign (>= 0.5): farther or weaker results are not merged and the place counts as not on Google; a photo reading the agent was unsure of is
+matches the sign (>= 0.5) or whose phone is the one on the sign (old 11-digit mobiles renumbered as in 2018), with no
+other house number than the one read surely, and, for a generic name ("Mắt Kính", "Phở"), the same phone or house
+number (result.py `google_check`; result.json `google.merge: {merged, why}`): other results are not merged and the
+place counts as not on Google; a photo reading the agent was unsure of is
 clarified by Google when Google agrees with what was read (`clarified: true`, `photoValue` kept). The place's own
 website (enrich_web.py) is read first and merged the same way (`source: "website"`), when its address is this place's. These are marked in the GeoJSON / CSV export
 (`fromGoogle`) and left out of the OpenStreetMap file, which must not contain Google data. Pins are never Google's.

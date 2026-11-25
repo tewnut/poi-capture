@@ -48,7 +48,10 @@ def search(key, query, lat, lon, radius=250):
         return json.load(r).get('places', [])
 
 
-def best(places, name, lat, lon):
+def best(places, name, lat, lon, phones=frozenset()):
+    """The result that is this place: name first, then nearness; one within 100 m with a phone read on the sign
+    (phones, in today's form: result._digits) wins whatever its name (result.google_check merges it)."""
+    from result import _digits
     scored = []
     for p in places:
         loc = p.get('location') or {}
@@ -56,11 +59,13 @@ def best(places, name, lat, lon):
             continue
         d = dist_m(lat, lon, loc['latitude'], loc['longitude'])
         s = similarity(name, (p.get('displayName') or {}).get('text'))
-        scored.append((s - d / 500, s, d, p))   # name first, then nearness
+        tel = _digits(p.get('nationalPhoneNumber') or p.get('internationalPhoneNumber') or '')
+        same = bool(phones) and tel in phones and d <= 100
+        scored.append((s - d / 500 + (2 if same else 0), s, d, p, same))   # name first, then nearness
     if not scored:
         return None
-    _, s, d, p = max(scored, key=lambda t: t[0])
-    if s < 0.3 or d > 300:
+    _, s, d, p, same = max(scored, key=lambda t: t[0])
+    if (s < 0.3 and not same) or d > 300:
         return None
     loc = p['location']
     return {'name': (p.get('displayName') or {}).get('text'), 'address': p.get('formattedAddress'),
@@ -68,7 +73,8 @@ def best(places, name, lat, lon):
             'openingHours': (p.get('regularOpeningHours') or {}).get('weekdayDescriptions'),
             'website': p.get('websiteUri'), 'url': p.get('googleMapsUri'), 'types': p.get('types'),
             'businessStatus': p.get('businessStatus'), 'rating': p.get('rating'),
-            'lat': loc['latitude'], 'lon': loc['longitude'], 'distanceM': round(d), 'nameMatch': s, 'placeId': p.get('id')}
+            'lat': loc['latitude'], 'lon': loc['longitude'], 'distanceM': round(d), 'nameMatch': s, 'placeId': p.get('id'),
+            **({'phoneMatch': True} if same else {})}
 
 
 def main():
@@ -104,7 +110,9 @@ def main():
             name = re.sub(r'\(.*?\)|…', ' ', p['name']).strip()
             query = f"{name} {p.get('street') or ''}".strip()
             try:
-                g = best(search(key, query, pos['lat'], pos['lon']), name, pos['lat'], pos['lon'])
+                from result import photo_phones as sign_phones
+                g = best(search(key, query, pos['lat'], pos['lon']), name, pos['lat'], pos['lon'],
+                         sign_phones(m.get('fields')))
                 g = ({**g, 'source': 'Google Places API (New) text search', 'query': query, 'fetchedAt': now, 'status': 'found'}
                      if g else {'status': 'not found', 'query': query, 'fetchedAt': now})
             except Exception as e:  # noqa: BLE001  (quota, network: keep going, say so in the file)

@@ -8,8 +8,15 @@ description: Process a street sweep received from the POI Capture app (exported 
 Turns a sweep into reviewable places: the agent pipeline of `docs/handoff.md` (steps 3–5, a simple step 4), done with
 your own vision on contact sheets, plus a Google Maps lookup for what the road cannot see.
 
-Scripts are in `scripts/` next to this file (`<skill>` below). They need Python 3 with Pillow (use `python`, not
-`python -I`: Pillow lives in the user site-packages). Keep the work folder out of the repo, e.g. in the scratchpad.
+Scripts are in `scripts/` next to this file (`<skill>` below). They need Python 3 with Pillow (and opencv-python for
+step 4b). Run them as **`python -E -P -X utf8 <skill>/scripts/<script>.py …`** (written `python …` below): `-E` ignores `PYTHON*` variables,
+`-P` keeps the current folder and the script's folder off the import path (a `json.py` planted in a downloaded ride
+is never imported; each script adds its own folder itself), and `-X utf8` prints Vietnamese on a cp1252 console.
+Not `python -I`: it also drops the user site-packages, where Pillow and OpenCV usually live, so the scripts cannot
+start. Your own helper scripts: in a folder of their own (never next to downloaded data), run the same way, data
+paths as arguments. Keep the work folder out of the repo, e.g. in the scratchpad. Long runs (enrich_browser.py,
+cloud.py push of a big ride) go in the background with the tool's background option, not with `&` (a shell job
+dies with its shell, silently).
 From Git Bash on Windows, a path argument with `[...]` in it can reach Python unconverted (`/c/Users/...`): the
 scripts turn `/c/...` into `C:/...` and refuse any other `/...` path (it would land on the drive root). Tests:
 `python -m unittest discover -s <skill>/scripts/tests`.
@@ -23,7 +30,8 @@ python <skill>/scripts/prepare.py <session.zip | folder> <work>
 Prints the session, the photo count and the roads, and how far the photo positions moved: the app stamps each photo
 with the latest GPS fix (up to ~1 s old, ~6 m at 25 km/h), so prepare.py places it by time between the fixes in
 `track.jsonl` (the phone's elapsed-time clock, which both carry; `positionFrom` and `fixLat`/`fixLon` in photos.json). `kind` must be `sweep`; for `poi` (Place capture) the places are
-already grouped: say so and stop unless the user wants the enrichment only.
+already grouped: say so and stop unless the user wants the enrichment only. On a house-number ride it also makes
+the plate crop sheets `<work>/crops/plates_NN.jpg` (see "Reading by target"; `--no-crops` skips them).
 
 ## 2. Read the contact sheets
 
@@ -32,12 +40,19 @@ sign is usually on 3–14 consecutive photos. What to read depends on the ride's
 "Reading by target" below). For each **business** (shop, cafe, restaurant, office, showroom; not traffic signs, which
 are never businesses (a signs ride lists them in `"signs"`), nor building names alone, banners, parking signs) note:
 
-- `name` as written on the sign (keep Vietnamese diacritics; mark unreadable parts with "…" and say why in `note`),
+- `name`: the business's own name as written on the sign, the brand part only (keep Vietnamese diacritics; mark
+  unreadable parts with "…" and say why in `note`): "Rửa Xe ĐT MotorBike", not "Rửa Xe ĐT MotorBike - Rửa Xe, Thay
+  Nhớt, Vá Vỏ"; "Nội Thất Zecchino", not "… - Công ty TNHH SX & TM Zecchino". The services, the legal company name
+  and slogans go in `signText` / `fields.other`: a long name falls under the Google name match (0.5) against the
+  same shop a few metres away,
 - `category` (cafe, restaurant, pharmacy, grocery, fashion, bank, office, …),
 - `photos`: `[first, last]` index it appears on, `cover`: the photo where it is clearest and most central,
 - `sightings`: its sign centre `x` (0 = left edge, 1 = right) on 2–3 photos spread over its range (first part, cover,
   last part): these give the position by triangulation; one sighting only = rough position,
-- `confidence`: `high` (name fully readable) or `low`, and `signText` (the main text as read),
+- `confidence`: `high` (name fully readable), `medium` (all of it read, but one letter or digit is doubtful: a
+  plate washed out, a word half behind a pole) or `low` (part of it not read, "…"), and `signText` (the main text
+  as read). build.py refuses any other value. `medium` is kept as written and shown to the reviewer; only `low` makes
+  a visit task ("name only partly read"),
 - `status`: `open`, or `closed` / `for_rent` ("cho thuê", "sang nhượng") / `under_construction` / `gone` when the
   photos show it; these become removal tasks,
 - `fields`: **everything readable** about it, each `{"value", "photo", "sure": high|medium|low}`: `phone`,
@@ -81,8 +96,16 @@ pavement, 20–35 m behind a service road or garden. Write `<work>/places.json`:
 
 `session.target` (prepare.py prints it; missing = `shops`) says what the ride was captured for (docs/sweep-targets.md).
 On a house-number ride the phone reads each photo for numbers (ML Kit): `plates` in photos.json lists what it found
-("106", "45/2A"). Use it to find the plates, not as the answer: it misses small or angled plates and may read a
-price or a date as a number; read every number yourself on the full-size photo.
+("106", "45/2A"), `plateHints` the same with each one's box. Use them to find the plates, not as the answer: on the
+24 Nov rides about half were wrong (prices "45K", vehicle plates "51B", phone fragments, dates, the "18" of "Đường
+số 18" on every sign, pole codes "T76", white numbers painted on street trees, a T-shirt) and the small gate plates
+(brass, dark, on pillars) were mostly missed; read every number yourself.
+**Crop sheets** (`<skill>/scripts/crops.py`; the contact sheets show a plate ~10 px high, too small to read):
+prepare.py already makes `<work>/crops/plates_NN.jpg` on a house-number ride: a numbered full-resolution tile around
+each hint (`plates.json`: tile -> photo, box, hint). For what the phone missed, `crops.py band <work> [--from N --to
+M] [--y 0.40,0.80]` shows the door / gate / kerb band of each photo at 1400 px wide with rulers in photo fractions
+(read `x` for sightings off them), and `crops.py boxes <work> 38:0.55,0.40,0.80,0.60 …` crops any box (fractions of
+the photo) at full resolution, many in one montage: no hand-cropping.
 On a traffic-signs ride (app 0.18+) the phone runs a sign detector on each photo (ml/signs): `signHints` in photos.json
 lists `{code, group, label, score, x, w, h, box}` (x = box centre, w / h = its width / height as fractions of the
 photo's; build.py ranges a sign from w). Start with those photos, but read every sign yourself: about half the boxes are shop
@@ -96,9 +119,23 @@ It sets the least to read, not the most: a shops ride whose photos show plates m
   house-number plate**, shop or not, in `"addresses"`: `houseNumber` as written ("106", "12/3", "45A"), `street`
   (from the plate; leave it out when the plate has none: the ride's road is used, marked for the reviewer), `unit`
   (alley / lane / unit: "Hẻm 12", "Kiệt 5"), `photos`, `cover`, `sightings` (the plate's centre, 2–3 photos),
-  `confidence`, `placeRef` (the `name` of the place in `"places"` it is on, when there is one), `note`. Crop the
-  full-size photo to read a plate; a number only guessed is not written. `agentPin` with the facade snap works as for
-  places.
+  `confidence`, `placeRef` (the `name` of the place in `"places"` it is on, when there is one), `note`, and:
+  - `source`: where the number was read: `plate` (a house-number plate), `sign` (the address line of a shop sign or
+    awning: weaker, the sign may be old or reused), `painted` (painted on a wall, pillar or gate), `other`. A number
+    on a shop sign is listed too (also as the shop's `fields.houseNumber`): on many streets most numbers come only
+    from signs. Numbers painted on trees and poles are not house numbers.
+  - read only in part: write what was read with "…" for the rest ("1…", "…01", "19…") and `confidence: low` (build.py
+    lowers it, and the reviewer sees "read only in part"); a number not read at all is not written; nothing guessed.
+  - two numbers on one gate or plate: `houseNumber` is the current one (the blue plate of the new numbering, the
+    number not marked "số cũ"), `oldNumber` the old one ("Số cũ 7/12", a black old-style plate next to it);
+    `altNumbers: ["34"]` when it is not clear which is current (say why in `note`).
+  - `confidence`: `high`, `medium` (one digit doubtful) or `low`, as for places.
+  `agentPin` with the facade snap works as for places.
+- **`"streets"`** (ride level, any target): where the street changes along the ride while the phone's `roadName`
+  stays the same (the ride turns into another street; one road changes name: Thích Mật Thể becomes "Đường 16" after
+  no. 13): `[{"fromPhoto": 0, "toPhoto": 30, "street": "Đường Số 7"}, {"fromPhoto": 31, "toPhoto": 41, "street":
+  "Thích Mật Thể"}]`. A place or address whose cover photo is in a stretch gets that street (its `street` from a
+  plate or sign still wins); `streetFrom` says "streets in places.json".
 - **signs** (the camera looked **forward**, along the road): every **traffic sign** in `"signs"`: `code` (QCVN
   41:2019: `P.xxx` prohibitory, `W.xxx` danger, `R.xxx` mandatory, `I.xxx` indication, `S.xxx` supplementary plate,
   e.g. P.131a, P.127, W.207a, R.302a, I.423b), `label` (its name in Vietnamese: "Cấm đỗ xe", "Tốc độ tối đa cho
@@ -137,7 +174,12 @@ It sets the least to read, not the most: a shops ride whose photos show plates m
 ```json
 "addresses": [{"houseNumber": "106", "street": "Nguyễn Thanh Sơn", "unit": "", "photos": [33, 36], "cover": 34,
                "sightings": [{"photo": 34, "x": 0.41}, {"photo": 36, "x": 0.12}], "confidence": "high",
-               "placeRef": "Bún Bò Huế Hương Cố Đô", "note": ""}],
+               "source": "sign", "placeRef": "Bún Bò Huế Hương Cố Đô", "note": ""},
+              {"houseNumber": "103", "oldNumber": "7/12", "source": "plate", "photos": [30, 31], "cover": 31,
+               "sightings": [{"photo": 31, "x": 0.55}], "confidence": "high", "note": "plate: 103, số cũ 7/12"},
+              {"houseNumber": "1…", "source": "plate", "photos": [40, 40], "cover": 40,
+               "sightings": [{"photo": 40, "x": 0.97}], "confidence": "low", "note": "cut by the frame edge"}],
+"streets": [{"fromPhoto": 0, "toPhoto": 30, "street": "Đường Số 7"}, {"fromPhoto": 31, "toPhoto": 41, "street": "Thích Mật Thể"}],
 "signs": [{"code": "P.131a", "label": "Cấm đỗ xe", "group": "prohibitory", "extra": "6h-9h", "photos": [120, 123],
            "cover": 122, "sightings": [{"photo": 120, "x": 0.66}, {"photo": 122, "x": 0.82, "w": 0.045}], "side": "right",
            "confidence": "high", "note": ""},
@@ -149,10 +191,31 @@ It sets the least to read, not the most: a shops ride whose photos show plates m
 ```
 
 build.py makes a folder for each (`NN_addr_…`, `NN_sign_…`, numbered after the places) with its best photos, and
-result.json entries with `layer` `address` / `sign` (a sign: `sign {code, group, facingDeg, side}`, facing = the
+result.json entries with `layer` `address` / `sign` (an address: `numbering {source, oldNumber, altNumbers,
+partial}`, also said in words in its `note`, and in places.geojson / places.csv; a sign: `sign {code, group, facingDeg, side}`, facing = the
 travel bearing at the cover; its position from the ranges and rays together, then snapped onto the road layout; a
 sign with neither a range nor two rays is put `"defaultSignDistanceM"` (default 15) ahead along its ray, so give two
 or three sightings and a width). The Google and website lookups skip them, and they get no visit tasks.
+
+### Long rides: several readers
+
+A house-number ride is read on full-size crops and takes about 3x the context of a shops ride: beyond ~100 photos,
+split the reading across reader subagents by photo range, with a few photos of overlap so a sign or plate at a
+boundary is whole in one of them (255 photos: 0-87, 84-173, 170-254). Give each reader this section of the skill,
+the ride's target, `<work>` (photos.json, sheets, crops) and its range; it writes `<work>/parts/places_<from>-<to>.json`
+in the places.json format (ride-level `street` / `defaultFacadeDistanceM` / `road` / `streets` for its range). A
+reader lists everything in its range, also what is cut at its edges, and follows a place that starts in its range to
+its last photo even past the range end; the overlap is read twice on purpose. Then merge:
+
+```
+python -E -P -X utf8 <skill>/scripts/merge_places.py <work>/places.json <work>/parts/places_0-87.json <work>/parts/places_84-173.json …
+```
+
+It joins the parts and merges the same place (same name, one inside the other, photo ranges overlapping or within 3
+photos), the same address (same number) and the same sign (same code) read by two readers: one entry over both
+ranges with every sighting, the surer field readings, both notes, the lower confidence. It prints each merge and the
+pairs to check by hand (the same name far apart: a chain twice, or approach and pass-by; similar names on the same
+photos): fix those in places.json, then build. `--dry-run` prints without writing.
 
 ## 3. Build the place folders
 
@@ -195,7 +258,10 @@ For each place it opens Google Maps at the estimated position (zoom 18), searche
 takes the nearby results, picks the one whose name contains most of the sign's words (`nameMatch` >= 0.5) and is
 within 300 m, opens it and reads the address, phone, website, plus code, opening hours, rating, open / closed and its
 exact position, then checks the 300 m limit again with that position (a list entry can point at another branch:
-rejected ones stay in `candidates`, marked). The other results are kept as `candidates` for review. One search at a
+rejected ones stay in `candidates`, marked). When no name matches but the photos show a phone, a result within 100 m
+with that phone is taken (`phoneMatch`: its list card, else the 2 nearest opened). Phones are compared in today's
+form (+84 and the 2018 renumbering of 11-digit mobiles undone: 0168 → 038, 0122 → 077, …). The other results are
+kept as `candidates` for review. Each line it prints says whether the result will be merged and why not. One search at a
 time, 2–4 s apart, in its own agent-browser session (`AGENT_BROWSER_SESSION`, default `poi-<output folder>-<hash>`),
 so runs on two rides in parallel do not share a tab.
 
@@ -203,8 +269,14 @@ Check the results before reporting them:
 - a match for a `low` confidence place (name partly read) is a guess, possibly a good one ("CAF… ANH" → "CAT ANH TEA
   COFFEE" 57 m away): say it needs a look at the photo;
 - `distanceM` over ~100 m: maybe another branch or another unit of the same building;
-- a match that is plainly another shop (a generic sign such as "Sửa Đồng Hồ" matched a neighbour with another house
-  number): set `"notThisPlace": true` and `"note"` on the place.json's `googleMaps`, then `python <skill>/scripts/result.py <out>`;
+- result.py already refuses (does not merge, and says why in `google.merge` of result.json and in the visit task) a
+  match whose house number is another than the one the photos show surely ("553" on the sign, Google "644 Nguyễn Thị
+  Định"), and a match for a generic name (every word a kind of shop: "Mắt Kính", "Hớt Tóc Nam", "Phở", "Cơm Tấm")
+  without the same phone or house number; it accepts a weak name match with the same phone. Over ~100 m with a
+  generic name is almost always another shop;
+- a match that is plainly another shop all the same: set `"notThisPlace": true` and `"note"` on the place.json's
+  `googleMaps`, then `python <skill>/scripts/result.py <out>`; one refused above that you checked is this place
+  (the shop moved, the sign keeps an old number): `"thisPlace": true` and `"note"`;
 - `not found nearby`: look at `candidates` (a branch 900 m away is not this one). Places Google does not have nearby
   are the most valuable finds: list them.
 - Google often lists only today's opening hours (`openingHours` one line, `hoursSummary` "closes at …").
@@ -253,8 +325,14 @@ python <skill>/scripts/blur.py apply <out> <check>
 ```
 
 It pixelates from the originals (so it can be run again), writes `privacy` into each place.json and
-`<check>/after_NN.jpg` (the blurred photos, 3 x 3): look them over for a face or readable plate it missed and add
-it to `"add"` (`{"file", "box": [x0, y0, x1, y1] as fractions of the photo, "why"}`), then apply again. Plates
+`<check>/after_NN.jpg` (the blurred photos, 3 x 3) and `<check>/zoom_NN.jpg`: the kerb band (40-95 % of the height,
+`--zoom-y 0.30,0.95` to change it) of every sweep photo once, 1400 px wide, 2 per sheet, with rulers in photo
+fractions. Look over the after-sheets for faces and **every zoom sheet** for a readable plate it missed: a rear
+plate of a motorbike parked at the kerb (~3 % of the photo wide) is readable there and invisible on the after-sheets
+(on the 24 Nov rides 86 such misses were found only at full size). Add each to `"add"` (`{"file", "box": [x0, y0,
+x1, y1] as fractions of the photo, "why"}`, read off the rulers), then apply again. An `add` applies to every copy of
+that sweep photo (a photo kept by a shop and by the house number on it is in both folders; same `#NN_<photo id>` in
+the file name), unless `"only": true`; an `add` whose file matches no photo stops apply. Plates
 washed out by the sun or too far to read need nothing. After a rebuild (step 3) run detect again. `cloud.py push`
 refuses a place folder that was not blurred. Website images (`WEB_*`) are public already and not touched.
 
@@ -279,12 +357,17 @@ python <skill>/scripts/cloud.py release <session id>         # giving up without
 ```
 
 `push` zips a folder and sends it as `type=processed-result` with its session id and name from result.json; the
-reviewer's web app lists them in its session list (downloaded when opened). An interrupted push resumes when run again.
+reviewer's web app lists them in its session list (downloaded when opened). A slow or flaky link needs no retry
+loop: push shrinks its chunks after a timeout (4 MB down to 256 KB, growing again when the link recovers), waits,
+asks the server where the upload stands and goes on, and gives up only after 25 failures in a row without progress.
+Run the same push again after that and it resumes from the server's offset (an unchanged folder's zip is kept in the
+temp folder until the upload is complete). A big ride takes a while: run it in the background.
 
 ## Google data: merged, marked, kept out of OpenStreetMap
 
 The project decided (2026-11-15) to use Google Maps data in its place records, knowing Google's terms do not allow
-it. `result.py` merges a matched Google place (name match >= 0.5, within 100 m) into each place's fields:
+it. `result.py` merges a matched Google place (name match >= 0.5 or the same phone, within 100 m, no other house
+number, a generic name only with the same phone or number: `google_check`) into each place's fields:
 
 - the photos show the same value: kept, `"google": "match"`;
 - the photos show a different value: the photo value is kept (newer), `"google": "differs"`, `"googleValue"`;
@@ -294,7 +377,7 @@ it. `result.py` merges a matched Google place (name match >= 0.5, within 100 m) 
   mostly the same): Google's value clarifies it, `"source": "google"`, `"clarified": true`, the reading kept in
   `"photoValue"` (e.g. "0904521417" read unsure, Google "0904523417").
 
-Only that match (name >= 0.5, <= 100 m) counts: a farther or weaker Google result is not merged, does not lend its
+Only that match (`google_check`; result.json's `google.merge` says `{"merged", "why"}`) counts: a farther or weaker Google result is not merged, does not lend its
 website to enrich_web.py, and the place counts as **not** on Google Maps (a visit task, "nearest: …"). Google's
 address is parsed for the first part that is "<number> <street>" or starts with Đường / Đ. / Phố, after building or
 unit names ("tòa nhà One Verandah, 2 Bát Nàn, …" → 2, Bát Nàn); streets are compared without Đường / Đ. / Số and
@@ -311,6 +394,9 @@ Instagram / TikTok / link-in-bio / shop pages skipped) and reads its schema.org 
 address is missing) and up to 8 images: og:image, then the page's own photos at full size (`WEB_1.jpg` …, shown with
 the place's photos). Its fields are merged like Google's (`"source": "website"`), before Google's, but only when the
 website's address is this place's street or house number: a chain's site gives its head office, not this branch.
+A product brand's site (castrol.com, honda.com.vn, dulux, michelin, …: the brand on a shop's sign) is skipped, and a
+site whose address is in a province or city more than 120 km away (a Hà Nội company of the same name) is marked
+`notThisPlace` with the reason (`"auto": true`): remove the mark if it is this shop after all.
 Run it after the Google lookup (it needs Google's website when the photos show none).
 
 **Then look at the website images** (a contact sheet of each place's `WEB_*`): keep the ones that show this place

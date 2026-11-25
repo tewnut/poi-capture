@@ -50,9 +50,24 @@ def _fold(s):
     s = unicodedata.normalize('NFD', (s or '').lower().replace('đ', 'd'))
     return ''.join(c for c in s if unicodedata.category(c) != 'Mn')
 
+# 11-digit mobile prefixes renumbered to 10 digits in 2018 (Bộ TT&TT, 15 Sep - 15 Nov 2018): signs still show the
+# old ones ("0168 …"), Google the new ("038 …")
+OLD_MOBILE = {'0162': '032', '0163': '033', '0164': '034', '0165': '035', '0166': '036', '0167': '037', '0168': '038',
+              '0169': '039',                                                                  # Viettel
+              '0120': '070', '0121': '079', '0122': '077', '0126': '076', '0128': '078',      # MobiFone
+              '0123': '083', '0124': '084', '0125': '085', '0127': '081', '0129': '082',      # VinaPhone
+              '0186': '056', '0188': '058',                                                   # Vietnamobile
+              '0199': '059'}                                                                  # Gmobile
+
+
 def _digits(p):
+    """A phone as bare digits in today's national form: "+84 90 452 3417" -> "0904523417", the 2018 renumbering
+    applied ("0168 123 4567" -> "0381234567")."""
     d = re.sub(r'\D', '', p or '')
-    return '0' + d[2:] if d.startswith('84') else d
+    d = '0' + d[2:] if d.startswith('84') and len(d) >= 11 else d
+    if len(d) == 11 and d[:4] in OLD_MOBILE:
+        d = OLD_MOBILE[d[:4]] + d[4:]
+    return d
 
 _HOUSE = r'([A-OR-Za-or-z]?\d+[A-Za-z]?(?:\s*[-/]\s*\d+[A-Za-z]?)*)'
 _STREET_WORD = re.compile(r'^(?:(?:đường|duong|phố)\s+|[đd]\.\s*)', re.I)
@@ -200,16 +215,89 @@ def merge_source(fields, values, source):
 GOOGLE_MIN_MATCH, GOOGLE_MAX_M = 0.5, 100
 
 
-def google_mergeable(g):
-    """A Google result that is this place: found, name match >= 0.5, within 100 m. Only such a result is merged,
-    counts as "on Google Maps" and lends its website (a farther or weaker one is probably another branch / shop).
-    `notThisPlace` (set by the agent: another shop, e.g. a generic sign name matched a neighbour) is never merged."""
-    return bool(g) and not g.get('notThisPlace') and bool(g.get('name')) and (g.get('nameMatch') or 0) >= GOOGLE_MIN_MATCH         and g.get('distanceM') is not None and g['distanceM'] <= GOOGLE_MAX_M
+# Words that name a kind of shop, not a shop: a sign made only of them ("Mắt Kính", "Hớt Tóc Nam", "Phở - Bò Kho",
+# "Cơm Tấm") matches any neighbour of that kind. Folded (no accents, đ -> d).
+GENERIC_WORDS = set('''
+mat kinh hot toc nam nu pho com tam bun bo banh mi cafe coffee ca phe tap hoa sua xe rua quan an vat tiem shop spa
+nail nha thuoc giat say ui photo copy may vang karaoke tra chay hu tieu xeo kho ga ran dien thoai nhom inox sat han
+nuoc da kem che oc lau nuong chao canh xao nghi khach san gas son thoi trang my pham salon cat goi dau massage khoa
+phong kham bac cam do game internet net bida sim the cua dong ho giay dep tui qua trai cay rau thit hai gao ngot bia
+ruou dai ly cau va moto oto lop vo nhot thay dich vu ban le si cho thue sieu thi mini mart store hang in uong gia
+re ngon dac mon cay xang dau may tinh laptop sach van phong pham thiet bi ve sinh noi that dieu hoa lanh dien tu
+hop kim cuon rem ga chien vit heo luoc hap nem cuon goi chua sieu ky banh trang tiem tra sua sinh to nuoc ep
+'''.split())
+
+
+def generic_name(name):
+    """True when every word of the name is a kind of shop ("Mắt Kính", "Hớt Tóc Nam", "Phở"): nothing in it says
+    which shop. A digit or any other word (a person's or brand name) makes it specific."""
+    words = re.findall(r'[a-z0-9]+', _fold(name))
+    return bool(words) and all(w in GENERIC_WORDS for w in words)
+
+
+def _photo_values(fields, k):
+    """What the photos show for field k (not a value filled from Google / the website)."""
+    v = (fields or {}).get(k) or {}
+    return str(v['value']) if v.get('value') and v.get('source') in (None, 'photo') else None
+
+
+def photo_phones(fields):
+    """The phones the photos show (field "phone"; several separated by , ; /), in today's form (_digits)."""
+    return {d for x in re.split(r'[,;/]', _photo_values(fields, 'phone') or '') for d in [_digits(x)] if len(d) >= 10}
+
+
+def _base_number(h):
+    """The leading number of a house number: "553" -> "553", "4/9" -> "4", "558B" -> "558", "…01" -> None."""
+    m = re.match(r'\s*(?:số\s*)?(\d+)', str(h or ''), re.I)
+    return m.group(1).lstrip('0') or '0' if m else None
+
+
+def google_check(g, fields=None):
+    """(merged, why): is this Google result this place? Found, within 100 m, not marked `notThisPlace`, and
+    - the house number the photos show (read sure) is not another one than Google's ("553" on the sign, Google
+      "644 Nguyễn Thị Định": another shop of the same kind);
+    - the name matches (>= 0.5), or the phone the photos show is Google's (long names like "Rửa Xe ĐT MotorBike -
+      Rửa Xe, Thay Nhớt" fall under 0.5 against the same shop 7 m away);
+    - a generic name ("Mắt Kính", "Phở") needs the same phone or house number too.
+    `"thisPlace": true` on the googleMaps block (set by the agent after looking) passes the name, house number and
+    generic checks; the distance still counts. Without fields (older callers) only name and distance are checked."""
+    if not g or not g.get('name'):
+        return False, 'no Google result'
+    if g.get('notThisPlace'):
+        return False, 'marked not this place' + (f": {g['note']}" if g.get('note') else '')
+    d = g.get('distanceM')
+    if d is None or d > GOOGLE_MAX_M:
+        return False, f'{d} m away (over {GOOGLE_MAX_M} m)'
+    nm = g.get('nameMatch') or 0
+    if g.get('thisPlace'):
+        return True, 'confirmed by the agent (thisPlace)'
+    gf = _google_fields(g)
+    phone_ok = bool(gf.get('phone')) and gf['phone'] in photo_phones(fields)
+    h_photo = (fields or {}).get('houseNumber') or {}
+    a = _base_number(_photo_values(fields, 'houseNumber')) if h_photo and not _unclear(h_photo) else None
+    b = _base_number(gf.get('houseNumber'))
+    if a and b and a != b:
+        return False, f"house number differs: photos {h_photo.get('value')}, Google {gf.get('houseNumber')}"
+    house_ok = bool(a and b and a == b)
+    if nm < GOOGLE_MIN_MATCH and not phone_ok:
+        return False, f'name match {nm} (under {GOOGLE_MIN_MATCH})'
+    name = _photo_values(fields, 'name')
+    if name and generic_name(name) and not (phone_ok or house_ok):
+        return False, f'generic name "{name}": needs the same phone or house number'
+    return True, ('same phone (name match only %s)' % nm) if nm < GOOGLE_MIN_MATCH else \
+        'same phone' if phone_ok else 'same house number' if house_ok else 'name and distance'
+
+
+def google_mergeable(g, fields=None):
+    """A Google result that is this place (google_check). Only such a result is merged, counts as "on Google Maps"
+    and lends its website (a farther or weaker one is probably another branch / shop). `notThisPlace` (set by the
+    agent: another shop, e.g. a generic sign name matched a neighbour) is never merged."""
+    return google_check(g, fields)[0]
 
 
 def merge_google(fields, g):
     """fields (from the photos) merged with a matched Google place, each field marked as above."""
-    if not google_mergeable(g):
+    if not google_mergeable(g, fields):
         return fields
     gv = _google_fields(g)
     out = merge_source(fields, gv, 'google')
@@ -227,7 +315,7 @@ def _host(u):
 def _site_from_far_google(w, fields, g):
     """The site was taken from a Google result too far or too unlike the sign to be this place (before enrich_web.py
     checked that): neither its fields nor its images are used."""
-    if (fields.get('website') or {}).get('value') or not g or google_mergeable(g) or not g.get('website'):
+    if (fields.get('website') or {}).get('value') or not g or google_mergeable(g, fields) or not g.get('website'):
         return False
     return _host(w.get('url')) == _host(g.get('website'))
 
@@ -241,7 +329,7 @@ def _web_fields(w, fields, g):
         return {}
     f = w.get('fields') or {}
     addr = _fold(w.get('address') or '')
-    known = _google_fields(g) if google_mergeable(g) else {}
+    known = _google_fields(g) if google_mergeable(g, fields) else {}
     street = (fields.get('street') or {}).get('value') or known.get('street') or ''
     house = (fields.get('houseNumber') or {}).get('value') or known.get('houseNumber') or ''
     house = re.match(r'\s*([\dA-Za-z/-]+)', house).group(1) if re.match(r'\s*([\dA-Za-z/-]+)', house) else ''
@@ -329,7 +417,12 @@ def place_entry(folder, m, session_id):
     pins['google'] = _google_pin(m.get('googleMaps'))
     pins.setdefault('agent', None)
     layer = layer_of(m)
-    extra = {'placeRef': p.get('placeRef')} if layer == 'address' else {'sign': p.get('sign')} if layer == 'sign' else {}
+    extra = ({'placeRef': p.get('placeRef'), 'numbering': p.get('numbering')} if layer == 'address'
+             else {'sign': p.get('sign')} if layer == 'sign' else {})
+    g = m.get('googleMaps')
+    if g and g.get('name') and layer == 'place':
+        ok, why = google_check(g, m.get('fields') or {})
+        g = {**g, 'merge': {'merged': ok, 'why': why}}   # why it was (not) merged, for the reviewer
     return {
         'id': f'{session_id}-{folder_no(folder)}', 'folder': folder, 'layer': layer, **extra,
         'name': p['name'], 'category': p.get('category'),
@@ -345,7 +438,7 @@ def place_entry(folder, m, session_id):
                   + [{'file': f"{folder}/{x['file']}", 'index': None, 'cover': False, 'why': 'website',
                       'source': 'website', 'url': x.get('url')} for x in (m.get('website') or {}).get('images') or []
                      if _site_is_this_place(m) and not x.get('drop')],   # drop: the agent saw it is not this place
-        'pins': pins, 'google': m.get('googleMaps'), 'review': m.get('review') or {'status': 'todo'},
+        'pins': pins, 'google': g, 'review': m.get('review') or {'status': 'todo'},
         'groundTruth': m.get('groundTruth'),
     }
 
@@ -364,10 +457,12 @@ def tasks_for(places, removals):
                         'why': f"seen {p['status'].replace('_', ' ')} on the photos", 'photo': cover})
             continue
         looked_up = bool(g.get('status')) and not str(g.get('status')).startswith('error')
-        if looked_up and not google_mergeable(g):   # only a match close enough to merge counts as on Google
+        merged = (g['merge']['merged'] if isinstance(g.get('merge'), dict) else google_mergeable(g))
+        if looked_up and not merged:   # only a match close enough to merge counts as on Google
             why.append('not on Google Maps nearby' + (
-                f" (nearest: {g['name']}, {g.get('distanceM')} m, name match {g.get('nameMatch')})" if g.get('name') else ''))
-        if google_mergeable(g) and g.get('businessStatus') and g['businessStatus'] != 'OPERATIONAL':
+                f" (nearest: {g['name']}, {g.get('distanceM')} m, name match {g.get('nameMatch')}"
+                + (f"; {g['merge']['why']}" if isinstance(g.get('merge'), dict) else '') + ')' if g.get('name') else ''))
+        if merged and g.get('businessStatus') and g['businessStatus'] != 'OPERATIONAL':
             why.append(f"Google says {g['businessStatus'].lower().replace('_', ' ')}")
         if p.get('confidence') == 'low':
             why.append('name only partly read')

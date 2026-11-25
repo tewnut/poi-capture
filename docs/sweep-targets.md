@@ -70,6 +70,13 @@ there besides the docs; the web list reads it.
 ```
 `group`: prohibitory (P), danger (W), mandatory (R), indication (I), supplementary (S) (QCVN 41:2019). `side`: left |
 right | over (gantry). `placeRef`: the shop this number is on, when there is one.
+An address may also have (24 Nov 2026 rides): `source` (`plate` | `sign` (a shop sign's address line) | `painted` |
+`other`), `oldNumber` (an old number on the same plate / gate: "Số cũ 7/12", an old-style plate beside the new one),
+`altNumbers` (other numbers on the gate when it is unclear which is current); a number read only in part keeps "…" for
+the unread digits ("1…", "…01") and is always `confidence: low`. `confidence` is `high` | `medium` | `low` (build.py
+refuses other values). The ride may have `"streets": [{"fromPhoto", "toPhoto", "street"}]`: the street per stretch of
+photos where it changes while the phone's `roadName` stays the same (overrides roadName for places and addresses
+whose cover is in the stretch).
 For positions (section 4) a sign may also have, per sighting, `w` / `h` (its width / height in the photo, as a fraction
 of the photo's), and `lane` (gantry: 1 = rightmost lane, 2.5 = the line between lanes 2 and 3), `sizeM` or
 `sizeFactor`; the ride has `"road"` (the cross-section per stretch of photos), `"signSizeFactor"`, `"maxSnapM"`,
@@ -81,7 +88,11 @@ box}`.
 - `session.target`.
 - Every entry of `places` gets `"layer": "place" | "address" | "sign"` (missing = `"place"`).
 - An address: `layer: "address"`, `name` "106 Nguyễn Thanh Sơn", `category: "address"`, fields `houseNumber`,
-  `street`, `other` (unit / alley), `placeRef` when it belongs to a shop.
+  `street`, `other` (unit / alley), `placeRef` when it belongs to a shop, and `numbering: {"source": "plate" |
+  "sign" | "painted" | "other" | null, "oldNumber": "7/12" | null, "altNumbers": ["34"], "partial": false}` (also
+  said in words in `note`; GeoJSON properties `houseNumber`, `numberSource`, `oldNumber`, `altNumbers`, `partial`;
+  CSV columns `house number`, `number source`, `old number`, `other numbers`). A partial number must not be
+  published as `addr:housenumber`.
 - A sign: `layer: "sign"`, `name` its label ("Cấm đỗ xe"), `category: "traffic_sign"`, `sign: {"code", "group",
   "facingDeg", "side"}` (`facingDeg`: the direction a driver facing the sign drives, = the travel bearing when it
   was photographed), fields `signCode` (the code, editable), `signText`, `other` (extra plate).

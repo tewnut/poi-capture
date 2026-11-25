@@ -2,7 +2,8 @@
 
 usage:
   python blur.py detect <out> <check>     find faces and plates; crop sheets of the plates to check
-  python blur.py apply  <out> <check>     pixelate them (all but those the agent kept); sheets of the result
+  python blur.py apply  <out> <check> [--zoom-y 0.40,0.95 | --no-zoom]
+                                          pixelate them (all but those the agent kept); sheets of the result
 
 <out> is a built place folder (build.py / build_place.py); <check> is a private folder OUTSIDE it (never uploaded):
 the unblurred originals (<check>/orig/), the boxes (<check>/boxes.json), the crop sheets and the agent's
@@ -20,12 +21,16 @@ The agent looks at every crop sheet and writes <check>/decisions.json:
    "add": [{"file": "07_Pho_Vu/COVER_#38_p_x.jpg", "box": [0.61, 0.70, 0.70, 0.78], "why": "plate missed"}]}
 Every box on the sheets is blurred unless kept: when unsure, blur (privacy first; the agent has read the signs already).
 `add` boxes are fractions of the photo's width / height (x0, y0, x1, y1), e.g. a plate or face seen on the after-sheets.
+An `add` box applies to every copy of that sweep photo (the same "#NN_<photo id>" in another folder: a photo kept by a
+shop and by its house number, more/, _removals/), unless "only": true; a file name no longer there (a rebuild
+renumbered the folders) still finds its copies by the photo, and one that matches nothing stops apply.
 
 `apply` writes the blurred photos (EXIF kept, orientation applied), `privacy` in each place.json (counts and method)
-and `<check>/after_NN.jpg`: the blurred photos, 3 x 3, to look for a face or plate still readable (then `add` and
-apply again). Website images (WEB_*) are not touched: they are already public.
+and `<check>/after_NN.jpg`: the blurred photos, 3 x 3, to look for a face still readable, and `<check>/zoom_NN.jpg`:
+the kerb band (40-95 % of the height, --zoom-y) of each sweep photo once, 1400 px wide with rulers in photo fractions,
+where a parked motorbike's plate is big enough to see (then `add` and apply again). Website images (WEB_*) are not touched: they are already public.
 """
-import json, os, shutil, sys, urllib.request
+import json, os, re, shutil, sys, urllib.request
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -332,7 +337,7 @@ def detect(out, check):
               f'{nv} vehicles, {sum(1 for x in boxes if x["file"] == rel and x["kind"] != "face")} plates / plate zones')
     json.dump({'boxes': boxes}, open(os.path.join(check, 'boxes.json'), 'w', encoding='utf-8'), indent=1)
     for f in os.listdir(check):
-        if f.startswith(('plates_', 'after_')) and f.endswith('.jpg'):
+        if f.startswith(('plates_', 'after_', 'zoom_')) and f.endswith('.jpg'):
             os.remove(os.path.join(check, f))
     todo = [b for b in boxes if b['state'] == 'check']
     sheets = crop_sheets(check, todo)
@@ -400,7 +405,26 @@ def pixelate(im, box, kind='face'):
     im.paste(small.resize(region.size, Image.NEAREST), (x0, y0))
 
 
-def apply(out, check):
+def photo_key(rel):
+    """The sweep photo a file is a copy of ("#38_p_x" from "07_Pho/COVER_#38_p_x.jpg", "12_addr_106/BEST2_#38_p_x.jpg",
+    "more/#38_p_x.jpg", "_removals/REMOVED_#38_p_x.jpg"); None when the name carries none."""
+    m = re.search(r'#(\d+)_(.+?)\.(?:jpe?g|png)$', os.path.basename(rel or ''), re.I)
+    return f'#{m.group(1)}_{m.group(2)}' if m else None
+
+
+def add_targets(a, files):
+    """The files a hand-added box applies to: the one named and every other copy of the same sweep photo (a photo
+    kept by a shop and by the house number on it is in both folders), unless "only": true. A file no longer there
+    (renamed by a rebuild) still finds its copies by the photo. [] when neither."""
+    f = (a.get('file') or '').replace('\\', '/')
+    if a.get('only'):
+        return [f] if f in files else []
+    key = photo_key(f)
+    same = [r for r in files if key and photo_key(r) == key]
+    return sorted(set(([f] if f in files else []) + same))
+
+
+def apply(out, check, zoom=(0.40, 0.95)):
     data = json.load(open(os.path.join(check, 'boxes.json'), encoding='utf-8'))
     dec_path = os.path.join(check, 'decisions.json')
     dec = json.load(open(dec_path, encoding='utf-8')) if os.path.exists(dec_path) else {}
@@ -416,9 +440,14 @@ def apply(out, check):
     for b in data['boxes']:
         if b['id'] not in keep:
             per_file.setdefault(b['file'], []).append((b['kind'], b['box']))
-    for a in dec.get('add', []):
-        per_file.setdefault(a['file'], []).append(('added', a['box'], 'fraction'))
     photos = photos_of(out)
+    for a in dec.get('add', []):
+        targets = add_targets(a, [rel for rel, _ in photos])
+        if not targets:
+            raise SystemExit(f"decisions.json adds a box to {a.get('file')!r}, which is not a photo of {out} (renamed by a "
+                             f"rebuild?): give its current path; nothing was blurred or marked")
+        for rel in targets:
+            per_file.setdefault(rel, []).append(('added', a['box'], 'fraction'))
     # every photo must have been through detect: a photo missing from the check folder would stay unblurred while
     # its place folder is stamped as blurred (and cloud.py push would let it out)
     missing = [rel for rel, _ in photos if not os.path.exists(os.path.join(check, 'orig', rel))]
@@ -452,12 +481,32 @@ def apply(out, check):
         m['privacy'] = {'blurred': True, **c, 'method': METHOD, 'files': sorted(files.get(folder, []))}
         json.dump(m, open(p, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
     for f in os.listdir(check):
-        if f.startswith('after_') and f.endswith('.jpg'):
+        if f.startswith(('after_', 'zoom_')) and f.endswith('.jpg'):
             os.remove(os.path.join(check, f))
     after_sheets(out, check, done)
+    nz = zoom_sheets(out, check, done, per_file, zoom) if zoom else 0
     tot = {k: sum(c[k] for c in counts.values()) for k in ('faces', 'plates', 'zones', 'added', 'photos')}
     print(f'blurred {tot["photos"]} photos: {tot["faces"]} faces, {tot["plates"]} plates, {tot["zones"]} vehicle plate zones, {tot["added"]} added by hand; '
-          f'{kept} boxes kept as not plates. Look over {os.path.join(check, "after_00.jpg")} ... for anything missed.')
+          f'{kept} boxes kept as not plates. Look over {os.path.join(check, "after_00.jpg")} ... for anything missed'
+          + (f', and the kerb band zoomed in {os.path.join(check, "zoom_00.jpg")} ... ({nz} sheets: parked bikes\' '
+             f'plates are readable there, not on the after-sheets)' if nz else '') + '.')
+
+
+def zoom_sheets(out, check, done, per_file, y=(0.40, 0.95), width=1400):
+    """The kerb band of every blurred photo (y[0]..y[1] of its height: the parked motorbikes, the doors), 1400 px
+    wide, 2 per sheet, with rulers in photo fractions for "add" boxes: a motorbike plate ~3 % of the photo wide is
+    ~40 px here, ~11 px on a 3 x 3 after-sheet. One copy per sweep photo: the one with the fewest boxes blurred
+    (a box kept as "not a plate" in one folder only shows there)."""
+    import crops
+    best = {}
+    for rel in done:
+        k = photo_key(rel) or rel
+        n = len(per_file.get(rel, []))
+        if k not in best or n < best[k][0]:
+            best[k] = (n, rel)
+    order = lambda rel: (int(re.search(r'#(\d+)_', rel).group(1)) if re.search(r'#(\d+)_', rel) else 10 ** 9, rel)
+    items = [(rel, os.path.join(out, rel), rel) for _n, rel in sorted(best.values(), key=lambda t: order(t[1]))]
+    return crops.band_sheets(items, check, 'zoom', y, width)
 
 
 def after_sheets(out, check, files, cols=3, rows=3, tw=640):
@@ -479,8 +528,14 @@ def after_sheets(out, check, files, cols=3, rows=3, tw=640):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 4 or sys.argv[1] not in ('detect', 'apply'):
+    if len(sys.argv) < 4 or sys.argv[1] not in ('detect', 'apply'):
         raise SystemExit(__doc__)
     out_dir, check_dir = arg_path(sys.argv[2]), arg_path(sys.argv[3])
     os.makedirs(check_dir, exist_ok=True)
-    (detect if sys.argv[1] == 'detect' else apply)(out_dir, check_dir)
+    if sys.argv[1] == 'detect':
+        detect(out_dir, check_dir)
+    else:
+        zy = (None if '--no-zoom' in sys.argv else
+              tuple(float(v) for v in sys.argv[sys.argv.index('--zoom-y') + 1].split(',')) if '--zoom-y' in sys.argv
+              else (0.40, 0.95))
+        apply(out_dir, check_dir, zy)

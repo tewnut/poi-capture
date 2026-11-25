@@ -374,6 +374,74 @@ def read_with_jawb(url, profile=None, facebook=False):
     return data
 
 
+# Product brands whose name is on many shops' signs (a Castrol oil banner over a repair shop, a Honda sign over a
+# dealer-workshop, a Dulux paint shop): their site is the maker's, never this shop's. Telecom and bank brands are
+# left out (their branches' own pages are on their site).
+BRANDS = set('''
+castrol shell mobil caltex total totalenergies motul liqui-moly petrolimex bp idemitsu repsol fuchs eneos
+honda yamaha yamaha-motor suzuki piaggio sym vinfast toyota hyundai kia mazda ford mitsubishi
+michelin bridgestone dunlop casumina kenda maxxis goodyear inoue pirelli continental
+dulux jotun nippon nipponpaint kova mykolor toa spec sika
+samsung oppo vivo xiaomi apple realme nokia sony panasonic toshiba daikin lg sharp electrolux philips casio
+coca-cola cocacola pepsi heineken tiger sabeco habeco budweiser carlsberg redbull nestle vinamilk th-truemilk
+unilever omo comfort sunlight downy ariel tide pg colgate
+'''.split())
+# Province / city names in an address (folded) and a point in each: a site whose address lies far from the place
+# (e.g. a Hà Nội plaster company's site for a Thủ Đức shop of the same name) is another business's.
+PROVINCES = {
+    'ha noi': (21.03, 105.85), 'hanoi': (21.03, 105.85), 'ho chi minh': (10.78, 106.70), 'hcm': (10.78, 106.70),
+    'sai gon': (10.78, 106.70), 'saigon': (10.78, 106.70), 'da nang': (16.05, 108.20), 'hai phong': (20.86, 106.68),
+    'can tho': (10.03, 105.78), 'hue': (16.46, 107.59), 'thua thien': (16.46, 107.59), 'khanh hoa': (12.24, 109.19),
+    'nha trang': (12.24, 109.19), 'lam dong': (11.94, 108.44), 'da lat': (11.94, 108.44), 'vung tau': (10.35, 107.08),
+    'ba ria': (10.50, 107.17), 'dong nai': (10.95, 106.82), 'bien hoa': (10.95, 106.82), 'binh duong': (10.98, 106.65),
+    'thu dau mot': (10.98, 106.65), 'long an': (10.54, 106.41), 'quang ninh': (20.95, 107.08), 'ha long': (20.95, 107.08),
+    'nghe an': (18.67, 105.68), 'thanh hoa': (19.81, 105.78), 'bac ninh': (21.18, 106.07), 'hai duong': (20.94, 106.33),
+    'nam dinh': (20.42, 106.17), 'thai nguyen': (21.59, 105.85), 'quang nam': (15.88, 108.33), 'hoi an': (15.88, 108.33),
+    'quang ngai': (15.12, 108.80), 'binh dinh': (13.78, 109.22), 'quy nhon': (13.78, 109.22), 'phu yen': (13.09, 109.30),
+    'gia lai': (13.98, 108.00), 'dak lak': (12.67, 108.04), 'dac lac': (12.67, 108.04), 'buon ma thuot': (12.67, 108.04),
+    'binh thuan': (10.93, 108.10), 'phan thiet': (10.93, 108.10), 'tien giang': (10.36, 106.36), 'ben tre': (10.24, 106.38),
+    'vinh long': (10.25, 105.97), 'an giang': (10.38, 105.44), 'kien giang': (10.01, 105.08), 'phu quoc': (10.23, 103.96),
+    'ca mau': (9.18, 105.15), 'soc trang': (9.60, 105.97), 'bac lieu': (9.29, 105.72), 'tay ninh': (11.31, 106.10),
+    'binh phuoc': (11.75, 106.72), 'ha tinh': (18.34, 105.90), 'quang binh': (17.47, 106.62), 'quang tri': (16.75, 107.19),
+    'ninh binh': (20.25, 105.97), 'ha nam': (20.54, 105.91), 'hung yen': (20.65, 106.05), 'thai binh': (20.45, 106.34),
+    'vinh phuc': (21.31, 105.60), 'phu tho': (21.32, 105.40), 'lao cai': (22.48, 103.97), 'lang son': (21.85, 106.76),
+    'hoa binh': (20.81, 105.34), 'son la': (21.33, 103.91), 'dien bien': (21.39, 103.02), 'ninh thuan': (11.57, 108.99),
+    'kon tum': (14.35, 108.00), 'dak nong': (12.00, 107.69), 'hau giang': (9.78, 105.47), 'tra vinh': (9.93, 106.34),
+    'dong thap': (10.46, 105.63), 'bac giang': (21.27, 106.19), 'tuyen quang': (21.82, 105.21), 'yen bai': (21.72, 104.91),
+    'cao bang': (22.67, 106.26), 'ha giang': (22.82, 104.98), 'bac kan': (22.15, 105.83), 'lai chau': (22.40, 103.46),
+}
+FAR_KM = 120
+
+
+def brand_site(url):
+    """The brand's name when the site is a product brand's (BRANDS: castrol.com, honda.com.vn), else None."""
+    host = urllib.parse.urlsplit(url if '//' in url else '//' + url).netloc.lower().split(':')[0].removeprefix('www.')
+    labels = [x for x in host.split('.') if x]
+    while len(labels) > 1 and labels[-1] in ('com', 'vn', 'net', 'org', 'co', 'info', 'biz', 'asia', 'global', 'io'):
+        labels.pop()
+    name = labels[-1] if labels else ''
+    return name if name in BRANDS else None
+
+
+def far_address(addr, lat, lon):
+    """(province as written, km) when the address's province / city (the last one it names: addresses end with it)
+    lies more than FAR_KM from the place; else None (no province named, or a near one)."""
+    if not addr or lat is None or lon is None:
+        return None
+    from enrich import fold
+    a = ' ' + fold(addr) + ' '
+    last = None
+    for name, ll in PROVINCES.items():
+        for mm in re.finditer(r'(?<= )' + re.escape(name) + r'(?= )', a):
+            if last is None or mm.start() > last[0]:
+                last = (mm.start(), name, ll)
+    if last is None:
+        return None
+    from enrich import dist_m
+    km = dist_m(lat, lon, *last[2]) / 1000
+    return (last[1], round(km)) if km > FAR_KM else None
+
+
 def website_of(m):
     """The site to read: the one on the photos, else Google's, but only from a Google result close enough to be
     this place (result.google_mergeable: name match >= 0.5, within 100 m); a farther one is another branch or shop."""
@@ -381,7 +449,7 @@ def website_of(m):
     if site:
         return site
     g = m.get('googleMaps') or {}
-    return g.get('website') if google_mergeable(g) else None
+    return g.get('website') if google_mergeable(g, m.get('fields') or {}) else None
 
 
 def main():
@@ -403,6 +471,8 @@ def main():
         host = urllib.parse.urlsplit(url).netloc.lower()
         if any(s in host or s in url for s in SKIP):
             m['website'] = {'status': 'skipped (social / link page)', 'url': url}
+        elif brand_site(url):
+            m['website'] = {'status': f"skipped (a brand's site: {brand_site(url)}, not this shop's)", 'url': url}
         elif any(host == s or host.endswith('.' + s) for s in FACEBOOK):
             try:
                 w = read_with_jawb(url, FB_PROFILE, facebook=True) if USE_JAWB else {'status': 'facebook: jawb off', 'url': url}
@@ -432,10 +502,17 @@ def main():
             w['images'] = save_images(w.pop('_images', []), os.path.join(out, d)) if w.get('status') == 'ok' else []
             m['website'] = w
             time.sleep(1.5)
+        far = far_address(m['website'].get('address'), m['place']['position'].get('lat'), m['place']['position'].get('lon'))
+        if m['website'].get('status') == 'ok' and far:
+            # another business of the same name elsewhere (a Hà Nội company's site for a Thủ Đức shop): neither its
+            # fields nor its images are used (result.py); remove the mark after looking if it is this shop after all
+            m['website'].update({'notThisPlace': True, 'auto': True,
+                                 'note': f'its address is in {far[0]}, {far[1]} km from the place (enrich_web.py)'})
         m['website']['fetchedAt'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         json.dump(m, open(f, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
         w = m['website']
-        print(f"{d}: {w['status']} | {w.get('url')} | fields {list((w.get('fields') or {}).keys())} | images {len(w.get('images') or [])}")
+        print(f"{d}: {w['status']} | {w.get('url')} | fields {list((w.get('fields') or {}).keys())} | images {len(w.get('images') or [])}"
+              + (f" | NOT this place: {w['note']}" if w.get('notThisPlace') else ''))
         n += 1
     build.write_indexes(out)
     print(f'{n} websites read')

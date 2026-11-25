@@ -87,12 +87,28 @@ def ev(js):
 MAX_M = 300           # a match farther than this from the estimate is another branch
 MIN_MATCH = 0.5       # share of the sign's words found in Google's name
 NEAR_M, NEAR_MATCH = 30, 0.3   # right next to the estimate, a weaker name match is enough ("ANH HAI BẮP", 4 m)
+PHONE_MAX_M = 100     # a result with the phone read on the sign: this place whatever its name, when this near
+PHONE_OPEN = 2        # nearest results opened to compare their phone when no name matched
 
 
 def acceptable(c):
-    """A result close enough and named enough like the sign to be this place."""
+    """A result close enough and named enough like the sign to be this place, or near with the sign's phone."""
     return ((c['nameMatch'] >= MIN_MATCH and c['distanceM'] <= MAX_M)
-            or (c['nameMatch'] >= NEAR_MATCH and c['distanceM'] <= NEAR_M))
+            or (c['nameMatch'] >= NEAR_MATCH and c['distanceM'] <= NEAR_M)
+            or (bool(c.get('phoneMatch')) and c['distanceM'] <= PHONE_MAX_M))
+
+
+def phones_in(text):
+    """The phone numbers in a text, in today's form (result._digits: +84 and the 2018 renumbering undone)."""
+    out = set()
+    for m in re.finditer(r'(?:\+?84|0)[\d .\-]{7,15}\d', text or ''):
+        d = build.result._digits(m.group(0))
+        if 10 <= len(d) <= 11:
+            out.add(d)
+    return out
+
+
+sign_phones = build.result.photo_phones   # the phones read on the photos, in today's form
 
 
 def checked(pick, det, lat, lon, cands=()):
@@ -106,7 +122,8 @@ def checked(pick, det, lat, lon, cands=()):
                 c['distanceM'] = pick['distanceM']
                 c['summary'] = f"rejected: {pick['distanceM']} m away on its own page; " + (c.get('summary') or '')
         return None
-    return {'name': pick['name'], **det, 'distanceM': pick['distanceM'], 'nameMatch': pick['nameMatch']}
+    return {'name': pick['name'], **det, 'distanceM': pick['distanceM'], 'nameMatch': pick['nameMatch'],
+            **({'phoneMatch': True} if pick.get('phoneMatch') else {})}
 
 
 def session_name(out):
@@ -148,8 +165,48 @@ def wait_coords(tries=5):
     return False
 
 
-def lookup(name, lat, lon):
-    url = f"https://www.google.com/maps/search/{urllib.parse.quote_plus(name)}/@{lat:.6f},{lon:.6f},18z?hl=vi"
+def open_hours():
+    try:   # Google ignores a scripted click on the hours expander: a real click (absent when it has no hours)
+        ab('click', '[jsaction*="openhours"][jsaction*="dropdown"]', timeout=20)
+        ab('wait', '1000')
+    except RuntimeError:
+        pass
+
+
+def by_phone(cands, phones, url, lat, lon):
+    """No name matched: a result within PHONE_MAX_M whose phone is the sign's is this place (a long sign name such as
+    "Rửa Xe ĐT MotorBike - Rửa Xe, Thay Nhớt" scores under 0.5 against Google's "Rửa Xe ĐT MotorBike" 7 m away).
+    The list cards' text first, then the PHONE_OPEN nearest results opened. -> (result or None, whether one was
+    taken by its phone)."""
+    near = sorted((c for c in cands if c['distanceM'] <= PHONE_MAX_M), key=lambda c: c['distanceM'])
+    for c in near:
+        if phones & phones_in(c.get('summary')):
+            c['phoneMatch'] = True
+            if not ev(CLICK_JS % json.dumps(c['name'])):
+                return None, False
+            ab('wait', '2500')
+            wait_coords()
+            open_hours()
+            return checked(c, ev(DETAIL_JS), lat, lon, cands), True
+    for k, c in enumerate(near[:PHONE_OPEN]):
+        if k:   # back to the list
+            ab('open', url, timeout=90)
+            ab('wait', '3500')
+        if not ev(CLICK_JS % json.dumps(c['name'])):
+            continue
+        ab('wait', '2500')
+        wait_coords()
+        if phones & phones_in(ev(DETAIL_JS).get('phone')):
+            c['phoneMatch'] = True
+            open_hours()
+            return checked(c, ev(DETAIL_JS), lat, lon, cands), True
+    return None, False
+
+
+def lookup(name, lat, lon, phones=frozenset()):
+    """(the Google result taken or None, the candidates). phones: the numbers read on the sign (sign_phones): a near
+    result with one of them is this place even when the names differ (by_phone)."""
+    url =f"https://www.google.com/maps/search/{urllib.parse.quote_plus(name)}/@{lat:.6f},{lon:.6f},18z?hl=vi"
     ab('open', url, timeout=90)
     ab('wait', '3500')
     found = ev(LIST_JS)
@@ -162,6 +219,10 @@ def lookup(name, lat, lon):
         cands.append({'name': c['name'], 'distanceM': round(d), 'nameMatch': s, 'summary': c['text'], '_score': s - d / 500})
     cands.sort(key=lambda c: -c['_score'])
     pick = next((c for c in cands if acceptable(c)), None)
+    if pick is None and found and phones:
+        g, taken = by_phone(cands, set(phones), url, lat, lon)
+        if taken:
+            return g, cands
     if not found:
         # one obvious match: Google shows that place straight away, without a list
         h1 = place_h1()
@@ -171,6 +232,8 @@ def lookup(name, lat, lon):
         d = dist_m(lat, lon, float(m.group(1)), float(m.group(2)))
         only = {'name': h1, 'distanceM': round(d), 'nameMatch': name_match(name, h1), 'summary': 'the only result'}
         cands = [only]
+        if phones and not acceptable(only) and set(phones) & phones_in(ev(DETAIL_JS).get('phone')):
+            only['phoneMatch'] = True
         if not acceptable(only):
             return None, cands
         pick = dict(only)
@@ -181,11 +244,7 @@ def lookup(name, lat, lon):
             return None, cands
         ab('wait', '2500')
         wait_coords()
-    try:   # Google ignores a scripted click on the hours expander: a real click (absent when it has no hours)
-        ab('click', '[jsaction*="openhours"][jsaction*="dropdown"]', timeout=20)
-        ab('wait', '1000')
-    except RuntimeError:
-        pass
+    open_hours()
     det = ev(DETAIL_JS)
     return checked(pick, det, lat, lon, cands), cands
 
@@ -208,16 +267,19 @@ def main():
             name = re.sub(r'\(.*?\)|…', ' ', p['name'])
             name = re.sub(r'\s+', ' ', name).strip()
             try:
-                g, cands = lookup(name, pos['lat'], pos['lon'])
-                others = [{k: c[k] for k in ('name', 'distanceM', 'nameMatch', 'summary')} for c in cands[:5]]
+                g, cands = lookup(name, pos['lat'], pos['lon'], sign_phones(m.get('fields')))
+                others = [{**{k: c[k] for k in ('name', 'distanceM', 'nameMatch', 'summary') if k in c},
+                           **({'phoneMatch': True} if c.get('phoneMatch') else {})} for c in cands[:5]]
                 g = ({**g, 'status': 'found', 'candidates': others} if g else {'status': 'not found nearby', 'candidates': others})
             except Exception as e:  # noqa: BLE001  (page changed, timeout, blocked: keep going, say so)
                 g = {'status': f'error: {e}'}
             g.update({'query': name, 'source': 'Google Maps search near the estimated position (agent-browser)', 'fetchedAt': now()})
             m['googleMaps'] = g
             json.dump(m, open(f, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
+            verdict = build.result.google_check(g, m.get('fields') or {}) if g.get('name') else None
             print(f"{d}: {g['status']} | {g.get('name') or ''} | {g.get('address') or ''} | {g.get('phone') or ''}"
-                  + (f" | {g['distanceM']} m" if g.get('distanceM') is not None else ''))
+                  + (f" | {g['distanceM']} m" if g.get('distanceM') is not None else '')
+                  + (f" | {'merged' if verdict[0] else 'NOT merged'}: {verdict[1]}" if verdict else ''))
             time.sleep(random.uniform(2, 4))          # one search at a time, at a human pace
     finally:
         build.write_indexes(out)

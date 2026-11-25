@@ -47,6 +47,7 @@ across the road onto the line of its "side" (snap_sign); see SKILL.md.
 """
 import csv, html, json, math, os, re, shutil, sys, tempfile, urllib.parse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # its own folder, also under python -P
 import mapview
 import result
 from paths import arg_path, folder_no, layer_of, place_folders
@@ -580,20 +581,92 @@ def _read(value, pl):
     return {'value': value, 'photo': pl.get('cover'), 'sure': pl.get('confidence') or 'high'}
 
 
-def address_item(a, photos, ride_street=None):
+CONFIDENCE = ('high', 'medium', 'low')
+NUMBER_SOURCES = ('plate', 'sign', 'painted', 'other')
+
+
+def is_partial(number):
+    """A house number read only in part: "1…", "…01", "19..." (the unread digits written as "…")."""
+    return '…' in str(number or '') or '...' in str(number or '')
+
+
+def street_at(spec, i):
+    """The street of photo i from places.json "streets" ([{"fromPhoto", "toPhoto", "street"}]: where the ride turns
+    into another street, or one road changes its name along the way, while the phone's roadName stays the same);
+    None when no stretch covers it."""
+    for seg in (spec or {}).get('streets') or []:
+        if seg.get('street') and seg.get('fromPhoto', 0) <= i <= seg.get('toPhoto', 10 ** 9):
+            return seg['street']
+    return None
+
+
+def check_spec(spec):
+    """Refuse values build.py would otherwise pass on silently: an unknown confidence ("med", "sure"), an unknown
+    address source, a "streets" stretch without a street. -> list of problems (empty when fine)."""
+    bad = []
+    for key in ('places', 'addresses', 'signs'):
+        for k, x in enumerate(spec.get(key) or []):
+            label = f"{key}[{k}] {x.get('name') or x.get('houseNumber') or x.get('code') or x.get('label') or ''}".strip()
+            if x.get('confidence') not in (None, '') + CONFIDENCE:
+                bad.append(f"{label}: confidence {x['confidence']!r} (high | medium | low)")
+            if key == 'addresses':
+                if x.get('source') not in (None, '') + NUMBER_SOURCES:
+                    bad.append(f"{label}: source {x['source']!r} ({' | '.join(NUMBER_SOURCES)})")
+                if x.get('altNumbers') is not None and not isinstance(x['altNumbers'], list):
+                    bad.append(f'{label}: altNumbers must be a list of strings')
+    for k, seg in enumerate(spec.get('streets') or []):
+        if not seg.get('street'):
+            bad.append(f'streets[{k}]: no "street"')
+    return bad
+
+
+def numbering(a):
+    """The house-number block of an address (place.json place.numbering, result.json numbering): where the number
+    was read (source: plate | sign | painted | other; None = not said), an old number on the same plate / gate
+    ("số cũ", an old-style plate next to the new one), other numbers on the same gate, read only in part."""
+    return {'source': a.get('source') or None, 'oldNumber': str(a['oldNumber']) if a.get('oldNumber') else None,
+            'altNumbers': [str(x) for x in a.get('altNumbers') or []], 'partial': is_partial(a.get('houseNumber'))}
+
+
+def numbering_note(nb):
+    """The numbering block as words for the reviewer's note (until the web app shows the block itself)."""
+    out = []
+    if nb.get('partial'):
+        out.append('number read only in part')
+    if nb.get('source') and nb['source'] != 'plate':
+        out.append({'sign': 'number from a shop sign', 'painted': 'number painted on the wall / pillar'}
+                   .get(nb['source'], 'number not from a plate'))
+    if nb.get('oldNumber'):
+        out.append(f"old number {nb['oldNumber']}")
+    if nb.get('altNumbers'):
+        out.append('also on the gate: ' + ', '.join(nb['altNumbers']))
+    return '; '.join(out)
+
+
+def address_item(a, photos, ride_street=None, spec=None):
     """An entry of places.json "addresses" as a place-like item (layer "address"). The name's street is the plate's,
-    else the road the plate was photographed from (result.py then fills the street field from it, source "ride")."""
+    else the street of its stretch in places.json "streets", else the road the plate was photographed from
+    (result.py then fills the street field from it, source "ride").
+    A number read only in part ("1…") is kept as written with confidence low (a higher one is lowered: it is not a
+    number to publish)."""
     a = dict(a)
     lo, hi = a.get('photos') or [a['cover'], a['cover']]
-    road, _how = result.pick_road(photos[a['cover']].get('roadName'),
-                                  [photos[i].get('roadName') for i in range(lo, hi + 1)], ride_street)
+    road = street_at(spec, a['cover'])
+    if not road:
+        road, _how = result.pick_road(photos[a['cover']].get('roadName'),
+                                      [photos[i].get('roadName') for i in range(lo, hi + 1)], ride_street)
+    nb = numbering(a)
+    if nb['partial'] and a.get('confidence') != 'low':
+        a['confidence'] = 'low'
     fields = {'houseNumber': _read(str(a['houseNumber']), a)}
     if a.get('street'):
         fields['street'] = _read(a['street'], a)
     if a.get('unit'):
         fields['other'] = _read(a['unit'], a)
+    words = numbering_note(nb)
     a.update({'layer': 'address', 'name': ' '.join(x for x in (str(a['houseNumber']), a.get('street') or road) if x),
-              'category': 'address', 'photos': [lo, hi], 'fields': fields})
+              'category': 'address', 'photos': [lo, hi], 'fields': fields, 'numbering': nb,
+              'note': '; '.join(x for x in (a.get('note'), words) if x) or None})
     return a
 
 
@@ -704,6 +777,9 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
     photos = json.load(open(os.path.join(work, 'photos.json'), encoding='utf-8'))
     session = json.load(open(os.path.join(work, 'session.json'), encoding='utf-8'))
     spec = json.load(open(os.path.join(work, 'places.json'), encoding='utf-8'))
+    bad = check_spec(spec)
+    if bad:
+        raise SystemExit('places.json: ' + '; '.join(bad[:10]) + (f' (and {len(bad) - 10} more)' if len(bad) > 10 else ''))
     # stopped (no travel direction yet): a photo without a camera direction borrows its nearest neighbour's
     known = [i for i, p in enumerate(photos) if p.get('cameraBearing') is not None]
     for i, p in enumerate(photos):
@@ -746,7 +822,7 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
     sign_d = float(spec.get('defaultSignDistanceM') or 15)
     fwd = forward_photos(photos) if spec.get('signs') else None
     items = ([dict(pl, layer='place') for pl in spec.get('places') or []]
-             + [address_item(x, photos, spec.get('street')) for x in spec.get('addresses') or []]
+             + [address_item(x, photos, spec.get('street'), spec) for x in spec.get('addresses') or []]
              + [sign_item(x) for x in spec.get('signs') or []])
     for n, pl in enumerate(items, 1):
         a, b = pl['photos']
@@ -791,11 +867,14 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
                 if x.get('file') and os.path.isfile(kept):
                     shutil.copy2(kept, os.path.join(d, x['file']))
         # the road it was photographed from (phone's roadName), not the ride's street
-        road, road_from = result.pick_road(cover.get('roadName'), [photos[i].get('roadName') for i in range(a, b + 1)],
-                                           spec.get('street'))
+        # (a stretch of places.json "streets" wins: the ride turned into another street, or the road changed its
+        # name, while the phone kept the first road's name)
+        road, road_from = ((street_at(spec, pl['cover']), 'streets in places.json') if street_at(spec, pl['cover'])
+                           else result.pick_road(cover.get('roadName'),
+                                                 [photos[i].get('roadName') for i in range(a, b + 1)], spec.get('street')))
         extra = {}
         if layer == 'address':
-            extra = {'placeRef': pl.get('placeRef') or None}
+            extra = {'placeRef': pl.get('placeRef') or None, 'numbering': pl.get('numbering')}
         elif layer == 'sign':
             # facing: the way a driver who sees it drives = the travel bearing when it was photographed
             tb = cover.get('travelBearing') if cover.get('travelBearing') is not None else cover.get('cameraBearing')
@@ -866,6 +945,21 @@ def sign_code(m):
     return ((m.get('fields') or {}).get('signCode') or {}).get('value') or (m['place'].get('sign') or {}).get('code')
 
 
+def address_props(m):
+    """GeoJSON properties of an address: its number, where it was read, an old / other number, read in part."""
+    if layer_of(m) != 'address':
+        return {}
+    nb = m['place'].get('numbering') or {}
+    return {'houseNumber': ((m.get('fields') or {}).get('houseNumber') or {}).get('value'),
+            'numberSource': nb.get('source'), 'oldNumber': nb.get('oldNumber'),
+            'altNumbers': nb.get('altNumbers') or None, 'partial': bool(nb.get('partial'))}
+
+
+def address_cols(m):
+    p = address_props(m)
+    return [p.get('houseNumber'), p.get('numberSource'), p.get('oldNumber'), ' | '.join(p.get('altNumbers') or [])]
+
+
 def write_indexes(out, session=None):
     rows = [(d, json.load(open(os.path.join(out, d, 'place.json'), encoding='utf-8'))) for d in place_folders(out)]
     if session is None and rows:
@@ -877,18 +971,20 @@ def write_indexes(out, session=None):
         w.writerow(['#', 'layer', 'name', 'category', 'signCode', 'confidence', 'photos', 'lat', 'lon', 'position',
                     'review link',
                     'google name', 'google address', 'google phone', 'google hours', 'google website', 'google link',
-                    'google distance m', 'folder'])
+                    'google distance m', 'folder', 'house number', 'number source', 'old number', 'other numbers'])
         for d, m in rows:
             p = m['place']; pos = p['position']
             w.writerow([csv_cell(x) for x in [folder_no(d), layer_of(m), p['name'], p['category'], sign_code(m),
                         p['confidence'], len(m['photos']), pos['lat'], pos['lon'],
                         pos['method'], pos['googleMaps'], g(m, 'name'), g(m, 'address'), g(m, 'phone'),
-                        ' | '.join(g(m, 'openingHours') or []), g(m, 'website'), g(m, 'url'), g(m, 'distanceM'), d]])
+                        ' | '.join(g(m, 'openingHours') or []), g(m, 'website'), g(m, 'url'), g(m, 'distanceM'), d]
+                        + address_cols(m)])
     feats = [{'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [m['place']['position']['lon'], m['place']['position']['lat']]},
               'properties': {'folder': d, 'layer': layer_of(m), 'name': m['place']['name'],
                              'category': m['place']['category'], 'confidence': m['place']['confidence'],
                              'googleName': g(m, 'name'),
-                             **({'signCode': sign_code(m)} if layer_of(m) == 'sign' else {})}} for d, m in rows]
+                             **({'signCode': sign_code(m)} if layer_of(m) == 'sign' else {}),
+                             **address_props(m)}} for d, m in rows]
     json.dump({'type': 'FeatureCollection', 'features': feats}, open(os.path.join(out, 'places.geojson'), 'w', encoding='utf-8'),
               ensure_ascii=False, indent=1)
     lines = [f"{folder_no(d):>2}  {m['place']['name']:<38} {len(m['photos']):>2} photos  {m['place']['position']['googleMaps']}"

@@ -1,12 +1,14 @@
 """Load a street sweep (exported zip, unzipped folder, or a raw session folder) and make contact sheets to read.
 
-usage: python prepare.py <session.zip | folder> <workdir>
+usage: python prepare.py <session.zip | folder> <workdir> [--no-crops]
 
 Writes into <workdir>:
   photos.json   every photo in order: idx, id, file (absolute path), time, camera position / bearing / FOV, size, blur
   session.json  the session record
   sheets/       sheet_NNN.jpg: 4 photos per sheet (2 x 2, 1000 px wide each; a sheet mixing landscape and portrait
                 photos gives each its own shape of cell), each labelled "#idx"
+  crops/        on a house-number ride: plates_NN.jpg, a full-resolution tile around each number the phone read
+                (photos.json plateHints; crops.py plates), so plates are read without cropping by hand
 Prints the ride's target (session.target: shops | addresses | signs; what to read, docs/sweep-targets.md).
 """
 import json, math, os, sys, zipfile
@@ -166,6 +168,22 @@ def sign_hints(item):
     return out or None
 
 
+def plate_hints(item, key='plates'):
+    """The phone's house-number hints with their boxes: [{text, box, heightPx, kind, src, why, line}] (box = [x0, y0,
+    x1, y1] in the upright photo's pixels, as the phone gave it, None when it gave none; app 0.20+ also says kind
+    "number" | "doubt", src "plate" | "sign" (a number on a plate, or in a sign's address line), why, the whole
+    line read). key="platesDropped": what the phone read as a number but judged not one (price, phone, date, vehicle
+    plate, the street's own number), with why."""
+    out = []
+    for p in item.get(key) or []:
+        b = p.get('box')
+        ok = isinstance(b, (list, tuple)) and len(b) == 4 and all(isinstance(v, (int, float)) for v in b)
+        h = {'text': p.get('text'), 'box': [int(v) for v in b] if ok else None, 'heightPx': p.get('heightPx')}
+        h.update({k: p[k] for k in ('kind', 'src', 'why', 'line') if p.get(k) is not None})
+        out.append(h)
+    return out or None
+
+
 TARGETS = {
     'shops': 'shops: read every business (SKILL.md, step 2)',
     'addresses': 'addresses (shops + house numbers): read every business and every readable house-number plate, '
@@ -211,6 +229,9 @@ def main():
             'ocrText': (i.get('ocr') or {}).get('text'),
             # house-number rides: the numbers the phone's text reader found on this photo (a hint where to look)
             'plates': [p.get('text') for p in i.get('plates') or []] or None,
+            # ... with where it is (box in the upright photo's pixels, app 0.17+): crops.py plates tiles them
+            'plateHints': plate_hints(i),
+            'platesDropped': [f"{p.get('text')} ({p.get('why') or 'not a number'})" for p in i.get('platesDropped') or []] or None,
             # signs rides (app 0.18+): what the phone's sign detector found, box centre x (0 = left) and score; a
             # hint where to look: about half are shop letters or logos, and the code is right on about a third
             # signs rides (app 0.19+): "sign" = an extra photo taken as a near sign reached the edge of the frame
@@ -221,6 +242,13 @@ def main():
     json.dump(photos, open(os.path.join(work, 'photos.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     json.dump(session, open(os.path.join(work, 'session.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     sheets(photos, os.path.join(work, 'sheets'))
+    plate_line = None
+    if (session.get('target') == 'addresses' or any(p.get('plateHints') for p in photos)) and '--no-crops' not in sys.argv:
+        import crops
+        n, t, nobox = crops.plates(work)
+        plate_line = (f"plate hints: {t} tiles on {n} sheet(s) in {os.path.join(work, 'crops')} (plates_NN.jpg)"
+                      + (f', {nobox} without a box' if nobox else '')
+                      + '; crops.py band / boxes for the rest (SKILL.md)')
     roads = {}
     for p in photos:
         roads[p['roadName']] = roads.get(p['roadName'], 0) + 1
@@ -228,6 +256,8 @@ def main():
     print(target_line(session))
     print(f"{len(photos)} photos -> {(len(photos) + 3) // 4} sheets in {os.path.join(work, 'sheets')}")
     print("roads:", sorted(roads.items(), key=lambda kv: -kv[1])[:5])
+    if plate_line:
+        print(plate_line)
     if moved:
         m = sorted(moved)
         print(f"photo positions from the GPS track by time: {how}, moved median {m[len(m) // 2]:.1f} m, max {m[-1]:.1f} m "
