@@ -20,7 +20,7 @@ to 256 KB) and grow again after a run of quick ones; after a failed chunk it wai
 the server where the upload stands (HEAD) and goes on from there; it gives up only after 25 failures in a row with
 no progress. Run the same push again after that (or after a crash) and it continues from the server's offset: the
 upload URL is kept in "<zip>.tus.json" beside the zip, or "<folder>.zip.tus.json" beside a folder, whose zip is kept
-in the temp folder (poi-push/) until the upload is complete and reused while the folder is unchanged. A folder is
+in ~/.cache/poi-capture/push/ (private to this user) until the upload is complete and reused while the folder is unchanged. A folder is
 zipped first (a processed place folder with result.json; its session id, name, kind and target are read from it).
 
 Standard library only.
@@ -271,14 +271,43 @@ def zip_folder(folder: str, out: str | None = None) -> str:
     if out is None:
         fd, out = tempfile.mkstemp(suffix='.zip', prefix=os.path.basename(os.path.abspath(folder)) + '-')
         os.close(fd)
-    with zipfile.ZipFile(out + '.part', 'w', zipfile.ZIP_DEFLATED) as z:
+    part = out + '.part'
+    if os.path.lexists(part):
+        os.remove(part)
+    # created new (never through an existing file or link someone else put there), readable by this user only
+    fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_BINARY', 0), 0o600)
+    with os.fdopen(fd, 'wb') as f, zipfile.ZipFile(f, 'w', zipfile.ZIP_DEFLATED) as z:
         for root, dirs, files in os.walk(folder):
             dirs.sort()
             for name in sorted(files):
                 p = os.path.join(root, name)
                 z.write(p, os.path.relpath(p, folder).replace(os.sep, '/'))
-    os.replace(out + '.part', out)
+    os.replace(part, out)
     return out
+
+
+def private_dir() -> str:
+    """This user's own folder for resumable zips (~/.cache/poi-capture/push, mode 700), not the shared temp root:
+    a zip kept there between runs is what gets uploaded, so nobody else may be able to replace it."""
+    import stat
+    d = os.path.join(os.path.expanduser('~'), '.cache', 'poi-capture', 'push')
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    st = os.lstat(d)
+    if not stat.S_ISDIR(st.st_mode) or stat.S_ISLNK(st.st_mode):
+        raise SystemExit(f'{d} is not a plain folder: remove it and run again')
+    if hasattr(os, 'getuid'):
+        if st.st_uid != os.getuid() or st.st_mode & 0o077:
+            raise SystemExit(f'{d} must belong to you with mode 700 (chmod 700 it, or remove it)')
+    return d
+
+
+def file_sha256(path: str) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(1 << 20), b''):
+            h.update(b)
+    return h.hexdigest()
 
 
 def folder_fingerprint(folder: str) -> str:
@@ -378,10 +407,10 @@ def push(cloud: Cloud, path: str, type_: str, session_id: str | None, name: str 
     if folder:
         # the zip of an unchanged folder is kept and reused, so a second run resumes; a changed folder is zipped again
         import hashlib
-        zdir = os.path.join(tempfile.gettempdir(), 'poi-push')
-        os.makedirs(zdir, exist_ok=True)
-        zip_path = os.path.join(zdir, hashlib.sha1(os.path.abspath(path).encode('utf-8')).hexdigest()[:12] + '-' + filename)
-        if not (st.get('fingerprint') == fp and os.path.isfile(zip_path) and os.path.getsize(zip_path) == st.get('size')):
+        zip_path = os.path.join(private_dir(), hashlib.sha1(os.path.abspath(path).encode('utf-8')).hexdigest()[:12] + '-' + filename)
+        # reused only when it is byte for byte the zip made from this unchanged (and privacy-checked) folder
+        if not (st.get('fingerprint') == fp and os.path.isfile(zip_path) and os.path.getsize(zip_path) == st.get('size')
+                and st.get('sha256') and file_sha256(zip_path) == st['sha256']):
             zip_folder(path, zip_path)
             st = {}
     else:
@@ -397,7 +426,8 @@ def push(cloud: Cloud, path: str, type_: str, session_id: str | None, name: str 
     for attempt in range(2):
         if url is None:
             url, offset = cloud.create(size, meta), 0
-            json.dump({'url': url, 'size': size, 'mtime': os.path.getmtime(zip_path), 'fingerprint': fp},
+            json.dump({'url': url, 'size': size, 'mtime': os.path.getmtime(zip_path), 'fingerprint': fp,
+                       'sha256': file_sha256(zip_path) if folder else None},
                       open(state_file, 'w', encoding='utf-8'))
         elif offset:
             print(f'resuming at {human(offset)} of {human(size)}')
