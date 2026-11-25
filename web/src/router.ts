@@ -8,8 +8,10 @@ export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/', name: 'sessions', component: Empty },
-    { path: '/tasks', name: 'tasks', component: Empty },
+    // the old "All tasks" list (gone: a session's tasks are under its places): its links land on the session list
+    { path: '/tasks', redirect: '/' },
     { path: '/s/:ds', name: 'session', component: Empty },
+    // older links to a session's tasks: the session, its to-do section open
     { path: '/s/:ds/tasks', name: 'sessionTasks', component: Empty },
     { path: '/s/:ds/p/:place', name: 'place', component: Empty },
     { path: '/s/:ds/t/:task', name: 'task', component: Empty },
@@ -28,10 +30,9 @@ export const router = createRouter({
 })
 
 export const to = {
-  sessions: () => ({ name: 'sessions' }),
-  tasks: () => ({ name: 'tasks' }),
+  /** The session list; query: its filters (sessionList.ts toQuery). */
+  sessions: (query: Record<string, string> = {}) => ({ name: 'sessions', query }),
   session: (ds: string) => ({ name: 'session', params: { ds } }),
-  sessionTasks: (ds: string) => ({ name: 'sessionTasks', params: { ds } }),
   place: (ds: string, place: string) => ({ name: 'place', params: { ds, place } }),
   task: (ds: string, task: number) => ({ name: 'task', params: { ds, task: String(task) } }),
   settings: () => ({ name: 'settingsConnection' }),

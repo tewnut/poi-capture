@@ -1,8 +1,9 @@
 <script setup lang="ts">
-// Left panel: the sessions on the project's server (or all tasks across them); open a session to review its places
-// and tasks (downloaded into this browser the first time, connection.ts). The map is in the middle, the selected
-// place or task on the right. The address (#/...) decides what is open; #/settings and #/admin are pages of their own.
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+// Left panel: the sessions on the project's server, by stage, searched and filtered (sessionList.ts); open a session
+// to review its places, with its tasks in a to-do section under them (downloaded into this browser the first time,
+// connection.ts). The map is in the middle (on the list: the rides listed), the selected place or task on the right.
+// The address (#/...) decides what is open; #/settings and #/admin are pages of their own.
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MapView from './components/MapView.vue'
 import PlaceReview from './components/PlaceReview.vue'
@@ -13,7 +14,7 @@ import Photo from './components/Photo.vue'
 import AdminPanel from './components/AdminPanel.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import ReviewBar from './components/ReviewBar.vue'
-import { state, load, remove, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, stageOf, STAGES, seqFlags, dupes } from './store'
+import { state, load, remove, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, stageOf, seqFlags, dupes } from './store'
 import { placeHints } from './hints'
 import { to } from './router'
 import { t, relTime } from './i18n'
@@ -23,22 +24,23 @@ import { geojson, csv, osm, tasksGeojson, download, type Published, type Removed
 import { kml, gpx, shapefile, xlsx, allFormats } from './exports'
 import { buildProject, projectName } from './project'
 import { missingStreet, pendingSuggestions } from './fields'
-import { humanSize, type CloudItem } from './cloud'
+import { humanSize, decodePolyline, type CloudItem } from './cloud'
+import {
+  LIST_STAGES, LIST_KINDS, KIND_ICON, PERIODS, SORTS, NO_FILTERS, listStage, listKind, filterFacts, stageCounts, sortFacts, dayGroups,
+  dayLabel, riders, toQuery, fromQuery, extraFilters, type Facts, type ListFilters,
+} from './sessionList'
 import { conn, connected, canRead, canRelease, stopProcessing, connect, refresh, rows, pull, loadSaved, saveToServer, type Row } from './connection'
 import { swipeStep, neighbour, blocksSwipe, type Step } from './swipe'
 import { LAYERS, layerOf, type Dataset, type Layer, type Place } from './types'
 import { defaultLevel, isIndoor, levelsOf, onLevel, placeLevel } from './indoor'
 
-type View = 'sessions' | 'allTasks' | 'places' | 'tasks'
-const view = ref<View>('sessions')
 const busy = ref('')
 const publishOpen = ref(false)
 const reviewRef = ref<InstanceType<typeof PlaceReview>>()
+/** The open session's to-do section (its tasks, under the places): open when a task is. */
+const todoOpen = ref(false)
 
-// filters
-const fStage = ref('')
-const fKind = ref('')
-const fHold = ref('')
+// the open session's place filters
 const q = ref('')
 const fDecision = ref('')
 const fGoogle = ref('')
@@ -46,14 +48,14 @@ const fGoogle = ref('')
 const route = useRoute()
 const router = useRouter()
 
-/** #/ sessions · #/tasks all tasks · #/s/<id> places · #/s/<id>/tasks · #/s/<id>/p/<place> · #/s/<id>/t/<task> */
+/** #/ sessions (?q=…&stage=… its filters) · #/s/<id> places and tasks · #/s/<id>/p/<place> · #/s/<id>/t/<task>
+ *  (older links: #/tasks lands on the list, #/s/<id>/tasks opens the session's to-do section) */
 function applyRoute() {
   if (state.loading) return
   const ds = route.params.ds as string | undefined
   state.missing = ''
   if (ds && !state.datasets.some((d) => d.id === ds)) {
     state.open = null; state.place = null; state.task = null
-    view.value = 'sessions'
     // a link to a session this browser has not downloaded yet: from the server, then open the link
     const item = rows(conn.items, state.datasets).find((r) => r.sessionId === ds)?.item
     if (item) { if (!conn.pulling) fetchSession(item, route.fullPath) }
@@ -62,32 +64,31 @@ function applyRoute() {
   }
   state.place = null; state.task = null
   switch (route.name) {
-    case 'session': state.open = ds!; view.value = 'places'; break
-    case 'sessionTasks': state.open = ds!; view.value = 'tasks'; break
+    case 'session': state.open = ds!; break
+    case 'sessionTasks': state.open = ds!; todoOpen.value = true; break
     case 'place': {
-      state.open = ds!; view.value = 'places'
+      state.open = ds!
       const id = route.params.place as string
       state.place = openDataset.value?.places.some((p) => p.id === id) ? id : null
       if (!state.place) state.missing = `${ds} / place ${id}`
       break
     }
     case 'task': {
-      state.open = ds!; view.value = 'tasks'
+      state.open = ds!; todoOpen.value = true
       const i = Number(route.params.task)
       state.task = Number.isInteger(i) && openDataset.value?.tasks[i] ? i : null
       if (state.task == null) state.missing = `${ds} / task ${route.params.task}`
       break
     }
-    case 'tasks': state.open = null; view.value = 'allTasks'; break
-    default: state.open = null; view.value = 'sessions'
+    default: state.open = null
   }
   if (state.open) state.shown.add(state.open)
 }
-watch(fKind, (k) => { if (k === 'poi') fHold.value = '' })
 watch(() => route.fullPath, applyRoute)
 watch(() => state.loading, applyRoute)
 watch(() => conn.items, applyRoute)
-watch(() => state.open, () => { q.value = ''; fDecision.value = ''; fGoogle.value = ''; state.layer = ''; state.level = openLevel() })
+watch(() => state.open, () => { q.value = ''; fDecision.value = ''; fGoogle.value = ''; state.layer = ''; state.level = openLevel()
+  todoOpen.value = route.name === 'task' || route.name === 'sessionTasks'; picked.value = ''; hot.value = '' })
 /** An indoor walk opens on the level with the most places (indoor.ts); outdoors there is no level. */
 function openLevel() {
   const d = openDataset.value
@@ -98,17 +99,88 @@ onMounted(async () => { await load(); await connect() })
 
 // sessions: the server's (processed, or still waiting for the agent) and the ones downloaded into this browser
 const dsOf = (r: Row) => state.datasets.find((d) => d.id === r.sessionId) || null
-/** A session not downloaded yet is processed (or, waiting for the agent, captured); a downloaded one says itself. */
-function rowStage(r: Row) { const d = dsOf(r); return d ? stageOf(d).stage : r.state === 'waiting' ? 'captured' : 'processed' }
-function rowHolding(r: Row) { const d = dsOf(r); return d ? d.session.holding || 'mount' : String(r.item?.metadata.holding || r.raw?.metadata.holding || 'mount') }
 const allRows = computed(() => rows(conn.items, state.datasets))
-const sessions = computed(() => allRows.value.filter((r) =>
-  (!fStage.value || rowStage(r) === fStage.value) &&
-  (!fKind.value || (r.kind || 'sweep') === fKind.value) &&
-  // mounted / in hand is a sweep property: a Place capture never matches it
-  (!fHold.value || (r.kind !== 'poi' && rowHolding(r) === fHold.value))))
-function clearSessionFilters() { fStage.value = ''; fKind.value = ''; fHold.value = '' }
-const stageCount = (s: string) => allRows.value.filter((r) => rowStage(r) === s).length
+const upload = (r: Row) => r.item || r.raw
+/** What the list knows of a row (sessionList.ts): its stage from this browser's copy when downloaded, else from the
+ *  server (waiting / being processed, the last review saved, who has it checked out); its kind; who uploaded it; and
+ *  the words the search looks in (name, street, rider, building). */
+function rowFacts(r: Row): Facts & { row: Row } {
+  const d = dsOf(r)
+  const info = conn.reviews[r.sessionId]
+  const raw = d ? d.source === 'raw' : r.state === 'waiting'
+  const st = d && !raw ? stageOf(d) : null
+  const rider = upload(r)?.by?.name || ''
+  const streets = d ? new Set(d.places.map((p) => p.fields.street?.value).filter(Boolean)) : []
+  const meta = upload(r)?.metadata || {}
+  const text = [r.name, d?.session.name, d?.session.street, d?.building?.name, ...streets, rider,
+    ...['street', 'building'].map((k) => (typeof meta[k] === 'string' ? meta[k] : ''))].filter(Boolean).join(' · ')
+  return {
+    row: r, key: r.key, name: r.name, date: r.date, rider, text,
+    stage: listStage({ raw, processing: !!conn.processing[r.sessionId], progress: st ?? info?.saved ?? null, locked: !!info?.lock }),
+    kind: listKind(d?.session.kind ?? r.kind, d?.session.target ?? r.target),
+  }
+}
+const allFacts = computed(() => allRows.value.map(rowFacts))
+
+// the list's search, filters and sort, kept in the address (#/?q=…&stage=…) while the list is shown
+const lf = reactive<ListFilters>({ ...NO_FILTERS })
+const filtersOpen = ref(false)
+const now = ref(Date.now())
+const sameQuery = (a: Record<string, unknown>, b: Record<string, unknown>) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort())
+watch(() => (route.name === 'sessions' ? route.query : null), (qy) => {
+  if (!qy) return
+  const f = fromQuery(qy)
+  Object.assign(lf, f)
+  if (extraFilters(f)) filtersOpen.value = true
+  // an address with values this version does not know: replaced by what it understood
+  if (!sameQuery(toQuery(f), qy)) router.replace(to.sessions(toQuery(f)))
+}, { immediate: true })
+watch(lf, () => {
+  if (route.name === 'sessions' && !sameQuery(toQuery(lf), route.query)) router.replace(to.sessions(toQuery(lf)))
+}, { deep: true })
+/** The list, with its filters (back from a session, after removing one). */
+const toList = () => to.sessions(toQuery(lf))
+function clearListFilters() { Object.assign(lf, { ...NO_FILTERS, sort: lf.sort }) }
+
+const listed = computed(() => sortFacts(filterFacts(allFacts.value, lf, now.value), lf.sort))
+const groups = computed(() => dayGroups(listed.value, lf.sort))
+const counts = computed(() => stageCounts(allFacts.value, lf, now.value))
+const riderList = computed(() => { const l = riders(allFacts.value); return lf.rider && !l.includes(lf.rider) ? [...l, lf.rider] : l })
+function groupTitle(key: string) {
+  const l = dayLabel(key, now.value)
+  return l.day === 'today' ? t('dayToday') : l.day === 'yesterday' ? t('dayYesterday') : l.day === 'none' ? t('noDate') : l.text
+}
+/** The row's time: the hour under a day header, else the day. */
+function rowWhen(r: Row) {
+  const ms = r.date ? Date.parse(r.date) : NaN
+  if (!Number.isFinite(ms)) return t('noDate')
+  const d = new Date(ms)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return lf.sort === 'new' || lf.sort === 'old' ? `${p(d.getHours())}:${p(d.getMinutes())}` : `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`
+}
+/** Places once downloaded, else the photos the upload says it has. */
+function rowSize(r: Row) {
+  const d = dsOf(r)
+  if (d) return d.places.length ? t('nPlaces', { n: d.places.length }) : t('noPlacesYet')
+  const n = upload(r)?.trip?.photos
+  return n ? t('nPhotos', { n }) : ''
+}
+// the map on the list: the rides listed; the hovered (or picked on the map) row's route bold
+const hot = ref('')
+const picked = ref('')
+const listedIds = computed(() => (state.open ? null : listed.value.map((x) => x.key)))
+const listedRoutes = computed(() => (state.open ? [] : listed.value.filter((x) => !dsOf(x.row)).flatMap((x) => {
+  const tr = upload(x.row)?.trip?.track
+  try { return tr ? [{ id: x.key, name: x.name, track: decodePolyline(tr) }] : [] } catch { return [] }
+})))
+/** A route clicked on the map: its row is picked (scrolled to, lit up); clicked again, the session opens. */
+function pickRow(id: string) {
+  const f = listed.value.find((x) => x.key === id)
+  if (!f) return
+  if (picked.value === id) { openRow(f.row); return }
+  picked.value = id
+  nextTick(() => document.querySelector(`[data-sid="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+}
 function kindLabel(x: Row | Dataset) {
   const d = 'session' in x ? x : dsOf(x)
   const kind = d ? d.session.kind : (x as Row).kind
@@ -182,7 +254,7 @@ const LIST_REFRESH_MS = 60 * 1000
 let listTimer: ReturnType<typeof setInterval> | undefined
 const onVisible = () => { if (document.visibilityState === 'visible' && connected.value && !conn.listing) refresh().catch(() => {}) }
 onMounted(() => {
-  listTimer = setInterval(() => { if (document.visibilityState === 'visible' && connected.value && !conn.listing) refresh().catch(() => {}) }, LIST_REFRESH_MS)
+  listTimer = setInterval(() => { now.value = Date.now(); if (document.visibilityState === 'visible' && connected.value && !conn.listing) refresh().catch(() => {}) }, LIST_REFRESH_MS)
   document.addEventListener('visibilitychange', onVisible)
 })
 onBeforeUnmount(() => { clearInterval(listTimer); document.removeEventListener('visibilitychange', onVisible) })
@@ -190,12 +262,10 @@ function openRow(r: Row) {
   if (dsOf(r)) router.push(to.session(r.sessionId))
   else if (r.item && !conn.pulling) fetchSession(r.item)
 }
-const STAGE_NAME = { captured: 'stageCaptured', processed: 'stageProcessed', reviewed: 'stageReviewed' } as const
-function toggleShown(id: string) { state.shown.has(id) ? state.shown.delete(id) : state.shown.add(id) }
 async function del(d: Dataset) {
   if (!window.confirm(t('removeConfirm', { name: d.session.name || d.id }))) return
   await remove(d.id)
-  router.push(to.sessions())
+  router.push(toList())
 }
 
 // one session
@@ -278,7 +348,7 @@ function stepOpen(s: Step) {
 }
 function closeDetail() {
   const d = openDataset.value
-  if (d) router.push(openPlace.value ? to.session(d.id) : to.sessionTasks(d.id))
+  if (d) router.push(to.session(d.id))
 }
 let touch: { x: number; y: number; t: number } | null = null
 function touchStart(e: TouchEvent) {
@@ -299,13 +369,6 @@ function touchEnd(e: TouchEvent) {
 watch(() => [state.place, state.task], () => detailEl.value?.scrollTo?.({ top: 0 }))
 watch(() => !!(openPlace.value || openTask.value), (open) => { if (!open) mapPeek.value = false })
 watch(mapPeek, async (v) => { if (v) { await nextTick(); mapRef.value?.focusOpen() } })
-
-// tasks across sessions (shown on the map), grouped by session
-const taskGroups = computed(() => state.datasets.filter((d) => state.shown.has(d.id) && d.tasks.length)
-  .map((d) => ({ d, items: d.tasks.map((t, i) => ({ t, i })) })))
-const shownTasks = computed(() => taskGroups.value.reduce((n, g) => n + g.items.length, 0))
-const allTasks = computed(() => state.datasets.reduce((n, d) => n + d.tasks.length, 0))
-const shownCount = computed(() => state.datasets.filter((d) => state.shown.has(d.id)).length)
 
 // publish
 // publish: the open session's confirmed places and removals
@@ -365,9 +428,8 @@ async function pubProject() {
   for (const f of pj.files) if (blobs[f.path]) files[f.path] = blobs[f.path]
   download(projectName(d.session.id, exportedAt), zipSync(files, { level: 0 }), 'application/zip')
 }
-function exportTasks(ds?: Dataset) {
-  const list = ds ? [ds] : state.datasets.filter((d) => state.shown.has(d.id))
-  download(`poi-tasks-${ds ? ds.session.id + '-' : ''}${stamp()}.geojson`, tasksGeojson(list, state.reviews, state.removals, state.reviewer), 'application/geo+json')
+function exportTasks(ds: Dataset) {
+  download(`poi-tasks-${ds.session.id}-${stamp()}.geojson`, tasksGeojson([ds], state.reviews, state.removals, state.reviewer), 'application/geo+json')
 }
 
 const DECISION = { todo: 'decTodo', confirmed: 'decConfirmed', rejected: 'decRejected', visit: 'decVisit' } as const
@@ -395,14 +457,9 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
         <span>{{ t('keyNoRead') }}</span> <RouterLink class="small" :to="to.settings()">{{ t('settings') }}</RouterLink></div>
       <div v-else-if="conn.listError" class="banner err">{{ conn.listError }} <button class="ghost small" @click="refresh()">{{ t('retry') }}</button></div>
 
-      <!-- sessions / all tasks -->
-      <template v-if="view === 'sessions' || view === 'allTasks'">
-        <nav class="seg">
-          <button :class="{ on: view === 'sessions' }" @click="router.push(to.sessions())">{{ t('sessions') }} <span class="n">{{ allRows.length }}</span></button>
-          <button :class="{ on: view === 'allTasks' }" @click="router.push(to.tasks())">{{ t('allTasks') }} <span class="n">{{ allTasks }}</span></button>
-        </nav>
-
-        <section v-if="view === 'sessions'" class="pane">
+      <!-- the session list: stage chips, search, filters, rows by day -->
+      <template v-if="!openDataset">
+        <section class="pane list">
           <div v-if="state.loading || conn.status === 'checking'" class="empty soft">{{ t('loading') }}</div>
           <div v-else-if="conn.status === 'none' && !allRows.length" class="empty">
             <div class="ico">☁</div>
@@ -415,87 +472,86 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
             <p v-if="!conn.listing" class="muted">{{ t('noSessionsText') }}</p>
           </div>
           <template v-else>
-            <div class="filters">
-              <select v-model="fStage"><option value="">{{ t('anyStage') }}</option><option v-for="s in STAGES" :key="s.key" :value="s.key">{{ t(STAGE_NAME[s.key]) }} ({{ stageCount(s.key) }})</option></select>
-              <select v-model="fKind"><option value="">{{ t('allKinds') }}</option><option value="sweep">{{ t('sweep') }}</option><option value="poi">{{ t('poi') }}</option></select>
-              <select v-if="fKind !== 'poi'" v-model="fHold"><option value="">{{ t('mountAndHand') }}</option><option value="mount">{{ t('mounted') }}</option><option value="hand">{{ t('inHand') }}</option></select>
+            <div class="ltop">
+              <nav class="lstages" :aria-label="t('stagesAria')">
+                <button :class="{ on: !lf.stage }" :aria-pressed="!lf.stage" @click="lf.stage = ''">{{ t('ls_all') }} <span class="n">{{ counts.all }}</span></button>
+                <button v-for="s in LIST_STAGES" :key="s" :class="['ls-' + s, { on: lf.stage === s }]" :aria-pressed="lf.stage === s"
+                  @click="lf.stage = lf.stage === s ? '' : s">{{ t('ls_' + s) }} <span class="n">{{ counts[s] }}</span></button>
+              </nav>
+              <div class="ltools">
+                <input v-model="lf.q" type="search" class="lsearch" :placeholder="t('listSearch')" :aria-label="t('listSearch')" />
+                <button :class="['secondary', 'small', 'lfbtn', { on: filtersOpen || extraFilters(lf) }]" :aria-expanded="filtersOpen"
+                  @click="filtersOpen = !filtersOpen">{{ t('filterBtn') }}<span v-if="extraFilters(lf)" class="n">{{ extraFilters(lf) }}</span></button>
+              </div>
+              <div v-if="filtersOpen" class="lfilters">
+                <select v-model="lf.kind" :aria-label="t('allTargets')"><option value="">{{ t('allTargets') }}</option>
+                  <option v-for="k in LIST_KINDS" :key="k" :value="k">{{ KIND_ICON[k] }} {{ t('kind_' + k) }}</option></select>
+                <select v-model="lf.period" :aria-label="t('period_')"><option v-for="p in PERIODS" :key="p" :value="p">{{ t('period_' + p) }}</option></select>
+                <select v-model="lf.rider" :aria-label="t('allRiders')"><option value="">{{ t('allRiders') }}</option>
+                  <option v-for="n in riderList" :key="n" :value="n">{{ n }}</option></select>
+                <select v-model="lf.sort" :aria-label="t('sortAria')"><option v-for="s in SORTS" :key="s" :value="s">{{ t('sort_' + s) }}</option></select>
+              </div>
             </div>
-            <div v-if="!sessions.length" class="empty soft">
+            <div v-if="!listed.length" class="empty soft">
               <b>{{ t('noSessionMatch') }}</b>
               <p class="muted">{{ t('sessionsHidden', { n: allRows.length }) }}</p>
-              <button class="secondary" @click="clearSessionFilters">{{ t('clearFilters') }}</button>
+              <button class="secondary" @click="clearListFilters">{{ t('clearFilters') }}</button>
             </div>
-            <article v-for="r in sessions" :key="r.key" :class="['ses', r.state, { busy: conn.pulling === r.sessionId }]">
-              <input v-if="dsOf(r)" type="checkbox" :checked="state.shown.has(r.sessionId)" :title="t('showOnMap')" :aria-label="t('showOnMap')" @change="toggleShown(r.sessionId)" />
-              <span v-else class="cbspace"></span>
-              <div class="body" :role="r.state === 'waiting' ? undefined : 'button'" @click="openRow(r)">
-                <b>{{ r.name }}</b> <span v-if="targetLabel(r)" class="chip target" :title="t('targetTitle')">{{ targetLabel(r) }}</span>
-                <div class="muted">{{ (r.date || '').slice(0, 10) || t('noDate') }} · {{ kindLabel(r) }}{{ (r.item || r.raw)?.by ? ' · ' + (r.item || r.raw)!.by!.name : '' }}</div>
-                <template v-if="dsOf(r)">
-                  <div class="stats">
-                    <span>{{ dsOf(r)!.places.length ? t('nPlaces', { n: dsOf(r)!.places.length }) : t('noPlacesYet') }}</span>
-                    <span class="chip new" v-if="dsOf(r)!.places.filter((p) => gstat(p) === 'new').length">{{ t('newToGoogle', { n: dsOf(r)!.places.filter((p) => gstat(p) === 'new').length }) }}</span>
-                    <span class="chip todo" v-if="dsOf(r)!.tasks.length">{{ t('nTasks', { n: dsOf(r)!.tasks.length }) }}</span>
-                    <span class="chip" v-if="r.state === 'local' && !r.item && connected">{{ t('onlyHere') }}</span>
-                    <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]" :title="lockLabel(r)!.title">{{ lockLabel(r)!.text }}</span>
+            <template v-for="g in groups" :key="g.key ?? 'all'">
+              <h3 v-if="g.key != null" class="dayhead">{{ groupTitle(g.key) }} <span class="n">{{ g.items.length }}</span></h3>
+              <article v-for="f in g.items" :key="f.key" :data-sid="f.key"
+                :class="['ses', f.row.state, { busy: conn.pulling === f.key, hot: hot === f.key || picked === f.key }]"
+                @mouseenter="hot = f.key" @mouseleave="hot = ''">
+                <div class="body" :role="f.row.state === 'waiting' ? undefined : 'button'" :tabindex="f.row.state === 'waiting' ? undefined : 0"
+                  @click="openRow(f.row)" @keydown.enter="openRow(f.row)">
+                  <div class="sline"><b class="sname" :title="f.name">{{ f.name }}</b>
+                    <span :class="['chip', 'lst', 'ls-' + f.stage]">{{ t('ls_' + f.stage) }}</span></div>
+                  <div class="muted sline2">
+                    <span>{{ rowWhen(f.row) }}</span>
+                    <span :title="kindLabel(f.row)">{{ KIND_ICON[f.kind] }} {{ t('kind_' + f.kind) }}</span>
+                    <span v-if="f.rider">{{ f.rider }}</span>
+                    <span v-if="rowSize(f.row)">{{ rowSize(f.row) }}</span>
                   </div>
-                  <StageBar :ds="dsOf(r)!" />
-                </template>
-                <div v-else class="stats">
-                  <span v-if="conn.pulling === r.sessionId" class="chip">{{ t('downloadingShort') }}</span>
-                  <span v-else-if="r.state === 'waiting' && conn.processing[r.sessionId]" class="chip visit"
-                    :title="t('processingTitle', procParams(r))">{{ t('processingBy', procParams(r)) }}</span>
-                  <button v-if="r.state === 'waiting' && conn.processing[r.sessionId] && (canRelease || conn.processing[r.sessionId].by.id === conn.me?.id)"
-                    class="ghost small" :title="t('stopProcessingTitle', procParams(r))" @click.stop="stopProc(r)">{{ t('stopProcessing') }}</button>
-                  <a v-else-if="r.state === 'waiting'" class="ghost small guide" href="./agents.md" target="_blank" rel="noopener"
-                    :title="t('agentGuideTitle')" @click.stop>{{ t('agentGuide') }}</a>
-                  <span v-else class="chip ok">{{ t('onServer', { size: humanSize(r.item?.size ?? null) }) }}</span>
-                  <span v-if="lockLabel(r)" :class="['chip', lockLabel(r)!.cls]" :title="lockLabel(r)!.title">{{ lockLabel(r)!.text }}</span>
+                  <div class="stats">
+                    <template v-if="dsOf(f.row)">
+                      <span class="chip new" v-if="dsOf(f.row)!.places.filter((p) => gstat(p) === 'new').length">{{ t('newToGoogle', { n: dsOf(f.row)!.places.filter((p) => gstat(p) === 'new').length }) }}</span>
+                      <span class="chip todo" v-if="dsOf(f.row)!.tasks.length">{{ t('nTasks', { n: dsOf(f.row)!.tasks.length }) }}</span>
+                      <span class="chip" v-if="f.row.state === 'local' && !f.row.item && connected">{{ t('onlyHere') }}</span>
+                    </template>
+                    <template v-else>
+                      <span v-if="conn.pulling === f.key" class="chip">{{ t('downloadingShort') }}</span>
+                      <span v-else-if="f.row.state === 'waiting' && conn.processing[f.key]" class="chip visit"
+                        :title="t('processingTitle', procParams(f.row))">{{ t('processingBy', procParams(f.row)) }}</span>
+                      <button v-if="f.row.state === 'waiting' && conn.processing[f.key] && (canRelease || conn.processing[f.key].by.id === conn.me?.id)"
+                        class="ghost small" :title="t('stopProcessingTitle', procParams(f.row))" @click.stop="stopProc(f.row)">{{ t('stopProcessing') }}</button>
+                      <a v-else-if="f.row.state === 'waiting'" class="ghost small guide" href="./agents.md" target="_blank" rel="noopener"
+                        :title="t('agentGuideTitle')" @click.stop>{{ t('agentGuide') }}</a>
+                      <span v-else class="chip ok">{{ t('onServer', { size: humanSize(f.row.item?.size ?? null) }) }}</span>
+                    </template>
+                    <span v-if="lockLabel(f.row)" :class="['chip', lockLabel(f.row)!.cls]" :title="lockLabel(f.row)!.title">{{ lockLabel(f.row)!.text }}</span>
+                  </div>
+                  <StageBar v-if="dsOf(f.row)" :ds="dsOf(f.row)!" />
+                  <!-- uploaded, not processed yet: "Captured", the stepper on its first step -->
+                  <StageBar v-else-if="f.row.state === 'waiting'" :ds="null" />
                 </div>
-                <!-- uploaded, not processed yet: "Captured", the stepper on its first step -->
-                <StageBar v-if="!dsOf(r) && r.state === 'waiting'" :ds="null" />
-              </div>
-              <button v-if="r.state === 'updated' && r.item" class="secondary small" :disabled="!!conn.pulling" :title="t('updateTitle')" @click="fetchSession(r.item)">{{ t('update') }}</button>
-              <button v-if="dsOf(r)" class="ghost del" :title="t('removeSession')" :aria-label="t('removeSession')" @click="del(dsOf(r)!)">🗑</button>
-            </article>
+                <button v-if="f.row.state === 'updated' && f.row.item" class="secondary small" :disabled="!!conn.pulling" :title="t('updateTitle')" @click="fetchSession(f.row.item)">{{ t('update') }}</button>
+                <button v-if="dsOf(f.row)" class="ghost del" :title="t('removeSession')" :aria-label="t('removeSession')" @click="del(dsOf(f.row)!)">🗑</button>
+              </article>
+            </template>
           </template>
         </section>
 
-        <section v-else class="pane">
-          <div v-if="!state.datasets.length" class="empty soft">
-            <b>{{ t('noTasksYet') }}</b>
-            <p class="muted">{{ t('noTasksYetText') }}</p>
-          </div>
-          <div v-else-if="!allTasks" class="empty soft">
-            <b>{{ t('nothingToDo') }}</b>
-            <p class="muted">{{ t('nothingToDoText') }}</p>
-          </div>
-          <div v-else-if="!shownTasks" class="empty soft">
-            <b>{{ t('noTasksShown') }}</b>
-            <p class="muted">{{ t('tasksHidden', { n: allTasks }) }}</p>
-            <button class="secondary" @click="router.push(to.sessions())">{{ t('goSessions') }}</button>
-          </div>
-          <template v-else>
-            <div class="row"><span class="muted small">{{ t('allTasksHint') }}</span>
-              <button class="secondary small" :title="t('exportTitle')" @click="exportTasks()">{{ t('export') }}</button></div>
-            <div v-for="g in taskGroups" :key="g.d.id" class="group">
-              <button class="ghead" @click="router.push(to.sessionTasks(g.d.id))"><b>{{ g.d.session.name }}</b> <span class="muted">{{ t('nTasks', { n: g.items.length }) }} ›</span></button>
-              <TaskRow v-for="it in g.items" :key="it.i" :ds="g.d" :task="it.t" :index="it.i" @open="selectTask(g.d.id, it.i)" @open-place="(id: string) => selectPlace(g.d.id, id)" />
-            </div>
-          </template>
-        </section>
-
-        <footer v-if="view === 'sessions' && connected" class="importbar">
+        <footer v-if="connected" class="importbar">
           <button class="secondary small" :disabled="conn.listing" @click="refresh()">↻ {{ t('cloudRefresh') }}</button>
           <span class="muted small">{{ t('connectedAs', { name: conn.me?.name }) }}</span>
         </footer>
       </template>
 
-      <!-- one session: places / tasks -->
-      <template v-else-if="openDataset">
+      <!-- one session: its places, and its tasks in a to-do section under them -->
+      <template v-else>
         <div class="sesshead">
           <div class="row">
-            <button class="ghost back" @click="router.push(to.sessions())">‹ {{ t('back') }}</button>
+            <button class="ghost back" @click="router.push(toList())">‹ {{ t('back') }}</button>
             <button v-if="openDataset.source === 'result'" class="primary small" :title="confirmed.length || removed.length ? '' : t('nothingConfirmed')" @click="publishOpen = true">{{ t('publish') }}{{ confirmed.length + removed.length ? ` (${confirmed.length + removed.length})` : '' }}</button>
           </div>
           <h1>{{ openDataset.session.name || openDataset.session.id }}</h1>
@@ -504,12 +560,8 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
           <StageBar :ds="openDataset" />
           <ReviewBar :ds="openDataset" />
         </div>
-        <nav class="seg">
-          <button :class="{ on: view === 'places' }" @click="router.push(to.session(openDataset.id))">{{ t('places') }} <span class="n">{{ openDataset.places.length }}</span></button>
-          <button :class="{ on: view === 'tasks' }" @click="router.push(to.sessionTasks(openDataset.id))">{{ t('tasks') }} <span class="n">{{ openDataset.tasks.length }}</span></button>
-        </nav>
 
-        <section v-if="view === 'places'" class="pane">
+        <section class="pane">
           <div v-if="!openDataset.places.length" class="empty soft">
             <template v-if="openDataset.source === 'raw' && openDataset.session.kind !== 'poi'">
               <b>{{ t('notProcessedTitle') }}</b>
@@ -561,27 +613,28 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
               </div>
             </button>
           </template>
-        </section>
-
-        <section v-else class="pane">
-          <div v-if="!openDataset.tasks.length" class="empty soft">
-            <b>{{ t('noTasksSession') }}</b>
-            <p class="muted">{{ t(openDataset.source === 'raw' ? 'noTasksSessionRaw' : 'noTasksSessionDone') }}</p>
+          <!-- the session's tasks: visits for Place capture, removals to confirm -->
+          <div :class="['todo', { open: todoOpen }]">
+            <button class="todohead" :aria-expanded="todoOpen" @click="todoOpen = !todoOpen">
+              <span class="caret" aria-hidden="true">{{ todoOpen ? '▾' : '▸' }}</span> {{ t('todoSection', { n: openDataset.tasks.length }) }}</button>
+            <template v-if="todoOpen">
+              <p v-if="!openDataset.tasks.length" class="muted small">{{ t(openDataset.source === 'raw' ? 'noTasksSessionRaw' : 'noTasksSessionDone') }}</p>
+              <template v-else>
+                <div class="row"><span class="muted small">{{ t('sessionTasksHint') }}</span>
+                  <button class="secondary small" :title="t('exportTitle')" @click="exportTasks(openDataset)">{{ t('export') }}</button></div>
+                <TaskRow v-for="(tk, i) in openDataset.tasks" :key="i" :ds="openDataset" :task="tk" :index="i" @open="selectTask(openDataset.id, i)" @open-place="(id: string) => selectPlace(openDataset!.id, id)" />
+              </template>
+            </template>
           </div>
-          <template v-else>
-            <div class="row"><span class="muted small">{{ t('sessionTasksHint') }}</span>
-              <button class="secondary small" :title="t('exportTitle')" @click="exportTasks(openDataset)">{{ t('export') }}</button></div>
-            <TaskRow v-for="(tk, i) in openDataset.tasks" :key="i" :ds="openDataset" :task="tk" :index="i" @open="selectTask(openDataset.id, i)" @open-place="(id: string) => selectPlace(openDataset!.id, id)" />
-          </template>
         </section>
       </template>
     </aside>
 
     <main class="mapwrap">
-      <MapView ref="mapRef" @select="selectPlace" @move-pin="movePin" />
-      <div v-if="!state.loading && (!state.datasets.length || !shownCount)" class="mapnote">
-        <template v-if="!state.datasets.length"><b>{{ t('mapEmptyTitle') }}</b><br />{{ t('mapEmptyText') }}</template>
-        <template v-else><b>{{ t('mapHiddenTitle') }}</b><br />{{ t('mapHiddenText') }}</template>
+      <MapView ref="mapRef" :only="listedIds" :routes="listedRoutes" :hot="hot || picked" @select="selectPlace" @move-pin="movePin"
+        @pick="pickRow" @hover="(id: string) => (hot = id)" />
+      <div v-if="!state.loading && !state.datasets.length && !listedRoutes.length" class="mapnote">
+        <b>{{ t('mapEmptyTitle') }}</b><br />{{ t('mapEmptyText') }}
       </div>
     </main>
 
@@ -596,7 +649,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
         <button class="secondary dstep" :disabled="!canStep(1)" :title="t(openPlace ? 'nextPlace' : 'nextTask')" :aria-label="t(openPlace ? 'nextPlace' : 'nextTask')" @click="stepOpen(1)">›</button>
       </nav>
       <PlaceReview v-if="openPlace" ref="reviewRef" :ds="openDataset" :place="openPlace" @close="router.push(to.session(openDataset.id))" @next="nextPlace" />
-      <TaskDetail v-else-if="openTask && state.task != null" :ds="openDataset" :task="openTask" :index="state.task" @close="router.push(to.sessionTasks(openDataset.id))" @open-place="(id: string) => selectPlace(openDataset!.id, id)" />
+      <TaskDetail v-else-if="openTask && state.task != null" :ds="openDataset" :task="openTask" :index="state.task" @close="router.push(to.session(openDataset.id))" @open-place="(id: string) => selectPlace(openDataset!.id, id)" />
     </aside>
 
     <div v-if="publishOpen && openDataset" class="modal" @click.self="publishOpen = false">

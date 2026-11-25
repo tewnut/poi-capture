@@ -47,11 +47,6 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .sesshead h1 { font-size: 17px; margin: 0; letter-spacing: -.2px; }
 .back { padding-left: 0; color: var(--accent); font-weight: 600; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.group { display: flex; flex-direction: column; gap: 6px; }
-.group + .group { margin-top: 8px; }
-.ghead { display: flex; justify-content: space-between; align-items: baseline; background: none; border: 0; border-bottom: 1px solid var(--line);
-  padding: 4px 0; text-align: left; }
-.ghead:hover b { color: var(--accent); }
 .pane { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .banner { margin: 8px 12px 0; padding: 7px 10px; background: #eef6ff; border-radius: 8px; font-size: 13px; }
 .banner.err { background: #fdecea; color: #8a1c1c; display: flex; justify-content: space-between; }
@@ -74,8 +69,48 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .ses:hover { border-color: #b9c6bf; }
 .ses .stats { margin-bottom: 6px; }
 .ses.open { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
-.ses input { margin-top: 4px; }
 .ses .body { flex: 1; cursor: pointer; min-width: 0; }
+/* the session list (sessionList.ts): stage chips with counts (one tap filters), search + filter button, the filters
+   (target, period, rider, sort), day headers; the rows are compact: name and stage, then when · what · who · how many */
+.pane.list { gap: 6px; }
+.ltop { position: sticky; top: 0; z-index: 5; margin: -12px -12px 2px; padding: 10px 12px 8px; background: var(--card);
+  border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.lstages { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 0 -12px; padding: 0 12px; }
+.lstages::-webkit-scrollbar { display: none; }
+.lstages button { flex: none; border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 999px; padding: 4px 10px;
+  font-size: 12px; font-weight: 600; white-space: nowrap; }
+.lstages button:hover { border-color: #b9c6bf; }
+.lstages button.on { background: var(--black); border-color: var(--black); color: var(--lime); }
+.lstages .n, .lfbtn .n, .dayhead .n { font-size: 11px; background: rgba(0,0,0,.06); border-radius: 8px; padding: 0 6px; margin-left: 3px; font-weight: 600; }
+.lstages button.on .n { background: rgba(190,255,0,.18); }
+.ltools { display: flex; gap: 6px; }
+.lsearch { flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.lsearch:focus, .lfilters select:focus { outline: 2px solid var(--lime-deep); outline-offset: -1px; border-color: var(--lime-deep); }
+.lfbtn { flex: none; white-space: nowrap; }
+.lfbtn.on { border-color: var(--accent); background: var(--accent-soft); }
+.lfilters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.lfilters select { min-width: 0; width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.dayhead { margin: 6px 2px 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); }
+.pane.list .ses { padding: 8px 10px; }
+.ses.hot { border-color: var(--black); box-shadow: inset 3px 0 0 var(--lime-deep); }
+.ses .body:focus-visible { outline: 2px solid var(--lime-deep); outline-offset: 2px; border-radius: 6px; }
+.sline { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sline2 { display: flex; flex-wrap: wrap; font-size: 12px; margin-top: 1px; }
+.sline2 > span + span::before { content: '·'; margin: 0 5px; }
+.pane.list .ses .stats { margin: 4px 0; }
+.pane.list .ses .stats:empty { display: none; }
+.chip.lst { flex: none; white-space: nowrap; }
+.chip.ls-captured { background: #eef0f2; color: #475569; }
+.chip.ls-processing { background: #f1eafb; color: #5b2f8f; }
+.chip.ls-toReview { background: #fff4db; color: #8a5a00; }
+.chip.ls-reviewing { background: #e6f0fb; color: #1d4f8a; }
+.chip.ls-done { background: var(--black); color: var(--lime); }
+/* an open session: its tasks in a to-do section under the places, folded by default */
+.todo { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 4px; display: flex; flex-direction: column; gap: 6px; }
+.todohead { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 6px 0; font-weight: 700; color: var(--ink); text-align: left; }
+.todohead:hover { color: var(--accent); }
+.todohead .caret { width: 12px; color: var(--muted); }
 .stats { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; align-items: center; font-size: 12px; }
 .del { font-size: 14px; }
 .chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; font-weight: 600; background: #eef0f2; color: #555; }
@@ -263,9 +298,10 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .primary, .secondary, .danger, .ghost, button.small { min-height: 44px; }
   .ghost { min-width: 44px; }
   .seg button { min-height: 44px; }
-  .ses input[type=checkbox] { width: 22px; height: 22px; margin: 2px; flex: none; }
   .prow { min-height: 64px; align-items: center; }
-  .ghead { min-height: 44px; align-items: center; }
+  .lstages button { min-height: 36px; padding: 4px 12px; }
+  .lsearch, .lfilters select { min-height: 44px; font-size: 16px; }
+  .todohead { min-height: 44px; }
   .filters select, .filters input, .dialog.admin input, .dialog.admin select { min-height: 44px; font-size: 16px; }
   .adminfilters select { min-height: 44px; }
   .dialog.admin > .row a { display: inline-flex; align-items: center; min-height: 44px; }
@@ -284,6 +320,7 @@ button.small { padding: 4px 10px; font-size: 13px; }
   .sesshead h1 { overflow-wrap: anywhere; }
   .sesshead .row { flex-wrap: wrap; }
   .filters select, .filters input { min-width: 0; flex: 1 1 140px; }
+  .ltop { position: static; margin: -10px -12px 2px; }
   .mapnote { max-width: calc(100vw - 32px); }
 
   /* the open place or task: full screen over map and list, scrolling on its own */
@@ -392,7 +429,6 @@ button.small { padding: 4px 10px; font-size: 13px; }
 a.gear { text-decoration: none; color: var(--muted); position: relative; }
 a.button { display: inline-block; text-decoration: none; border-radius: 10px; padding: 8px 14px; }
 /* session list: rows not downloaded yet, or still waiting for the agent */
-.ses .cbspace { width: 13px; flex: none; }
 .ses.remote .body b, .ses.waiting .body b { font-weight: 600; }
 .ses.waiting { background: var(--canvas); }
 .ses.waiting .body { cursor: default; }

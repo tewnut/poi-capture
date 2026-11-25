@@ -11,12 +11,37 @@ import { signSvg } from '../signArt'
 import { markerGroups } from '../signPosts'
 import { buildingRings, isIndoor, onLevel, shotsOn, trackOn } from '../indoor'
 
-const emit = defineEmits<{ select: [ds: string, place: string]; movePin: [lat: number, lon: number] }>()
+// On the session list (no session open) the map follows the list's filters: only: the ids of the sessions listed
+// (null = every one); routes: the listed rides not downloaded yet that carry a track (upload metadata), drawn dashed;
+// hot: the session whose row is hovered or picked, its route drawn bold. A click on a route picks its row (pick), and
+// hovering one lights the row up (hover).
+const props = withDefaults(defineProps<{ only?: string[] | null; routes?: { id: string; name: string; track: [number, number][] }[]; hot?: string }>(),
+  { only: null, routes: () => [], hot: '' })
+const emit = defineEmits<{ select: [ds: string, place: string]; movePin: [lat: number, lon: number]; pick: [ds: string]; hover: [ds: string] }>()
 const el = ref<HTMLDivElement>()
 let map: L.Map
 let base: L.LayerGroup
 let sel: L.LayerGroup
 let fitted = false
+/** Every route drawn, by session id, with its normal style (restored when it is no longer hot). */
+const lines = new Map<string, { line: L.Polyline; style: L.PathOptions }[]>()
+const HOT: L.PathOptions = { color: '#0a0a0a', weight: 6, opacity: 0.95 }
+const listing = () => !state.open
+const listed = (id: string) => !listing() || !props.only || props.only.includes(id)
+
+/** A ride's route: hot when its row is, a click picks its row (on the list only), hovering it lights the row up. */
+function route(id: string, pts: L.LatLngExpression[], style: L.PathOptions, name?: string) {
+  const s = props.hot === id && listing() ? { ...style, ...HOT } : style
+  const line = L.polyline(pts, s).addTo(base)
+  if (name) line.bindTooltip(esc(name), { sticky: true })
+  if (listing()) {
+    line.on('click', () => emit('pick', id))
+    line.on('mouseover', () => emit('hover', id))
+    line.on('mouseout', () => emit('hover', ''))
+  }
+  if (!lines.has(id)) lines.set(id, [])
+  lines.get(id)!.push({ line, style })
+}
 
 const DECISION_COLOR: Record<string, string> = { confirmed: '#3d6b00', rejected: '#8a949c', visit: '#b7791f' }
 const G_COLOR = { found: '#1659c7', new: '#e8590c', todo: '#6b7280' }
@@ -74,10 +99,16 @@ function postIcon(d: Dataset, group: Place[]) {
 function drawAll() {
   if (!map) return
   base.clearLayers()
+  lines.clear()
   const bounds: L.LatLngExpression[] = []
   for (const d of state.datasets) {
-    if (!state.shown.has(d.id)) continue
+    if (!state.shown.has(d.id) || !listed(d.id)) continue
     drawDataset(d, bounds)
+  }
+  if (listing()) for (const r of props.routes) {
+    if (r.track.length < 2) continue
+    route(r.id, r.track, { color: '#3d6b00', weight: 4, opacity: 0.7, dashArray: '6 6' }, r.name)
+    bounds.push(...r.track)
   }
   if (!fitted && bounds.length) { map.fitBounds(L.latLngBounds(bounds), { padding: [30, 30] }); fitted = true }
   drawSelected()
@@ -89,7 +120,7 @@ function drawDataset(d: Dataset, bounds: L.LatLngExpression[]) {
   const level = state.open === d.id && isIndoor(d) ? state.level : ''
   if (isIndoor(d)) drawBuilding(d, dim)
   for (const part of trackOn(d, level))
-    if (part.length > 1) L.polyline(part, { color: '#7d8c84', weight: 4, opacity: dim ? 0.25 : 0.55 }).addTo(base)
+    if (part.length > 1) route(d.id, part, { color: '#7d8c84', weight: 4, opacity: dim ? 0.25 : 0.55 }, listing() ? d.session.name || d.id : undefined)
   if (state.open === d.id)
     for (const s of shotsOn(d, level)) L.circleMarker([s[1], s[2]], { radius: 2.2, color: '#4b5a52', weight: 1, fillOpacity: 0.8 })
       .bindTooltip(t('photoN', { n: s[0] })).addTo(base)
@@ -214,16 +245,31 @@ watch(() => [state.task, state.open], () => {
 })
 watch(() => state.open, (v) => { if (v && !state.place) fitOpen(); else if (!v) fitAll() })
 
-/** Back on the session list: all the sessions shown. */
+/** Back on the session list: all the sessions listed. */
 function fitAll() {
   const pts: L.LatLngExpression[] = []
   for (const d of state.datasets) {
-    if (!state.shown.has(d.id)) continue
+    if (!state.shown.has(d.id) || !listed(d.id)) continue
     pts.push(...d.track)
     for (const p of d.places) { const at = pinOf(p, reviewOf(d.id, p)); pts.push([at.lat, at.lon]) }
   }
+  if (!state.open) for (const r of props.routes) pts.push(...r.track)
   if (pts.length) map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] })
 }
+// the list's filters changed what is listed: draw those, and fit them
+watch(() => `${props.only?.join('|') ?? '*'} ${props.routes.map((r) => r.id).join('|')}`, () => {
+  if (state.open || !map) return
+  drawAll()
+  fitAll()
+})
+// a row hovered or picked: its route bold and on top, the others back to normal
+watch(() => props.hot, (id) => {
+  for (const [k, ls] of lines) for (const { line, style } of ls) {
+    const hot = k === id && listing()
+    line.setStyle(hot ? { ...style, ...HOT } : style)
+    if (hot) line.bringToFront()
+  }
+})
 /** The open place, or else the open task, or else the open session. */
 function focusOpen() {
   map.invalidateSize()
