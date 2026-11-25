@@ -11,7 +11,7 @@ import {
 import { build, parse, collect, reviewFiles, progress, REVIEW_SCHEMA } from './reviewpkg'
 import type { Dataset } from './types'
 import { importFiles } from './importer'
-import { state, add, setReviewer, applyReview, photoBlob, putPhoto, saveReviews, setSynced, setBase, replaceSet } from './store'
+import { state, add, setReviewer, applyReview, photoBlob, putPhoto, saveReviews, setSynced, setBase, replaceSet, addExports } from './store'
 import { merge3, type Conflict } from './merge'
 import { t } from './i18n'
 export { rows, type Row } from './sessions'
@@ -117,7 +117,7 @@ export async function loadSaved(d: Dataset, force = false, f: typeof fetch = fet
   if (!saved || (!force && state.synced[d.id] && state.synced[d.id] >= saved.at)) return
   const theirs = await fetchSaved(d, f)
   if (!theirs) return
-  await applyReview(d.id, theirs.doc.reviews, theirs.doc.removals, theirs.blobs, saved.at, saved.version ?? null)
+  await applyReview(d.id, theirs.doc.reviews, theirs.doc.removals, theirs.blobs, saved.at, saved.version ?? null, theirs.doc.exports ?? null)
 }
 
 /** The server's saved review of [d]: its document and its photo files. */
@@ -146,6 +146,7 @@ async function mergeNewer(d: Dataset, f: typeof fetch): Promise<number> {
   const { merged, conflicts } = merge3(base && base.version != null ? base : null, mine,
     { reviews: theirs.doc.reviews, removals: theirs.doc.removals })
   replaceSet(d.id, merged)
+  addExports(d.id, theirs.doc.exports)
   if (conflicts.length) state.conflicts[d.id] = conflicts
   else delete state.conflicts[d.id]
   state.dirty.add(d.id)
@@ -205,7 +206,8 @@ export async function saveToServer(d: Dataset, checkin: boolean, f: typeof fetch
       if (b) files.set(p, new Uint8Array(await b.arrayBuffer()))
     }
     const savedAt = new Date().toISOString()
-    const zip = build({ schema: REVIEW_SCHEMA, sessionId: d.id, reviewer: state.reviewer, savedAt, reviews, removals }, files)
+    const zip = build({ schema: REVIEW_SCHEMA, sessionId: d.id, reviewer: state.reviewer, savedAt, reviews, removals,
+      exports: state.exports[d.id] ?? [] }, files)
     let info: ReviewInfo
     try {
       info = await putReviewPackage(conn.cfg, d.id, zip, progress(d, reviews, removals), checkin, f)

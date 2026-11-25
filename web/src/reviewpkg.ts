@@ -3,6 +3,7 @@
 // or cropped (their stored paths, added/... and crop/..., as PhotoEdits names them). Pure: the caller reads and stores.
 import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate'
 import type { Dataset, Review, RemovalReview } from './types'
+import type { ExportRecord } from './sessionList'
 
 export const REVIEW_SCHEMA = 'poi-review/1'
 
@@ -13,6 +14,8 @@ export type ReviewDoc = {
   savedAt: string
   reviews: Record<string, Review>          // place id → review
   removals: Record<string, RemovalReview>  // task index → decision
+  /** The exports and publishes of the reviewed places (sessionList.ts isExported); missing in older packages. */
+  exports?: ExportRecord[]
 }
 
 /** This session's reviews and removals out of the app's maps (keyed `${ds}|...`). */
@@ -58,6 +61,7 @@ export function parse(zip: Uint8Array, sessionId: string): { doc: ReviewDoc; fil
   if (doc?.schema !== REVIEW_SCHEMA) throw new Error(`unknown review schema ${doc?.schema}`)
   if (doc.sessionId !== sessionId) throw new Error(`the review is of ${doc.sessionId}, not ${sessionId}`)
   if (!doc.reviews || typeof doc.reviews !== 'object' || !doc.removals || typeof doc.removals !== 'object') throw new Error('review.json is incomplete')
+  if (doc.exports != null && !Array.isArray(doc.exports)) doc.exports = []
   const files = new Map<string, Uint8Array>()
   for (const [p, b] of Object.entries(all)) if (p !== 'review.json' && safePath(p)) files.set(p, b)
   return { doc, files }

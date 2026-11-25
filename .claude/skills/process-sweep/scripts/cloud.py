@@ -31,6 +31,7 @@ import argparse
 import base64
 import json
 import os
+import re
 import sys
 import tempfile
 import urllib.error
@@ -446,27 +447,76 @@ def push(cloud: Cloud, path: str, type_: str, session_id: str | None, name: str 
     return url
 
 
+MAX_META_TEXT = 120   # the longest `street` / `building` value (as the phone sends them)
+
+
+def _cap(names, max_chars=MAX_META_TEXT):
+    """Names joined by ", ", whole names only up to [max_chars] (a single longer one cut); None when there are none."""
+    out = ''
+    for n in names:
+        nxt = f'{out}, {n}' if out else n[:max_chars]
+        if len(nxt) > max_chars:
+            break
+        out = nxt
+    return out or None
+
+
+def ride_streets(doc: dict, max_n: int = 3):
+    """The ride's street(s) for the upload metadata: the session's street as the agent named it ("Trương Văn Bang /
+    Tạ Hiện" split into its names), else the streets its places carry, most places first; at most [max_n], joined by
+    ", ", at most MAX_META_TEXT characters. None when nothing names one."""
+    ses = doc.get('session') or {}
+    street = ses.get('street')
+    names = []
+    if isinstance(street, str) and street.strip():
+        names = [x.strip() for x in re.split(r'\s*/\s*|\s*,\s*', street) if x.strip()]
+    if not names:
+        counts = {}
+        for p in doc.get('places') or []:
+            v = ((p.get('fields') or {}).get('street') or {}).get('value')
+            if isinstance(v, str) and v.strip():
+                counts[v.strip()] = counts.get(v.strip(), 0) + 1
+        names = sorted(counts, key=lambda k: -counts[k])   # stable: first seen first among equals
+    seen = []
+    for n in names:
+        if n not in seen:
+            seen.append(n)
+    return _cap(seen[:max_n])
+
+
+def building_name(doc: dict):
+    """An indoor walk's building name (result.json building, or the session's as the phone had it); None outdoors."""
+    for b in (doc.get('building'), (doc.get('session') or {}).get('building')):
+        n = (b or {}).get('name') if isinstance(b, dict) else None
+        if isinstance(n, str) and n.strip():
+            return n.strip()[:MAX_META_TEXT]
+    return None
+
+
 def read_session(zip_path: str) -> dict:
-    """session id / name / kind / target from result.json (processed) or manifest.json (raw), wherever it sits in
-    the zip."""
+    """session id / name / kind / target, and the ride's street(s) and building, from result.json (processed) or
+    manifest.json (raw), wherever it sits in the zip."""
     try:
         with zipfile.ZipFile(zip_path) as z:
             for n in sorted(z.namelist(), key=len):
                 base = n.rsplit('/', 1)[-1]
                 if base in ('result.json', 'manifest.json'):
-                    s = json.loads(z.read(n)).get('session') or {}
+                    doc = json.loads(z.read(n))
+                    s = doc.get('session') or {}
                     return {'sessionId': s.get('id'), 'name': s.get('name'), 'kind': s.get('kind'),
-                            'target': s.get('target')}
-    except (zipfile.BadZipFile, ValueError, KeyError):
+                            'target': s.get('target'), 'street': ride_streets(doc), 'building': building_name(doc)}
+    except (zipfile.BadZipFile, ValueError, KeyError, AttributeError):
         pass
     return {}
 
 
 def push_metadata(info: dict, filename: str, type_: str, session_id: str | None, name: str | None) -> dict:
-    """The upload's metadata; `target` only when the result names one (the web list shows it; None is not sent)."""
+    """The upload's metadata; `target`, `street` and `building` only when the result names them (the web list shows
+    the target and searches the street and building before the ride is downloaded; None is not sent)."""
     return {'filename': filename, 'filetype': 'application/zip', 'type': type_,
             'sessionId': session_id or info.get('sessionId'), 'name': name or info.get('name'),
             'kind': info.get('kind'), 'target': info.get('target'),
+            'street': info.get('street'), 'building': info.get('building'),
             'createdAt': datetime.now(timezone.utc).isoformat(timespec='seconds')}
 
 

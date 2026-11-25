@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   dayGroups, dayKey, dayLabel, extraFilters, filterFacts, fold, fromQuery, inPeriod, listKind, listStage, matches, NO_FILTERS,
-  riders, sortFacts, stageCounts, toQuery, type Facts, type ListFilters,
+  riders, sortFacts, stageCounts, toQuery, hiddenKeys, metaWords, lastChange, latestExport, isExported, mergeExports, shortDay,
+  type Facts, type ListFilters,
 } from './sessionList'
 
 // local times: the tests run in whatever time zone the machine has
@@ -75,8 +76,8 @@ describe('filter and stage counts', () => {
     expect(filterFacts(list, F(), NOW)).toHaveLength(4)
   })
   it('the stage counts follow the other filters, not the stage itself', () => {
-    expect(stageCounts(list, F(), NOW)).toEqual({ all: 4, captured: 1, processing: 0, toReview: 1, reviewing: 1, done: 1 })
-    expect(stageCounts(list, F({ rider: 'Sơn', stage: 'done' }), NOW)).toEqual({ all: 2, captured: 0, processing: 0, toReview: 1, reviewing: 0, done: 1 })
+    expect(stageCounts(list, F(), NOW)).toEqual({ all: 4, captured: 1, processing: 0, toReview: 1, reviewing: 1, done: 1, exported: 0 })
+    expect(stageCounts(list, F({ rider: 'Sơn', stage: 'done' }), NOW)).toEqual({ all: 2, captured: 0, processing: 0, toReview: 1, reviewing: 0, done: 1, exported: 0 })
   })
   it('riders: unique, sorted, no blanks', () => {
     expect(riders(list)).toEqual(['An', 'Sơn'])
@@ -118,5 +119,66 @@ describe('address query', () => {
   })
   it('unknown values fall back to no filter', () => {
     expect(fromQuery({ stage: 'nope', kind: 3, period: ['30d', 'x'], sort: 'sideways', q: null })).toEqual(F({ period: '30d' }))
+  })
+})
+
+describe('reviewed and exported', () => {
+  const all = { raw: false, processing: false, progress: { done: 12, total: 12 }, locked: false }
+  it('every decision made: reviewed, or exported when an export is newer than the last decision', () => {
+    expect(listStage(all)).toBe('done')
+    expect(listStage({ ...all, exported: true })).toBe('exported')
+    // not every decision made: an export does not count
+    expect(listStage({ ...all, progress: { done: 11, total: 12 }, exported: true })).toBe('reviewing')
+  })
+  it('an export counts only when newer than every review and removal decision', () => {
+    const rv = [{ at: '2026-11-24T08:00:00Z' }, { at: '2026-11-24T09:00:00Z' }, {}]
+    const rm = [{ at: '2026-11-24T09:30:00Z' }]
+    expect(lastChange(rv, rm)).toBe('2026-11-24T09:30:00Z')
+    expect(lastChange([], [])).toBe('')
+    const ex = [{ at: '2026-11-24T09:00:00Z', by: 'An', format: 'csv' }, { at: '2026-11-24T10:00:00Z', by: 'An', format: 'osm' }]
+    expect(latestExport(ex)?.format).toBe('osm')
+    expect(isExported(ex, lastChange(rv, rm))).toBe(true)
+    // a decision changed after the export: reviewed again, not exported
+    expect(isExported(ex, lastChange([...rv, { at: '2026-11-24T11:00:00Z' }], rm))).toBe(false)
+    expect(isExported([], '')).toBe(false)
+    expect(isExported(null, '')).toBe(false)
+  })
+  it('exports from this browser and the server merge without repeats, oldest first', () => {
+    const a = [{ at: '2026-11-24T10:00:00Z', by: 'An', format: 'osm' }]
+    const b = [{ at: '2026-11-24T10:00:00Z', by: 'An', format: 'osm' }, { at: '2026-11-23T10:00:00Z', by: null, format: 'csv' }]
+    expect(mergeExports(a, b)).toEqual([{ at: '2026-11-23T10:00:00Z', by: null, format: 'csv' }, a[0]])
+    expect(mergeExports(a, [{ bad: 1 } as any, null as any])).toEqual(a)
+    expect(mergeExports(b, a, 1)).toEqual(a)
+  })
+  it('the row writes the day as dd/mm', () => {
+    expect(shortDay(at(2026, 11, 24))).toBe('24/11')
+    expect(shortDay('nope')).toBe('')
+  })
+  it('the stage counts and filter know exported', () => {
+    const list = [f({ name: 'A', stage: 'done' }), f({ name: 'B', stage: 'exported' })]
+    expect(stageCounts(list, F(), NOW)).toMatchObject({ done: 1, exported: 1 })
+    expect(filterFacts(list, F({ stage: 'exported' }), NOW).map((x) => x.name)).toEqual(['B'])
+    expect(fromQuery({ stage: 'exported' }).stage).toBe('exported')
+  })
+})
+
+describe('hidden by the filters', () => {
+  it('the rides the search and filters leave out (a duplicate there still opens, marked hidden)', () => {
+    const list = [f({ key: 'a', name: 'Đồng Văn Cống', rider: 'Sơn' }), f({ key: 'b', name: 'Mai Chí Thọ', rider: 'An' })]
+    expect([...hiddenKeys(list, F({ q: 'dong van' }), NOW)]).toEqual(['b'])
+    expect([...hiddenKeys(list, F({ rider: 'An' }), NOW)]).toEqual(['a'])
+    expect(hiddenKeys(list, F(), NOW).size).toBe(0)
+  })
+})
+
+describe('search before download', () => {
+  it('the upload metadata: name, street(s), building, from the raw ride and the processed result', () => {
+    const raw = { name: 'Chuyến 1', street: 'Đồng Văn Cống, Mai Chí Thọ', building: '', photos: '120' }
+    const result = { name: 'Chuyến 1', street: 'Đồng Văn Cống', building: 'Vincom Thảo Điền' }
+    expect(metaWords(result, raw)).toEqual(['Chuyến 1', 'Đồng Văn Cống', 'Vincom Thảo Điền', 'Đồng Văn Cống, Mai Chí Thọ'])
+    expect(metaWords(null, undefined, { street: 5 })).toEqual([])
+    const text = metaWords(result, raw).join(' · ')
+    expect(matches(text, 'mai chi tho')).toBe(true)
+    expect(matches(text, 'vincom thao dien')).toBe(true)
   })
 })

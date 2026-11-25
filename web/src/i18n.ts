@@ -158,8 +158,12 @@ const en: Record<string, Msg> = {
   
   sweep: 'Street sweep',
   // the session list (sessionList.ts): stage chips, search, filters, sort, day headers
-  ls_all: 'All', ls_captured: 'Captured', ls_processing: 'Processing', ls_toReview: 'To review', ls_reviewing: 'In review',
-  ls_done: 'Reviewed / exported', stagesAria: 'Stages',
+  ls_all: 'All', ls_captured: 'Captured', ls_processing: 'Processing', ls_toReview: 'To review', ls_reviewing: 'Reviewing',
+  ls_done: 'Reviewed', ls_exported: 'Exported', stagesAria: 'Stages',
+  exportedOn: (p) => `exported ${p.day} · ${p.format}`,
+  exportedTitle: (p) => `Exported ${p.when} by ${p.name} (${p.format}), after the last decision`,
+  fmt_geojson: 'GeoJSON', fmt_csv: 'CSV', fmt_osm: 'OSM', fmt_kml: 'KML', fmt_gpx: 'GPX', fmt_shp: 'Shapefile', fmt_xlsx: 'Excel',
+  fmt_all: 'all formats', fmt_photos: 'photos', fmt_project: 'VMAP package',
   listSearch: 'Search name, street, rider, building', filterBtn: 'Filter',
   allTargets: 'All targets', kind_place: 'Places', kind_address: 'Addresses', kind_sign: 'Signs', kind_indoor: 'Indoor',
   kind_poi: 'Place capture',
@@ -180,7 +184,7 @@ const en: Record<string, Msg> = {
   
   missingLink: (p) => `This link points to ${p.what}, which is neither on the server nor in this browser.`,
   // stages
-  stageCaptured: 'Captured', stageProcessed: 'Agent processed', stageReviewed: 'Human reviewed',
+  stageCaptured: 'Captured', stageProcessed: 'Agent processed', stageReviewed: 'Human reviewed', stageExported: 'Exported',
   reviewedOf: (p) => `${p.done}/${p.total} reviewed`, notProcessed: 'not processed yet',
   // places
   search: 'Search name, category, sign', anyDecision: 'Any decision', toReview: 'To review', confirmedF: 'Confirmed',
@@ -275,7 +279,8 @@ const en: Record<string, Msg> = {
   seqTitle: 'The numbers on this side of the street run the other way here: an old number, a misreading, or a number of another street? A hint only.',
   alsoOnRide: (p) => (p.n === 1 ? 'also on another ride' : `also on ${p.n} other rides`),
   dupesH: 'Also on another ride',
-  dupesHint: 'The same place, seen on an overlapping ride shown on the map: keep one (confirm it) and reject the other as a duplicate.',
+  dupesHint: 'The same place, seen on an overlapping ride downloaded into this browser: keep one (confirm it) and reject the other as a duplicate.',
+  dupeHidden: '(hidden by the filters)', dupeHiddenTitle: 'The search or filters of the session list hide this ride; Open still opens it.',
   dupeWhy_name: 'like name', dupeWhy_phone: 'same phone', 'dupeWhy_name+phone': 'like name, same phone', dupeWhy_number: 'same number',
   dupeOpen: 'Open', dupeThere: (p) => `there: ${p.d}`,
   rejectDupe: 'Reject this one as a duplicate', rejectDupeTitle: 'Reject this place, with a comment naming the one on the other ride',
@@ -434,7 +439,11 @@ const vi: Record<string, Msg> = {
   
   sweep: 'Quét đường',
   ls_all: 'Tất cả', ls_captured: 'Đã thu thập', ls_processing: 'Đang xử lý', ls_toReview: 'Chờ duyệt', ls_reviewing: 'Đang duyệt',
-  ls_done: 'Đã duyệt / xuất', stagesAria: 'Giai đoạn',
+  ls_done: 'Đã duyệt', ls_exported: 'Đã xuất', stagesAria: 'Giai đoạn',
+  exportedOn: (p) => `xuất ${p.day} · ${p.format}`,
+  exportedTitle: (p) => `${p.name} đã xuất ${p.when} (${p.format}), sau quyết định cuối cùng`,
+  fmt_geojson: 'GeoJSON', fmt_csv: 'CSV', fmt_osm: 'OSM', fmt_kml: 'KML', fmt_gpx: 'GPX', fmt_shp: 'Shapefile', fmt_xlsx: 'Excel',
+  fmt_all: 'mọi định dạng', fmt_photos: 'ảnh', fmt_project: 'gói VMAP',
   listSearch: 'Tìm tên, đường, người chụp, tòa nhà', filterBtn: 'Lọc',
   allTargets: 'Mọi mục tiêu', kind_place: 'Địa điểm', kind_address: 'Địa chỉ', kind_sign: 'Biển báo', kind_indoor: 'Trong nhà',
   kind_poi: 'Chụp điểm',
@@ -454,7 +463,7 @@ const vi: Record<string, Msg> = {
   
   
   missingLink: (p) => `Liên kết này trỏ tới ${p.what}, không có trên máy chủ lẫn trong trình duyệt này.`,
-  stageCaptured: 'Đã thu thập', stageProcessed: 'Agent đã xử lý', stageReviewed: 'Người đã duyệt',
+  stageCaptured: 'Đã thu thập', stageProcessed: 'Agent đã xử lý', stageReviewed: 'Người đã duyệt', stageExported: 'Đã xuất',
   reviewedOf: (p) => `${p.done}/${p.total} đã duyệt`, notProcessed: 'chưa xử lý',
   search: 'Tìm tên, loại, biển hiệu', anyDecision: 'Mọi quyết định', toReview: 'Chưa duyệt', confirmedF: 'Đã xác nhận',
   needsVisit: 'Cần đến kiểm tra', rejectedF: 'Đã loại', googleAny: 'Google: tất cả', onGoogle: 'Có trên Google',
@@ -542,7 +551,8 @@ const vi: Record<string, Msg> = {
   seqTitle: 'Số nhà bên này của đường chạy ngược chiều ở đây: số cũ, đọc nhầm, hay số của đường khác? Chỉ là gợi ý.',
   alsoOnRide: (p) => (p.n === 1 ? 'có trên chuyến khác' : `có trên ${p.n} chuyến khác`),
   dupesH: 'Cũng có trên chuyến khác',
-  dupesHint: 'Cùng một địa điểm, thấy trên một chuyến chồng lấn đang hiện trên bản đồ: giữ một (xác nhận) và loại cái kia vì trùng.',
+  dupesHint: 'Cùng một địa điểm, thấy trên một chuyến chồng lấn đã tải về trình duyệt này: giữ một (xác nhận) và loại cái kia vì trùng.',
+  dupeHidden: '(ẩn bởi bộ lọc)', dupeHiddenTitle: 'Ô tìm kiếm hoặc bộ lọc của danh sách đang ẩn chuyến này; nút Mở vẫn mở được.',
   dupeWhy_name: 'tên giống', dupeWhy_phone: 'cùng số điện thoại', 'dupeWhy_name+phone': 'tên giống, cùng số điện thoại', dupeWhy_number: 'cùng số nhà',
   dupeOpen: 'Mở', dupeThere: (p) => `ở đó: ${p.d}`,
   rejectDupe: 'Loại cái này vì trùng', rejectDupeTitle: 'Loại địa điểm này, kèm ghi chú nêu địa điểm trên chuyến kia',

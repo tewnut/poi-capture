@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// Captured -> Agent processed -> Human reviewed as connected dots (the name on hover), with the review progress.
+// Captured -> Agent processed -> Human reviewed -> Exported as connected dots (the name on hover), with the review progress.
 // A ride still waiting on the server (no dataset yet) is at the first stage: ds = null.
 import { computed } from 'vue'
 import { STAGES, stageOf } from '../store'
@@ -10,13 +10,15 @@ const props = defineProps<{ ds: Dataset | null }>()
 const st = computed(() => (props.ds ? stageOf(props.ds) : { stage: 'captured' as const, done: 0, total: 0 }))
 const at = computed(() => STAGES.findIndex((s) => s.key === st.value.stage))
 const pct = computed(() => (st.value.total ? Math.round((100 * st.value.done) / st.value.total) : 100))
-const NAME = { captured: 'stageCaptured', processed: 'stageProcessed', reviewed: 'stageReviewed' } as const
+const NAME = { captured: 'stageCaptured', processed: 'stageProcessed', reviewed: 'stageReviewed', exported: 'stageExported' } as const
+/** Dots before this one are full, this one is "now": a reviewed ride waits for its export, an exported one is through. */
+const reached = computed(() => (st.value.stage === 'reviewed' || st.value.stage === 'exported' ? at.value + 1 : at.value))
 </script>
 
 <template>
   <div class="stagebar">
     <ol :aria-label="t(NAME[st.stage])">
-      <li v-for="(s, i) in STAGES" :key="s.key" :class="{ done: i < at || st.stage === 'reviewed', now: i === at && st.stage !== 'reviewed' }"
+      <li v-for="(s, i) in STAGES" :key="s.key" :class="{ done: i < reached, now: i === reached }"
         :data-tip="t(NAME[s.key])" :title="t(NAME[s.key])"><i></i></li>
     </ol>
     <div class="bar" v-if="st.stage !== 'captured'"><div :style="{ width: pct + '%' }"></div></div>

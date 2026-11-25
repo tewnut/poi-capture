@@ -3,7 +3,7 @@
 // to review its places, with its tasks in a to-do section under them (downloaded into this browser the first time,
 // connection.ts). The map is in the middle (on the list: the rides listed), the selected place or task on the right.
 // The address (#/...) decides what is open; #/settings and #/admin are pages of their own.
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MapView from './components/MapView.vue'
 import PlaceReview from './components/PlaceReview.vue'
@@ -14,7 +14,7 @@ import Photo from './components/Photo.vue'
 import AdminPanel from './components/AdminPanel.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import ReviewBar from './components/ReviewBar.vue'
-import { state, load, remove, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, stageOf, seqFlags, dupes } from './store'
+import { state, load, remove, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, stageOf, seqFlags, dupes, exportOf, recordExport } from './store'
 import { placeHints } from './hints'
 import { to } from './router'
 import { t, relTime } from './i18n'
@@ -27,7 +27,7 @@ import { missingStreet, pendingSuggestions } from './fields'
 import { humanSize, decodePolyline, type CloudItem } from './cloud'
 import {
   LIST_STAGES, LIST_KINDS, KIND_ICON, PERIODS, SORTS, NO_FILTERS, listStage, listKind, filterFacts, stageCounts, sortFacts, dayGroups,
-  dayLabel, riders, toQuery, fromQuery, extraFilters, type Facts, type ListFilters,
+  dayLabel, riders, toQuery, fromQuery, extraFilters, hiddenKeys, metaWords, shortDay, HIDDEN_BY_FILTERS, type Facts, type ListFilters,
 } from './sessionList'
 import { conn, connected, canRead, canRelease, stopProcessing, connect, refresh, rows, pull, loadSaved, saveToServer, type Row } from './connection'
 import { swipeStep, neighbour, blocksSwipe, type Step } from './swipe'
@@ -111,12 +111,13 @@ function rowFacts(r: Row): Facts & { row: Row } {
   const st = d && !raw ? stageOf(d) : null
   const rider = upload(r)?.by?.name || ''
   const streets = d ? new Set(d.places.map((p) => p.fields.street?.value).filter(Boolean)) : []
-  const meta = upload(r)?.metadata || {}
+  // not downloaded: only what the uploads say (name, street(s), building: the phone's raw ride and the agent's result)
   const text = [r.name, d?.session.name, d?.session.street, d?.building?.name, ...streets, rider,
-    ...['street', 'building'].map((k) => (typeof meta[k] === 'string' ? meta[k] : ''))].filter(Boolean).join(' · ')
+    ...metaWords(r.item?.metadata, r.raw?.metadata)].filter(Boolean).join(' · ')
   return {
     row: r, key: r.key, name: r.name, date: r.date, rider, text,
-    stage: listStage({ raw, processing: !!conn.processing[r.sessionId], progress: st ?? info?.saved ?? null, locked: !!info?.lock }),
+    stage: listStage({ raw, processing: !!conn.processing[r.sessionId], progress: st ?? info?.saved ?? null, locked: !!info?.lock,
+      exported: st?.stage === 'exported' }),
     kind: listKind(d?.session.kind ?? r.kind, d?.session.target ?? r.target),
   }
 }
@@ -143,6 +144,15 @@ const toList = () => to.sessions(toQuery(lf))
 function clearListFilters() { Object.assign(lf, { ...NO_FILTERS, sort: lf.sort }) }
 
 const listed = computed(() => sortFacts(filterFacts(allFacts.value, lf, now.value), lf.sort))
+// the rides the filters hide: a link to one (a duplicate on another ride) still opens it, and says it is hidden
+const hidden = computed(() => hiddenKeys(allFacts.value, lf, now.value))
+provide(HIDDEN_BY_FILTERS, hidden)
+/** "exported 24/11 · OSM" on a row whose last export is newer than its last decision. */
+function exportLine(r: Row) {
+  const d = dsOf(r)
+  const e = d ? exportOf(d) : null
+  return e ? { text: t('exportedOn', { day: shortDay(e.at), format: t('fmt_' + e.format) }), title: t('exportedTitle', { when: relTime(e.at), name: e.by || '?', format: t('fmt_' + e.format) }) } : null
+}
 const groups = computed(() => dayGroups(listed.value, lf.sort))
 const counts = computed(() => stageCounts(allFacts.value, lf, now.value))
 const riderList = computed(() => { const l = riders(allFacts.value); return lf.rider && !l.includes(lf.rider) ? [...l, lf.rider] : l })
@@ -379,6 +389,7 @@ const removed = computed<Removed[]>(() => { const d = openDataset.value; return 
   .filter((x) => x.review?.decision === 'confirmed') : [] })
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')
 function pub(kind: 'geojson' | 'csv' | 'osm' | 'kml' | 'gpx' | 'shp' | 'xlsx' | 'all') {
+  noteExport(kind)
   const base = `poi-published-${openDataset.value?.session.id || 'session'}-${stamp()}`
   const [c, r] = [confirmed.value, removed.value]
   if (kind === 'geojson') download(`${base}.geojson`, geojson(c, r), 'application/geo+json')
@@ -391,9 +402,15 @@ function pub(kind: 'geojson' | 'csv' | 'osm' | 'kml' | 'gpx' | 'shp' | 'xlsx' | 
   if (kind === 'all') download(`${base}-all.zip`, allFormats(c, r, base), 'application/zip')
 }
 /** The kept (and cropped) photos of the confirmed places, named as in the photos column, with places.geojson. */
+/** An export or publish of the open session is remembered with its review (store.ts recordExport): "Exported". */
+function noteExport(format: string) {
+  const d = openDataset.value
+  if (d) recordExport(d.id, format).catch((e) => { state.error = e?.message || String(e) })
+}
 async function pubPhotos() {
   const d = openDataset.value
   if (!d) return
+  noteExport('photos')
   const files: Record<string, Uint8Array> = { 'places.geojson': strToU8(geojson(confirmed.value, removed.value)) }
   for (const x of confirmed.value) {
     const names = exportNames(x.place, x.review)
@@ -427,6 +444,7 @@ async function pubProject() {
   }
   for (const f of pj.files) if (blobs[f.path]) files[f.path] = blobs[f.path]
   download(projectName(d.session.id, exportedAt), zipSync(files, { level: 0 }), 'application/zip')
+  recordExport(d.id, 'project', exportedAt).catch((e) => { state.error = e?.message || String(e) })
 }
 function exportTasks(ds: Dataset) {
   download(`poi-tasks-${ds.session.id}-${stamp()}.geojson`, tasksGeojson([ds], state.reviews, state.removals, state.reviewer), 'application/geo+json')
@@ -529,6 +547,7 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
                       <span v-else class="chip ok">{{ t('onServer', { size: humanSize(f.row.item?.size ?? null) }) }}</span>
                     </template>
                     <span v-if="lockLabel(f.row)" :class="['chip', lockLabel(f.row)!.cls]" :title="lockLabel(f.row)!.title">{{ lockLabel(f.row)!.text }}</span>
+                    <span v-if="exportLine(f.row)" class="chip exp" :title="exportLine(f.row)!.title">{{ exportLine(f.row)!.text }}</span>
                   </div>
                   <StageBar v-if="dsOf(f.row)" :ds="dsOf(f.row)!" />
                   <!-- uploaded, not processed yet: "Captured", the stepper on its first step -->

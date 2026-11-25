@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // One place: photos, what was read (each field with the photo it came from), the three pins, the decision.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Photo from './Photo.vue'
 import CropEditor from './CropEditor.vue'
 import { state, rkey, reviewOf, putReview, gstat, photoUrl, putPhoto, delPhoto, cropPhoto, seqFlags, dupes } from '../store'
@@ -15,6 +15,7 @@ import { FIELD_KEYS, layerOf } from '../types'
 import { signSvg } from '../signArt'
 import { overRoad, postOf, postSigns } from '../signPosts'
 import { isIndoorPlace } from '../indoor'
+import { HIDDEN_BY_FILTERS } from '../sessionList'
 
 const props = defineProps<{ ds: Dataset; place: Place }>()
 const emit = defineEmits<{ close: []; next: [] }>()
@@ -280,6 +281,9 @@ function marks(k: FieldKey) {
 // hints (hints.ts): confidence, a house number's source / partly read / out of order; the same place on another ride
 const hints = computed(() => placeHints(props.place, r.value, { seq: seqFlags.value.get(props.place.id) }))
 const sameOn = computed<Dupe[]>(() => dupes.value.get(props.place.id) || [])
+/** The rides the session list's filters hide (App.vue): a duplicate there still opens (the link goes to it
+ *  directly), and says it is hidden, so the reviewer is not surprised not to find it on the list. */
+const hiddenRides = inject(HIDDEN_BY_FILTERS, computed(() => new Set<string>()))
 const DECISION = { todo: 'decTodo', confirmed: 'decConfirmed', rejected: 'decRejected', visit: 'decVisit' } as const
 /** Reject this one as a duplicate of [d]: the review has no reason field, so the comment says which one it duplicates. */
 async function rejectAsDupe(d: Dupe) {
@@ -378,7 +382,8 @@ const signArt = computed(() => signSvg(signCodeNow.value, r.value.fields.signTex
         <div class="dtext">
           <b>{{ d.place.name }}</b>
           <div class="muted small">{{ d.ds.session.name || d.ds.id }} · {{ d.distM }} m · {{ t('dupeWhy_' + d.why) }}
-            · {{ t('dupeThere', { d: t(DECISION[reviewOf(d.ds.id, d.place).decision]) }) }}</div>
+            · {{ t('dupeThere', { d: t(DECISION[reviewOf(d.ds.id, d.place).decision]) }) }}
+            <span v-if="hiddenRides.has(d.ds.id)" class="dhidden" :title="t('dupeHiddenTitle')">{{ t('dupeHidden') }}</span></div>
         </div>
         <RouterLink class="button secondary small" :to="to.place(d.ds.id, d.place.id)">{{ t('dupeOpen') }}</RouterLink>
         <button v-if="!ro && r.decision !== 'rejected'" class="secondary small" :title="t('rejectDupeTitle')" @click="rejectAsDupe(d)">{{ t('rejectDupe') }}</button>
@@ -567,6 +572,7 @@ footer { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; bottom: 0; 
 .dupes p { margin: 0; }
 .dupe { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dupe .dtext { flex: 1; min-width: 160px; }
+.dupe .dhidden { font-style: italic; }
 .dupe a.button { padding: 4px 10px; font-size: 13px; }
 .chip.g-found { background: #e8f0fe; color: #123f8c; } .chip.g-new { background: #fff0e6; color: #a23b05; } .chip.g-todo { background: #eef0f2; color: #555; }
 

@@ -150,4 +150,12 @@ class IndoorTest {
         assertEquals(emptyList<String>(), SessionSplit.split(store, s.id, "?"))
         assertEquals("shops", sessionUploadMetadata(s, "x.zip", 60)["target"])
     }
+
+    @Test fun uploadMetadataNamesTheBuilding() {
+        val b = BuildingQuery.parseBuildings(buildings).first()
+        val m = sessionUploadMetadata(indoorSession(b), "x.zip", 0)
+        assertEquals(b.name, m["building"])
+        assertTrue(!b.name.isNullOrBlank())
+        assertNull(sessionUploadMetadata(indoorSession(null), "x.zip", 0)["building"])
+    }
 }

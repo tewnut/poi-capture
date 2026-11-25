@@ -425,6 +425,36 @@ class Targets(unittest.TestCase):
         bare = cloud.push_metadata({}, 'r.zip', 'processed-result', 'x', None)
         self.assertNotIn('target', cloud.decode_metadata(cloud.encode_metadata(bare)))
 
+    def test_cloud_metadata_street_and_building(self):
+        import cloud, zipfile
+        place = lambda st: {'fields': {'street': {'value': st}} if st else {}}
+        # the agent's street for the ride, split into its names
+        doc = {'session': {'id': 's1', 'street': 'Trương Văn Bang / Tạ Hiện'}, 'places': [place('Lê Lợi')]}
+        self.assertEqual(cloud.ride_streets(doc), 'Trương Văn Bang, Tạ Hiện')
+        # none: the places' streets, most places first, at most 3
+        doc = {'session': {'id': 's1', 'street': None},
+               'places': [place('B'), place('A'), place('A'), place(None), place('C'), place('D'), place('A'), place('B')]}
+        self.assertEqual(cloud.ride_streets(doc), 'A, B, C')
+        self.assertIsNone(cloud.ride_streets({'session': {}, 'places': [place(None)]}))
+        # at most 120 characters, whole names only
+        long = {'session': {'street': ' / '.join(['X' * 70, 'Y' * 60])}}
+        self.assertEqual(cloud.ride_streets(long), 'X' * 70)
+        self.assertEqual(len(cloud.ride_streets({'session': {'street': 'Z' * 300}})), 120)
+        # an indoor walk: the building's name (result.json building, else the session's)
+        self.assertEqual(cloud.building_name({'building': {'name': ' Vincom Thảo Điền '}}), 'Vincom Thảo Điền')
+        self.assertEqual(cloud.building_name({'session': {'building': {'name': 'Estella'}}}), 'Estella')
+        self.assertIsNone(cloud.building_name({'session': {}, 'building': None}))
+        # read from the zip and sent; nothing when the result names none
+        z = os.path.join(self.d, 'in.zip')
+        with zipfile.ZipFile(z, 'w') as f:
+            f.writestr('walk/result.json', json.dumps({'session': {'id': 's_in', 'kind': 'indoor', 'street': 'Song Hành'},
+                                                       'building': {'name': 'Vincom Thảo Điền'}, 'places': []}))
+        meta = cloud.decode_metadata(cloud.encode_metadata(cloud.push_metadata(cloud.read_session(z), 'r.zip', 'processed-result', None, None)))
+        self.assertEqual((meta['street'], meta['building']), ('Song Hành', 'Vincom Thảo Điền'))
+        bare = cloud.decode_metadata(cloud.encode_metadata(cloud.push_metadata({}, 'r.zip', 'processed-result', 'x', None)))
+        self.assertNotIn('street', bare)
+        self.assertNotIn('building', bare)
+
     def test_old_ride_is_shops(self):
         s = read(os.path.join(self.work, 'session.json'))
         del s['target']

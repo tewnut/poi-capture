@@ -105,7 +105,9 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .chip.ls-processing { background: #f1eafb; color: #5b2f8f; }
 .chip.ls-toReview { background: #fff4db; color: #8a5a00; }
 .chip.ls-reviewing { background: #e6f0fb; color: #1d4f8a; }
-.chip.ls-done { background: var(--black); color: var(--lime); }
+.chip.ls-done { background: #e7f4d6; color: #2f5a00; }
+.chip.ls-exported { background: var(--black); color: var(--lime); }
+.chip.exp { background: #f0f4ec; color: #2f5a00; }
 /* an open session: its tasks in a to-do section under the places, folded by default */
 .todo { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 4px; display: flex; flex-direction: column; gap: 6px; }
 .todohead { display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 6px 0; font-weight: 700; color: var(--ink); text-align: left; }

@@ -81,6 +81,28 @@ class PolylineTest {
         assertNull(none["track"]); assertNull(none["distanceM"])
     }
 
+    private fun photo(road: String?) = org.json.JSONObject().put("kind", "photo").put("roadName", road ?: org.json.JSONObject.NULL)
+
+    @Test fun uploadMetadataCarriesTheRidesStreets() {
+        val items = List(5) { photo("Đồng Văn Cống") } + List(3) { photo("Mai Chí Thọ") } + List(2) { photo("Trần Não") } +
+            listOf(photo("Lương Định Của"), photo(null), photo("Unnamed road (residential)"),
+                org.json.JSONObject().put("kind", "plan").put("roadName", "Xa lộ Hà Nội"))
+        // most photos first, at most 3, unnamed roads and non-photos left out
+        assertEquals("Đồng Văn Cống, Mai Chí Thọ, Trần Não", rideStreets(items))
+        val m = sessionUploadMetadata(session(), "x.zip", items.size, null, items)
+        assertEquals("Đồng Văn Cống, Mai Chí Thọ, Trần Não", m["street"])
+        assertNull(m["building"])                       // a street sweep has no building
+        assertFalse(m.values.any { it?.contains("lan") == true })
+        DirectUpload.createBody(10, m)
+        // no named road: no street; a sweep without items (older callers): none either
+        assertNull(rideStreets(listOf(photo(null), photo("Unnamed road (service)"))))
+        assertNull(sessionUploadMetadata(session(), "x.zip", 0)["street"])
+        // ≤ 120 characters: whole names only, a single longer one cut
+        val long = List(3) { photo("A".repeat(70)) } + List(2) { photo("B".repeat(40)) } + listOf(photo("C".repeat(10)))
+        assertEquals("A".repeat(70) + ", " + "B".repeat(40), rideStreets(long))
+        assertEquals(120, rideStreets(listOf(photo("D".repeat(200))))!!.length)
+    }
+
     @Test fun clientHeader() {
         assertEquals("POI Capture/0.16.0 (Android 14; samsung SM-A546E)", Tus.clientHeader("0.16.0", "14", "samsung", "SM-A546E"))
         assertEquals("POI Capture/1 (Android 15; Pixel ?)", Tus.clientHeader("1", "15", null, "Pixel é"))

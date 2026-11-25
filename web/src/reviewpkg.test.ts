@@ -17,6 +17,13 @@ describe('review package', () => {
     expect(back.files.get('added/p1/a.jpg')).toEqual(new Uint8Array([1, 2, 3]))
   })
 
+  it('carries the exports (other browsers see "Exported"); older packages have none, a bad value is dropped', () => {
+    const exports = [{ at: '2026-11-24T10:00:00Z', by: 'Sơn', format: 'osm' }]
+    expect(parse(build(doc({ exports }), new Map()), 's1').doc.exports).toEqual(exports)
+    expect(parse(build(doc(), new Map()), 's1').doc.exports).toBeUndefined()
+    expect(parse(build(doc({ exports: 'x' as any }), new Map()), 's1').doc.exports).toEqual([])
+  })
+
   it('refuses another session, another schema, and paths outside added/ and crop/', () => {
     const z = build(doc(), new Map([['../evil.jpg', new Uint8Array([1])], ['photos/x.jpg', new Uint8Array([1])]]))
     expect(() => parse(z, 's2')).toThrow(/s1, not s2/)

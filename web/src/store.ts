@@ -8,6 +8,7 @@ import { googleMergeable } from './fields'
 import type { Conflict, ReviewSet } from './merge'
 import { seqEntries, sequenceFlags, type SeqFlag } from './addresses'
 import { crossRideDupes, type Dupe } from './dupes'
+import { isExported, lastChange, latestExport, mergeExports, type ExportRecord } from './sessionList'
 
 const meta = createStore('poi-capture-reviewer', 'meta')      // dataset json, reviews
 const blobs = createStore('poi-capture-reviewer-files', 'files') // photos: `${datasetId}/${path}`
@@ -37,6 +38,8 @@ export const state = reactive({
   base: {} as Record<string, ReviewSet & { version: string | null }>,
   /** Per session, places both this reviewer and somebody else changed differently, to decide before saving. */
   conflicts: {} as Record<string, Conflict[]>,
+  /** Per session, its exports and publishes (who, when, which format): saved with its review package on the server. */
+  exports: {} as Record<string, ExportRecord[]>,
   loading: true,
   error: '' as string,
 })
@@ -54,6 +57,7 @@ export async function load() {
     state.dirty = new Set((await get('dirty', meta)) || [])
     state.base = (await get('base', meta)) || {}
     state.conflicts = (await get('conflicts', meta)) || {}
+    state.exports = (await get('exports', meta)) || {}
     state.shown = new Set(state.datasets.map((d) => d.id))
   } catch (e: any) {
     state.error = `Could not open the browser storage: ${e.message}`
@@ -83,6 +87,7 @@ export async function clearAll() {
   state.shown = new Set()
   state.reviews = {}
   state.removals = {}
+  state.exports = {}
   state.open = null; state.place = null; state.task = null; state.missing = ''
 }
 
@@ -96,6 +101,7 @@ export async function remove(id: string) {
   state.shown.delete(id)
   for (const k of Object.keys(state.reviews)) if (k.startsWith(id + '|')) delete state.reviews[k]
   for (const k of Object.keys(state.removals)) if (k.startsWith(id + '|')) delete state.removals[k]
+  delete state.exports[id]
   await saveReviews()
   if (state.open === id) { state.open = null; state.place = null }
 }
@@ -145,6 +151,7 @@ export async function saveReviews() {
   await set('removals', JSON.parse(JSON.stringify(state.removals)), meta)
   await set('dirty', [...state.dirty], meta)
   await set('conflicts', JSON.parse(JSON.stringify(state.conflicts)), meta)
+  await set('exports', JSON.parse(JSON.stringify(state.exports)), meta)
 }
 
 /** What this browser's work on [ds] now starts from: the server review [s] (version [version]). */
@@ -169,14 +176,42 @@ export async function setSynced(ds: string, at: string | null) {
 
 /** A review loaded from the server replaces this session's reviews, removals and reviewer photos in this browser. */
 export async function applyReview(ds: string, reviews: Record<string, Review>, removals: Record<string, RemovalReview>,
-  files: Map<string, Blob>, savedAt: string | null, version: string | null = null) {
+  files: Map<string, Blob>, savedAt: string | null, version: string | null = null, exports: ExportRecord[] | null = null) {
   replaceSet(ds, { reviews, removals })
+  // exports are only ever added: the server's and this browser's together
+  addExports(ds, exports)
   for (const [path, b] of files) await putPhoto(ds, path, b)
   state.dirty.delete(ds)
   delete state.conflicts[ds]
   await saveReviews()
   await setSynced(ds, savedAt)
   await setBase(ds, { reviews, removals }, version)
+}
+
+/** Add exports of [ds] (from a review package) to the ones this browser knows; saved by the caller (saveReviews). */
+export function addExports(ds: string, list: ExportRecord[] | null | undefined) {
+  if (!list?.length) return
+  state.exports[ds] = mergeExports(state.exports[ds], list)
+}
+
+/**
+ * The reviewer exported or published [ds] in [format]: remembered in this browser, and, when it is checked out by
+ * this reviewer, marked unsaved so it goes to the server with the review package (the next save or the autosave), where
+ * other browsers see it. Not checked out: it stays in this browser until the next save of this session from here.
+ */
+export async function recordExport(ds: string, format: string, at = new Date().toISOString()) {
+  state.exports[ds] = mergeExports(state.exports[ds], [{ at, by: state.reviewer || null, format }])
+  if (state.editable.has(ds)) state.dirty.add(ds)
+  await saveReviews()
+}
+
+/** The newest export of [d] when it is newer than every review and removal decision of it, else null. */
+export function exportOf(d: Dataset): ExportRecord | null {
+  const pre = d.id + '|'
+  const rv = Object.entries(state.reviews).filter(([k]) => k.startsWith(pre)).map(([, v]) => v)
+  const rm = Object.entries(state.removals).filter(([k]) => k.startsWith(pre)).map(([, v]) => v)
+  const list = state.exports[d.id]
+  return isExported(list, lastChange(rv, rm)) ? latestExport(list) : null
 }
 
 export function setReviewer(name: string) {
@@ -224,20 +259,22 @@ export function counts(d: Dataset) {
   return c
 }
 
-export type Stage = 'captured' | 'processed' | 'reviewed'
+export type Stage = 'captured' | 'processed' | 'reviewed' | 'exported'
 export const STAGES: { key: Stage; label: string }[] = [
   { key: 'captured', label: 'Captured' }, { key: 'processed', label: 'Agent processed' }, { key: 'reviewed', label: 'Human reviewed' },
+  { key: 'exported', label: 'Exported' },
 ]
 
 /** Where a session is in the pipeline: captured (raw phone export), agent processed (result bundle), human
- *  reviewed (every place decided, and every removal task too). done / total counts those decisions. */
+ *  reviewed (every place decided, and every removal task too), exported (reviewed, and exported or published after the
+ *  last change: exportOf). done / total counts those decisions. */
 export function stageOf(d: Dataset): { stage: Stage; done: number; total: number } {
   if (d.source === 'raw') return { stage: 'captured', done: 0, total: d.places.length }
   const removals = d.tasks.map((t, i) => ({ t, i })).filter(({ t }) => t.type !== 'visit')
   const total = d.places.length + removals.length
   const done = d.places.filter((p) => reviewOf(d.id, p).decision !== 'todo').length +
     removals.filter(({ i }) => (state.removals[`${d.id}|${i}`]?.decision || 'todo') !== 'todo').length
-  return { stage: done >= total ? 'reviewed' : 'processed', done, total }
+  return { stage: done < total ? 'processed' : exportOf(d) ? 'exported' : 'reviewed', done, total }
 }
 
 /** Google status of a place, from the agent's lookup: a result too far or too unlike the sign is "new". */

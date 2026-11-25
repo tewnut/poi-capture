@@ -245,8 +245,9 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                         ctx.getString(R.string.session_no_street), ways = session.road.ways)
                     store.save(session)
                 }
+                val items = store.items(sid)
                 val metadata = sessionUploadMetadata(session, Exporter.fileName(session),
-                    store.items(sid).count { it.optString("kind") == "photo" }, store.trackFile(sid))
+                    items.count { it.optString("kind") == "photo" }, store.trackFile(sid), items)
                 val (opened, first) = client.directCreate(size, metadata)
                 d = opened
                 urls = first

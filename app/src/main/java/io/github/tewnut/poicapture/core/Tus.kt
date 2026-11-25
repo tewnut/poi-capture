@@ -76,9 +76,13 @@ data class UploadRecord(
 /**
  * Upload-Metadata of a raw session (what the agent, `cloud.py list` and the admin map see). With the session's
  * track.jsonl ([track]): `track`, the ride as a Google encoded polyline (≤ 2,000 characters, left out under 2 usable
- * fixes), and `distanceM`; `endedAt` and `photos` (= `photoCount`) per server/README.md "Trip metadata". Nothing private.
+ * fixes), and `distanceM`; `endedAt` and `photos` (= `photoCount`) per server/README.md "Trip metadata". With the
+ * session's items ([items]): `street`, the ride's main road(s) ([rideStreets]); an indoor walk: `building`, the
+ * building's name. Both let the reviewer's list find a ride by street or building before it is downloaded. Nothing
+ * private (public road and building names).
  */
-fun sessionUploadMetadata(s: Session, fileName: String, photoCount: Int, track: java.io.File? = null): Map<String, String?> = linkedMapOf(
+fun sessionUploadMetadata(s: Session, fileName: String, photoCount: Int, track: java.io.File? = null,
+                          items: List<JSONObject> = emptyList()): Map<String, String?> = linkedMapOf(
     "filename" to fileName,
     "filetype" to "application/zip",
     "type" to "raw-session",
@@ -93,4 +97,29 @@ fun sessionUploadMetadata(s: Session, fileName: String, photoCount: Int, track: 
     "photos" to photoCount.toString(),
     "distanceM" to track?.takeIf { it.exists() }?.let { Math.round(TrackStats.of(it).distanceM).toString() },
     "track" to track?.let { Polyline.capped(Polyline.trackPoints(it)) },
+    "street" to rideStreets(items),
+    "building" to (if (s.kind == SessionKind.INDOOR) s.building?.name?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_STREETS_CHARS) else null),
 )
+
+/** The longest `street` / `building` upload metadata value. */
+const val MAX_STREETS_CHARS = 120
+
+/**
+ * The ride's main street(s): the named roads its photos were taken on (each photo's `roadName`), most photos first,
+ * at most [max], joined by ", ", at most [maxChars] characters (whole names only; a single longer name is cut).
+ * null when no photo was on a named road.
+ */
+fun rideStreets(items: List<JSONObject>, max: Int = 3, maxChars: Int = MAX_STREETS_CHARS): String? {
+    val names = items.filter { it.optString("kind") == "photo" }
+        .map { it.optString("roadName").trim() }.filter { SessionNaming.isNamed(it) }
+        .groupingBy { it }.eachCount().entries
+        .sortedByDescending { it.value }.take(max).map { it.key }
+    if (names.isEmpty()) return null
+    var out = names[0].take(maxChars)
+    for (n in names.drop(1)) {
+        val next = "$out, $n"
+        if (next.length > maxChars) break
+        out = next
+    }
+    return out
+}
