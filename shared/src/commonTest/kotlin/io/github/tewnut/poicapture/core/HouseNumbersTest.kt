@@ -73,6 +73,14 @@ class HouseNumbersTest {
         assertEquals(Kind.DOUBT, kind("4071"))
     }
 
+    @Test fun aPlateSeriesLowInThePhotoIsDoubted() {
+        fun at(text: String, y: Int) = HouseNumbers.read(listOf(HouseNumbers.Line(text, intArrayOf(100, y, 200, y + 40), 0)), 3840, null)
+            .firstOrNull()?.kind
+        assertEquals(Kind.DOUBT, at("51B", 3000))      // at the kerb: a bike's plate, second line not read
+        assertEquals(Kind.NUMBER, at("51B", 1200))     // at door height: house 51B
+        assertEquals(Kind.NUMBER, at("12", 3000))      // plain numbers are not plate series
+    }
+
     @Test fun theStreetsOwnNumberIsNotAHouseNumber() {
         // "Đường số 18" on every sign of the ride: dropped, with the reason
         val h = one("ĐƯỜNG SỐ 18", "Đường số 18")!!

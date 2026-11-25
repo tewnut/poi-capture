@@ -96,6 +96,8 @@ object HouseNumbers {
     private val ADDRESS_WORDS = Regex("\\b(?:duong|phuong|p\\.|quan|q\\.|tp|hcm|hem|kp|khu pho|so cu|so moi|ward|street|xa|huyen|tinh|ap)\\b")
     private val PHONE_PIECE = Regex("^0\\d{2,}$|^\\d{3,4}[\\s.]\\d{3}(?:[\\s.]\\d{3})?$")
     private val PLATE_SECOND_LINE = Regex("^\\d{3}[.,]\\d{2}$")
+    private val PLATE_SERIES = Regex("^\\d{2}[A-Z]\\d?$")
+    private const val LOW_IN_PHOTO = 0.62
     private val LEAD = Regex("^k?(\\d+)")
     private val SUFFIX = Regex("^k?\\d+([a-z])")
     private val DAY_MONTH = Regex("^\\d{1,2}/\\d{1,2}$")
@@ -131,8 +133,14 @@ object HouseNumbers {
         // a plate: the number is the biggest text of its block, and the rest (if any) is its street / ward line
         val plateLike = mates.size <= 2 && mates.all { m -> ADDRESS_WORDS.containsMatchIn(m) || m.none { it.isLetter() } } &&
             blockMates.none { o -> o.box != null && box != null && o.box[3] - o.box[1] > 1.2 * h }
-        fun hint(n: String, kind: Kind, why: String?, alone: Boolean) =
-            Hint(n.uppercase().replace(" ", ""), kind, why, raw, box, h, hFrac, yFrac, if (alone && plateLike) "plate" else "sign")
+        fun hint(n: String, kind: Kind, why: String?, alone: Boolean): Hint {
+            val t = n.uppercase().replace(" ", "")
+            // "51B" alone, low in the photo: a motorbike plate's first line whose second line was not read (house
+            // plates hang at door height; the lower part of a sideways photo is the kerb with its parked bikes)
+            val (k, w) = if (kind == Kind.NUMBER && PLATE_SERIES.matches(t) && (yFrac ?: 0.0) >= LOW_IN_PHOTO)
+                Kind.DOUBT to "2 digits and a letter low in the photo (vehicle plate?)" else kind to why
+            return Hint(t, k, w, raw, box, h, hFrac, yFrac, if (alone && plateLike) "plate" else "sign")
+        }
 
         val named = mutableListOf<Hint>()
         var rest = f
