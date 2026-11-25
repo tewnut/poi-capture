@@ -276,7 +276,8 @@ def main():
             g.update({'query': name, 'source': 'Google Maps search near the estimated position (agent-browser)', 'fetchedAt': now()})
             m['googleMaps'] = g
             json.dump(m, open(f, 'w', encoding='utf-8'), ensure_ascii=False, indent=2)
-            verdict = build.result.google_check(g, m.get('fields') or {}) if g.get('name') else None
+            verdict = (build.result.google_check(g, m.get('fields') or {}, build.result.address_numbers(m))
+                       if g.get('name') else None)
             print(f"{d}: {g['status']} | {g.get('name') or ''} | {g.get('address') or ''} | {g.get('phone') or ''}"
                   + (f" | {g['distanceM']} m" if g.get('distanceM') is not None else '')
                   + (f" | {'merged' if verdict[0] else 'NOT merged'}: {verdict[1]}" if verdict else ''))

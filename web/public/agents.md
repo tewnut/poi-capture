@@ -57,7 +57,7 @@ All commands are `python -E -P -X utf8 .claude/skills/process-sweep/scripts/clou
 |---|---|---|---|
 | `shops` (Địa điểm) | sideways, at the shopfronts | every business: name, category, phone, hours, address, website | Google + website enrichment |
 | `addresses` (Địa chỉ) | sideways | the shops, plus every house number: plates, and the address lines of shop signs (`source`) | `plates` hints in photos.json (about half are prices, vehicle plates, phone fragments); read each number yourself on the full-resolution crop sheets (`crops/plates_NN.jpg`, `crops.py band`) |
-| `signs` (Biển báo) | forward, along the road | every traffic sign: QCVN 41:2019 code, extra plate, side | `signHints` from the phone's detector: the box is reliable, the code often is not; no Google lookup |
+| `signs` (Biển báo) | forward, along the road | every traffic sign: QCVN 41:2019 code, extra plate, side; signs on one pole or gantry share a `post` (+ `order`, 1 = top) | `signHints` from the phone's detector: the box is reliable, the code often is not; no Google lookup |
 
 Place-capture rides (`kind: poi`, "Chụp điểm") are already grouped by place on the phone.
 

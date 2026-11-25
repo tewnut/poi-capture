@@ -156,6 +156,21 @@ It sets the least to read, not the most: a shops ride whose photos show plates m
     board R.4xx, indication I.xxx) has no standard size: no range unless `sizeM` is given.
   - `lane` (gantry signs): the lane it hangs over, 1 = the rightmost of the rider's direction; 2.5 = over the line
     between lanes 2 and 3.
+  - **`post`** + **`order`**: signs on one pole, or the boards of one gantry, share a `post` (an id you give, unique
+    in the ride: `"p12"`, `"g1"`) and each has its `order` on it (1 = top; on a gantry from the left). Give them
+    whenever two or more signs hang on one pole ("P.104 above P.127", the same sightings) or one gantry; leave both
+    out for a sign alone on its pole. All signs of a post have the same `side`. build.py places a **pole** ONCE from
+    the sightings and ranges of all its signs (one ray per photo, each sign's own size for its range) and snaps that
+    point like one sign: every sign of the pole gets the same position. A **gantry** (every board `"side": "over"`)
+    is a line across the road: each board is located and snapped over its own `lane`, then all take one along-road
+    position (their positions weighted by 1 / uncertainty², a board only put the default distance ahead counting
+    as ±that distance). place.json `place.sign` and result.json `sign` get `post` and `order` (and `lane`),
+    `position.post` / the algorithm pin's `post` say how (`{"id", "mount": "pole" | "gantry", "signs"}`, a gantry
+    board also `alongMovedM` and `alone`: where it was on its own); places.geojson `signPost` / `signOrder`,
+    places.csv `sign post` / `sign order`. The web app draws a pole as one marker (the signs stacked), lists the
+    other signs of the post in the review panel, and writes a pole as ONE OSM node (`traffic_sign=VN:P.104;VN:P.127`,
+    top first); a gantry's boards stay nodes of their own. merge_places.py puts the part's number in front of each
+    reader's post ids (`"2.p1"`).
   - **`"road"`** (ride level): the cross-section, per stretch of photos, from looking at the road: count the lanes of
     the rider's direction, which one the rider is in, whether a median divides the road. build.py moves each sign
     across the road onto the line of its `side` (right kerb; median, or the far kerb without one; the centre of its
@@ -184,7 +199,13 @@ It sets the least to read, not the most: a shops ride whose photos show plates m
            "cover": 122, "sightings": [{"photo": 120, "x": 0.66}, {"photo": 122, "x": 0.82, "w": 0.045}], "side": "right",
            "confidence": "high", "note": ""},
           {"code": "R.412", "label": "Làn đường dành riêng cho xe ô tô", "photos": [227, 233], "cover": 233,
-           "sightings": [{"photo": 233, "x": 0.07}], "side": "over", "lane": 4, "confidence": "high", "note": ""}],
+           "sightings": [{"photo": 233, "x": 0.07}], "side": "over", "lane": 4, "post": "g1", "order": 1,
+           "confidence": "high", "note": ""},
+          {"code": "P.104", "label": "Cấm xe máy", "photos": [4, 9], "cover": 8, "side": "left", "post": "p1", "order": 1,
+           "sightings": [{"photo": 6, "x": 0.415}, {"photo": 8, "x": 0.295}], "confidence": "high", "note": ""},
+          {"code": "P.127", "label": "Tốc độ tối đa cho phép", "text": "60", "photos": [4, 9], "cover": 8, "side": "left",
+           "post": "p1", "order": 2, "sightings": [{"photo": 6, "x": 0.415}, {"photo": 8, "x": 0.295}],
+           "confidence": "high", "note": ""}],
 "road": [{"fromPhoto": 4, "toPhoto": 140, "lanes": [3.2, 3.2], "riderLane": 1, "divider": true,
           "rightKerbOffsetM": 2.2, "medianOffsetM": 4.4, "note": "measured on #11: edge line 2.0 m right, barrier 4.4 m left"},
          {"fromPhoto": 222, "toPhoto": 244, "lanes": ["moto", "car", "car", "car"], "riderLane": 1, "divider": true}]
@@ -272,8 +293,12 @@ Check the results before reporting them:
 - result.py already refuses (does not merge, and says why in `google.merge` of result.json and in the visit task) a
   match whose house number is another than the one the photos show surely ("553" on the sign, Google "644 Nguyễn Thị
   Định"), and a match for a generic name (every word a kind of shop: "Mắt Kính", "Hớt Tóc Nam", "Phở", "Cơm Tấm")
-  without the same phone or house number; it accepts a weak name match with the same phone. Over ~100 m with a
-  generic name is almost always another shop;
+  without the same phone or house number; it accepts a weak name match with the same phone, or (name match 0.25+)
+  with the same house number. The house number of the shop's **own address entry** counts like one on the photos:
+  an address in `"addresses"` whose `placeRef` is this place's `name`, read surely (not `low`, not in part) — build.py
+  writes it to the place.json as `place.addressNumbers`, result.py refreshes it from the address folders, and
+  `google.merge.addressNumbers` shows it was used; Google's number must be one of them. Over ~100 m with a generic
+  name is almost always another shop;
 - a match that is plainly another shop all the same: set `"notThisPlace": true` and `"note"` on the place.json's
   `googleMaps`, then `python <skill>/scripts/result.py <out>`; one refused above that you checked is this place
   (the shop moved, the sign keeps an old number): `"thisPlace": true` and `"note"`;

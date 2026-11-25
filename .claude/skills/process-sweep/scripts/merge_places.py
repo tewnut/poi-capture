@@ -6,7 +6,9 @@ Each reader read a range of photos (e.g. 0-87, 84-173, 170-254: ranges overlap b
 boundary is seen whole by one of them) and wrote a places.json part with the same format. This joins them:
 - ride-level keys ("street", "defaultFacadeDistanceM", "bearingOffsetDeg", ...) from the first part that has them;
   "road" and "streets" stretches and "removals" are joined;
-- places, addresses and signs are joined, and the same thing read by two readers in the overlap is merged into one:
+- places, addresses and signs are joined, and the same thing read by two readers in the overlap is merged into one
+  (a sign's "post" gets its part's number in front, "2.p1", so two readers' "p1" stay apart; a post merged in the
+  overlap takes one id for all its signs):
   a place with the same name (folded, or one name inside the other) whose photo ranges overlap or touch (within
   MAX_GAP photos); an address with the same house number on overlapping photos; a sign with the same code on
   overlapping photos. The merged entry spans both ranges, keeps every sighting (one per photo), every field (the
@@ -91,7 +93,8 @@ def merge_two(a, b):
     for k in ('altNumbers',):
         if a.get(k) or b.get(k):
             out[k] = list(dict.fromkeys((a.get(k) or []) + (b.get(k) or [])))
-    for k in ('oldNumber', 'source', 'placeRef', 'street', 'unit', 'agentPin', 'signText', 'extra', 'side', 'lane'):
+    for k in ('oldNumber', 'source', 'placeRef', 'street', 'unit', 'agentPin', 'signText', 'extra', 'side', 'lane',
+              'post', 'order'):
         if not out.get(k) and second.get(k):
             out[k] = second[k]
     notes = [n for n in (first.get('note'), second.get('note')) if n]
@@ -134,16 +137,31 @@ def merge(parts):
         segs = [s for p in parts for s in p.get(k) or []]
         if segs:
             out[k] = sorted(segs, key=lambda s: s.get('fromPhoto', 0))
+    alias = {}                     # sign posts: each reader's ids made distinct ("2.p1"); joined where merged
+
+    def root(pid):
+        while alias.get(pid, pid) != pid:
+            pid = alias[pid]
+        return pid
     for kind in ('places', 'addresses', 'signs'):
         merged = []
-        for p in parts:
+        for n, p in enumerate(parts, 1):
             for x in p.get(kind) or []:
+                if kind == 'signs' and x.get('post') not in (None, '') and len(parts) > 1:
+                    x = dict(x, post=f"{n}.{x['post']}")
                 hit = next((k for k, y in enumerate(merged) if same(kind, y, x)), None)
                 if hit is None:
                     merged.append(dict(x))
                 else:
                     report.append(f'{kind}: merged {label(kind, merged[hit])} + {label(kind, x)}')
+                    a, b = merged[hit].get('post'), x.get('post')
+                    if a and b and root(a) != root(b):
+                        alias[root(b)] = root(a)
                     merged[hit] = merge_two(merged[hit], x)
+        if kind == 'signs':
+            for x in merged:
+                if x.get('post'):
+                    x['post'] = root(x['post'])
         merged.sort(key=lambda x: (_range(x)[0], x.get('cover') or 0))
         for a, b, why in near_misses(kind, merged):
             report.append(f'{kind}: CHECK {label(kind, a)} / {label(kind, b)}: {why}')

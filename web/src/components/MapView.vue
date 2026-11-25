@@ -8,6 +8,7 @@ import { state, reviewOf, gstat, openPlace, openDataset, openTask } from '../sto
 import { t, lang } from '../i18n'
 import { layerOf, type Dataset, type Place, type Review } from '../types'
 import { signSvg } from '../signArt'
+import { markerGroups } from '../signPosts'
 
 const emit = defineEmits<{ select: [ds: string, place: string]; movePin: [lat: number, lon: number] }>()
 const el = ref<HTMLDivElement>()
@@ -45,11 +46,28 @@ function layerIcon(p: Place, r: Review, selected: boolean, l: 'address' | 'sign'
     const bg = r.decision !== 'todo' ? DECISION_COLOR[r.decision] : '#475569'
     return L.divIcon({ className: '', iconSize: [36, 18], iconAnchor: [18, 9], html: `<div class="apin ${cls}" style="background:${bg}">${num}</div>` })
   }
+  return L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15], html: signHtml(p, r, cls, mark, 'spin') })
+}
+
+/** A sign's drawing (follows the reviewer's code), ✓ / ✕ once decided, "?" while unsure. */
+function signHtml(p: Place, r: Review, cls: string, mark: string, box: string, attrs = '') {
   const code = r.fields.signCode?.value || p.fields.signCode?.value || p.sign?.code || ''
   const value = r.fields.signText?.value || p.fields.signText?.value || ''
   const low = p.confidence === 'low' && r.decision === 'todo' ? 'low' : ''
-  return L.divIcon({ className: '', iconSize: [30, 30], iconAnchor: [15, 15],
-    html: `<div class="spin ${cls} ${low}">${signSvg(code, value)}${mark ? `<b>${mark}</b>` : ''}</div>` })
+  return `<div class="${box} ${cls} ${low}"${attrs}>${signSvg(code, value)}${mark ? `<b>${mark}</b>` : ''}</div>`
+}
+
+/** The signs of one pole (signPosts.ts markerGroups): one marker, their drawings stacked top first, small; a tap
+ *  on a drawing opens that sign. */
+function postIcon(d: Dataset, group: Place[]) {
+  const rows = group.map((p) => {
+    const r = reviewOf(d.id, p)
+    const mark = r.decision === 'confirmed' ? '✓' : r.decision === 'rejected' ? '✕' : ''
+    return signHtml(p, r, `${state.place === p.id ? 'sel' : ''} ${esc(r.decision)}`, mark, 'srow', ` data-pid="${esc(p.id)}"`)
+  })
+  const on = group.some((p) => p.id === state.place) ? 'sel' : ''
+  const h = 20 * group.length + 4
+  return L.divIcon({ className: '', iconSize: [24, h], iconAnchor: [12, h / 2], html: `<div class="spost ${on}">${rows.join('')}</div>` })
 }
 
 function drawAll() {
@@ -70,16 +88,23 @@ function drawDataset(d: Dataset, bounds: L.LatLngExpression[]) {
   if (state.open === d.id)
     for (const s of d.shots) L.circleMarker([s[1], s[2]], { radius: 2.2, color: '#4b5a52', weight: 1, fillOpacity: 0.8 })
       .bindTooltip(t('photoN', { n: s[0] })).addTo(base)
-  d.places.forEach((p, k) => {
-    // the open session shows the layer its chips picked (App.vue)
-    if (state.open === d.id && state.layer && layerOf(p) !== state.layer) return
+  // the open session shows the layer its chips picked (App.vue)
+  const shown = d.places.filter((p) => !(state.open === d.id && state.layer && layerOf(p) !== state.layer))
+  const num = new Map(d.places.map((p, k) => [p.id, String(k + 1)]))
+  // the signs of one pole: one marker (signPosts.ts); everything else one marker each
+  for (const group of markerGroups(shown, (p) => pinOf(p, reviewOf(d.id, p)))) {
+    const p = group[0]
     const r = reviewOf(d.id, p)
     const at = pinOf(p, r)
     bounds.push([at.lat, at.lon])
-    const m = L.marker([at.lat, at.lon], { icon: icon(p, r, state.place === p.id, String(k + 1)), zIndexOffset: 500, opacity: dim ? 0.55 : 1 })
-      .bindTooltip(esc(p.name)).addTo(base)
-    m.on('click', () => emit('select', d.id, p.id))
-  })
+    const ic = group.length > 1 ? postIcon(d, group) : icon(p, r, state.place === p.id, num.get(p.id)!)
+    const m = L.marker([at.lat, at.lon], { icon: ic, zIndexOffset: 500, opacity: dim ? 0.55 : 1 })
+      .bindTooltip(group.map((x) => esc(x.name)).join('<br>')).addTo(base)
+    m.on('click', (e: L.LeafletMouseEvent) => {
+      const hit = (e.originalEvent?.target as Element | null)?.closest?.('[data-pid]')?.getAttribute('data-pid')
+      emit('select', d.id, group.find((x) => x.id === hit)?.id || p.id)
+    })
+  }
   for (const tk of d.tasks.filter((x) => x.type !== 'visit')) {
     L.marker([tk.lat, tk.lon], { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="rm">✕</div>' }) })
       .bindTooltip(t(tk.type === 'removal' ? 'removalTip' : 'verifyTip', { name: esc(tk.name) })).addTo(base)
@@ -214,6 +239,19 @@ defineExpose({ fitOpen, focusOpen })
 .spin.rejected, .apin.rejected { opacity: .6; }
 .apin.sel { transform: scale(1.3); box-shadow: 0 0 0 4px rgba(61,107,0,.35); }
 .spin.sel { transform: scale(1.5); filter: drop-shadow(0 0 3px #7bcf00) drop-shadow(0 1px 3px rgba(0,0,0,.5)); z-index: 1; }
+/* the signs of one pole: stacked top first, a thin post behind them */
+.spost { position: relative; display: flex; flex-direction: column; align-items: center; gap: 0; padding: 2px 2px;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
+.spost::before { content: ''; position: absolute; left: 11px; top: 2px; bottom: 0; width: 2px; background: #6b7280; z-index: -1; }
+.spost.sel { transform: scale(1.4); filter: drop-shadow(0 0 3px #7bcf00) drop-shadow(0 1px 3px rgba(0,0,0,.5)); }
+.srow { position: relative; width: 20px; height: 20px; cursor: pointer; }
+.srow svg { display: block; width: 100%; height: 100%; }
+.srow.low svg { opacity: .8; }
+.srow.sel { outline: 2px solid #7bcf00; border-radius: 50%; }
+.srow.rejected { opacity: .6; }
+.srow > b { position: absolute; right: -6px; bottom: -3px; width: 11px; height: 11px; border-radius: 50%; border: 1px solid #fff;
+  color: #fff; font: 700 8px/10px system-ui; text-align: center; background: #8a949c; }
+.srow.confirmed > b { background: #3d6b00; }
 .leaflet-marker-icon > .rm { width: 18px; height: 18px; border-radius: 4px; background: #d6336c; color: #fff; font: 700 11px/18px system-ui; text-align: center; }
 .final-pin { width: 30px; height: 40px; background: no-repeat center/contain
   url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 40'%3E%3Cpath d='M15 39C15 39 2 22 2 14a13 13 0 0 1 26 0c0 8-13 25-13 25z' fill='%23f59f00' stroke='white' stroke-width='2'/%3E%3Ccircle cx='15' cy='14' r='5' fill='white'/%3E%3C/svg%3E"); }

@@ -107,8 +107,8 @@ class AddressFields(unittest.TestCase):
         self.assertNotIn('numberSource', g['Phở Liên'])
         with open(os.path.join(self.out, 'places.csv'), encoding='utf-8-sig') as f:
             rows = f.read().splitlines()
-        self.assertTrue(rows[0].endswith('folder,house number,number source,old number,other numbers'))
-        self.assertTrue(any(r.endswith(',18,sign,,34') for r in rows))
+        self.assertTrue(rows[0].endswith('folder,house number,number source,old number,other numbers,sign post,sign order'))
+        self.assertTrue(any(r.endswith(',18,sign,,34,,') for r in rows))
 
     def test_unknown_values_are_refused(self):
         spec = self.spec()

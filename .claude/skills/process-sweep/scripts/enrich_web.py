@@ -29,7 +29,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build  # noqa: E402
 from paths import arg_path, business_folders  # noqa: E402
-from result import google_mergeable  # noqa: E402
+from result import address_numbers, google_mergeable  # noqa: E402
 
 UA = 'Mozilla/5.0 (compatible; poi-capture-reviewer/0.16; place details from the business website)'
 SKIP = ('instagram.com', 'tiktok.com', 'linkbio', 'linktr.ee', 'zalo.me', 'shopee', 'lazada')
@@ -449,7 +449,7 @@ def website_of(m):
     if site:
         return site
     g = m.get('googleMaps') or {}
-    return g.get('website') if google_mergeable(g, m.get('fields') or {}) else None
+    return g.get('website') if google_mergeable(g, m.get('fields') or {}, address_numbers(m)) else None
 
 
 def main():

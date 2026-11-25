@@ -13,6 +13,7 @@ import { t } from '../i18n'
 import type { Dataset, Place, Review, FieldKey, PinSource, PhotoEdits, CropRect } from '../types'
 import { FIELD_KEYS, layerOf } from '../types'
 import { signSvg } from '../signArt'
+import { overRoad, postOf, postSigns } from '../signPosts'
 
 const props = defineProps<{ ds: Dataset; place: Place }>()
 const emit = defineEmits<{ close: []; next: [] }>()
@@ -231,6 +232,9 @@ const layerInfo = computed(() => {
     word('signGroup_', p.sign?.group)
     word('signSide_', p.sign?.side)
     if (typeof p.sign?.facingDeg === 'number') out.push(t('signFacing', { deg: Math.round(p.sign.facingDeg) }))
+    if (p.sign?.lane != null) out.push(t('postLane', { lane: p.sign.lane }))
+    if (onPost.value.length > 1)
+      out.push(t('postPos_' + postKind.value, { id: postOf(p), n: onPost.value.indexOf(p) + 1, of: onPost.value.length }))
   }
   if (layer.value === 'address' && p.placeRef) out.push(t('placeRef', { name: p.placeRef }))
   return out.join(' · ')
@@ -273,6 +277,16 @@ async function rejectAsDupe(d: Dupe) {
 }
 /** A value read on the photos: not one filled from Google / the website, nor the ride's road. */
 const fromPhoto = (k: FieldKey) => { const s = props.place.fields[k]?.source; return !!props.place.fields[k] && (!s || !['google', 'website', 'ride'].includes(s)) }
+
+// the other signs on the same post (signPosts.ts): a pole shares one position, a gantry one place along the road
+const onPost = computed(() => (layer.value === 'sign' ? postSigns(props.ds.places, props.place) : [props.place]))
+const postKind = computed(() => (overRoad(props.place) ? 'gantry' : 'pole'))
+const postMates = computed(() => onPost.value.filter((p) => p.id !== props.place.id).map((p) => {
+  const rv = reviewOf(props.ds.id, p)
+  const code = rv.fields.signCode?.value || p.fields.signCode?.value || p.sign?.code || ''
+  return { p, code, art: signSvg(code, rv.fields.signText?.value || p.fields.signText?.value), n: onPost.value.indexOf(p) + 1,
+    decision: rv.decision }
+}))
 
 const signCodeNow = computed(() => r.value.fields.signCode?.value || props.place.fields.signCode?.value || props.place.sign?.code || '')
 const signArt = computed(() => signSvg(signCodeNow.value, r.value.fields.signText?.value || props.place.fields.signText?.value))
@@ -333,6 +347,17 @@ const signArt = computed(() => signSvg(signCodeNow.value, r.value.fields.signTex
       <div v-if="edited" class="muted small">{{ t('photoEditsNote') }}</div>
     </div>
     <p v-if="place.note" class="note">{{ place.note }}</p>
+
+    <section v-if="postMates.length" class="postmates">
+      <h3>{{ t('postH_' + postKind) }}</h3>
+      <p class="muted small">{{ t('postHint_' + postKind) }}</p>
+      <RouterLink v-for="m in postMates" :key="m.p.id" class="mate" :to="to.place(ds.id, m.p.id)">
+        <span class="mn">{{ m.n }}</span>
+        <span class="mart" :title="m.code" v-html="m.art" />
+        <span class="mtext">{{ m.p.name }} <span class="muted small">· {{ m.code }}<template v-if="m.p.sign?.lane != null"> · {{ t('postLane', { lane: m.p.sign.lane }) }}</template>
+          · {{ t(DECISION[m.decision]) }}</span></span>
+      </RouterLink>
+    </section>
 
     <section v-if="sameOn.length" class="dupes">
       <h3>{{ t('dupesH') }}</h3>
@@ -518,6 +543,14 @@ footer { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; bottom: 0; 
 .chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #e7f6ec; color: #2c4f00; font-weight: 600; margin-left: 2px; }
 .chip.bad { background: #fde8ef; color: #9b1c47; } .chip.warn { background: #fdecea; color: #9b1c1c; }
 .dupes { display: grid; gap: 6px; background: #f5f8ff; border-radius: 10px; padding: 8px 10px; }
+.postmates { display: grid; gap: 4px; background: #f6f8f3; border-radius: 10px; padding: 8px 10px; }
+.postmates h3, .postmates p { margin: 0; }
+.mate { display: flex; gap: 8px; align-items: center; color: inherit; text-decoration: none; padding: 2px 0; }
+.mate:hover .mtext { text-decoration: underline; }
+.mate .mn { flex: none; width: 16px; text-align: right; font-weight: 700; color: #6b7280; }
+.mate .mart { flex: none; width: 28px; height: 28px; }
+.mate .mart :deep(svg) { display: block; width: 100%; height: 100%; }
+.mate .mtext { flex: 1; min-width: 0; }
 .dupes h3 { margin: 0; }
 .dupes p { margin: 0; }
 .dupe { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

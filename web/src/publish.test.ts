@@ -193,7 +193,7 @@ describe('addresses and signs (docs/sweep-targets.md)', () => {
   it('a sign is a node with traffic_sign=VN:<code> and direction, only with a confirmed code', () => {
     const x = osm([{ dataset, place: sign, review: ok(sign) }])
     expect(x).toContain('<tag k="traffic_sign" v="VN:P.131a"/>')
-    expect(x).toContain('<tag k="direction" v="272"/>')
+    expect(x).toContain('<tag k="direction" v="92"/>')   // met heading 272°, it faces 92° (Key:traffic_sign)
     expect(x).not.toContain('k="name"')
     const noCode: Review = { decision: 'confirmed', fields: { signCode: { state: 'rejected', value: 'P.131a' } } }
     expect(osm([{ dataset, place: sign, review: noCode }])).not.toContain('<node')

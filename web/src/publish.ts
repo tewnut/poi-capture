@@ -4,6 +4,7 @@
 import type { Dataset, Place, Review, FieldKey, RemovalReview, Task } from './types'
 import { FIELD_KEYS, layerOf } from './types'
 import { exportNames } from './photos'
+import { overRoad, postOf, trafficSignValue } from './signPosts'
 
 export type Published = {
   dataset: Dataset
@@ -34,6 +35,7 @@ export function record(x: Published) {
     name: v.name || place.name,
     category: review.category || place.category || null,
     ...(layer === 'sign' ? { signCode: v.signCode } : {}),
+    ...(layer === 'sign' && postOf(place) ? { signPost: postOf(place), signOrder: place.sign?.order ?? null } : {}),
     status: place.status,
     phone: v.phone, houseNumber: v.houseNumber, street: v.street, openingHours: v.openingHours, website: v.website,
     lat: +pin.lat.toFixed(7), lon: +pin.lon.toFixed(7),
@@ -63,7 +65,7 @@ export function geojson(places: Published[], removed: Removed[]) {
   return JSON.stringify({ type: 'FeatureCollection', features: feats }, null, 1)
 }
 
-export const CSV_COLS = ['id', 'change', 'name', 'category', 'layer', 'signCode', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
+export const CSV_COLS = ['id', 'change', 'name', 'category', 'layer', 'signCode', 'signPost', 'signOrder', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
   'fromGoogle', 'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment', 'photos'] as const
 
 /** A CSV cell. Text starting with = + - @ (or a tab / return) is prefixed with ' so spreadsheets do not run it
@@ -125,13 +127,15 @@ function addressTags(r: Record<string, any>): Record<string, string> | null {
   return tags
 }
 
-/** OSM tags of a traffic sign: only with a confirmed code; direction = the way a driver facing it drives. */
-function signTags(r: Record<string, any>, p: Place): Record<string, string> | null {
-  const code = (r.signCode || '').trim()
-  if (!code) return null
-  const tags: Record<string, string> = { traffic_sign: `VN:${code}` }
+/** OSM tags of a traffic sign (or of the signs of one pole, top first): only with a confirmed code.
+ *  direction = the way the sign faces, against the traffic it is for (Key:traffic_sign: met riding north, it faces
+ *  south, direction=180): facingDeg (the travel bearing of the drivers who see it) + 180. */
+function signTags(codes: string[], p: Place): Record<string, string> | null {
+  const value = trafficSignValue(codes)
+  if (!value) return null
+  const tags: Record<string, string> = { traffic_sign: value }
   const f = p.sign?.facingDeg
-  if (typeof f === 'number' && Number.isFinite(f)) tags.direction = String(((Math.round(f) % 360) + 360) % 360)
+  if (typeof f === 'number' && Number.isFinite(f)) tags.direction = String((((Math.round(f) + 180) % 360) + 360) % 360)
   return tags
 }
 
@@ -148,13 +152,32 @@ export function osm(places: Published[]) {
     for (const [k, v] of Object.entries(tags)) if (v) lines.push(`    <tag k="${esc(k)}" v="${esc(v)}"/>`)
     lines.push('  </node>')
   }
+  // the signs of one pole (not a gantry: its boards hang over their own lanes, one node each): ONE node, at the
+  // top sign's position, traffic_sign listing their confirmed codes top first (signPosts.ts)
+  const poles = new Map<string, { r: Record<string, any>; x: Published }[]>()
+  const poleOf = (x: Published) => (postOf(x.place) && !overRoad(x.place) ? `${x.dataset.id}|${postOf(x.place)}` : null)
+  for (const x of places) {
+    const k = poleOf(x)
+    if (k) poles.set(k, [...(poles.get(k) || []), { r: record(x), x }])
+  }
   for (const x of places) {
     const r: Record<string, any> = { ...record(x) }
     // OpenStreetMap does not accept data copied from Google: those fields stay out of the .osm file
     for (const k of (r.fromGoogle as string).split(' ').filter(Boolean)) r[k] = null
     // addresses and signs are nodes of their own, without the shop tags; left out when the number / code is missing
     if (r.layer !== 'place') {
-      const tags = r.layer === 'address' ? addressTags(r) : signTags(r, x.place)
+      const pole = r.layer === 'sign' ? poleOf(x) : null
+      if (pole) {
+        const signs = poles.get(pole)!
+        if (!signs.length) continue                       // written with the first of its pole
+        poles.set(pole, [])
+        signs.sort((a, b) => (a.r.signOrder ?? Infinity) - (b.r.signOrder ?? Infinity))
+        const coded = signs.filter((s) => (s.r.signCode || '').trim())
+        const tags = coded.length ? signTags(coded.map((s) => s.r.signCode), coded[0].x.place) : null
+        if (tags) node(coded[0].r, tags)
+        continue
+      }
+      const tags = r.layer === 'address' ? addressTags(r) : signTags([r.signCode || ''], x.place)
       if (tags) node(r, tags)
       continue
     }

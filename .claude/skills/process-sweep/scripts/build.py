@@ -44,6 +44,10 @@ coefficient 1, urban roads; "signSizeFactor" for the ride, "sizeFactor" or "size
 its width in the photo ("w" of a sighting, else the phone detector's box in signHints) gives its distance; rays and
 ranges are solved together (locate_sign). "road" (the cross-section per stretch of photos) then snaps each sign
 across the road onto the line of its "side" (snap_sign); see SKILL.md.
+Signs on one pole or gantry share a "post" (an id) with an "order" (1 = top): a pole is placed once from all its
+signs' sightings, a gantry's boards share one along-road position, each over its lane (locate_post).
+A place that an address names (its "placeRef") gets place.addressNumbers: that address's sure house number, for its
+Google check (result.google_check).
 """
 import csv, html, json, math, os, re, shutil, sys, tempfile, urllib.parse
 
@@ -299,43 +303,92 @@ def locate_sign(sign, photos, default_d, gate=(3, 80), spec=None):
     distance along the travel direction. Rays and ranges are solved together by weighted least squares (a range
     pins the along-road position the nearly parallel rays leave loose); one photo with a range is a full fix.
     Without any range: locate() (rays, else the single-photo default distance)."""
+    return locate_signs([sign], photos, default_d, gate, spec)
+
+
+def post_sightings(signs):
+    """The signs of one post as one sign for locate() / snap_sign(): one sighting per photo (x the mean of theirs),
+    in the order first seen; cover, side and lane the first (top) sign's."""
+    xs = {}
+    for sg in signs:
+        for s in sg.get('sightings') or []:
+            xs.setdefault(s['photo'], []).append(s['x'])
+    out = {'cover': signs[0].get('cover'), 'side': signs[0].get('side'), 'lane': signs[0].get('lane'),
+           'sightings': [{'photo': i, 'x': sum(v) / len(v)} for i, v in xs.items()]}
+    if any(sg.get('snap') is False for sg in signs):
+        out['snap'] = False
+    return out
+
+
+def locate_signs(signs, photos, default_d, gate=(3, 80), spec=None):
+    """locate_sign for one sign or for the signs of one post (a pole): one point from all their sightings. A ray per
+    photo (x: the mean of the signs' x on it) and a range per sign and photo (each sign with its own size; the same
+    range twice, e.g. both signs given the same phone box, counts once)."""
     lo, hi = gate
-    width_m = sign_width_m(sign, spec)
-    sights = [s for s in sign.get('sightings') or [] if photos[s['photo']].get('lat') is not None]
-    if not sights or width_m is None:
-        return locate(sign, photos, default_d, gate)
-    lat0, lon0 = photos[sights[0]['photo']]['lat'], photos[sights[0]['photo']]['lon']
-    obs, seen = [], []
-    for s in sights:
-        p = photos[s['photo']]
+    pad = float((spec or {}).get('signBoxPad', BOX_PAD))
+    fallback = signs[0] if len(signs) == 1 else post_sightings(signs)
+    by_photo = {}                                       # photo -> [(sign, sighting)], in the order first seen
+    for sg in signs:
+        for s in sg.get('sightings') or []:
+            if photos[s['photo']].get('lat') is not None:
+                by_photo.setdefault(s['photo'], []).append((sg, s))
+    if not by_photo or all(sign_width_m(sg, spec) is None for sg in signs):
+        return locate(fallback, photos, default_d, gate)
+    first = photos[next(iter(by_photo))]
+    lat0, lon0 = first['lat'], first['lon']
+    rays, ranges, seen = [], [], []
+    for i, hits in by_photo.items():
+        p = photos[i]
         c = to_xy(p['lat'], p['lon'], lat0, lon0)
-        b = math.radians(bearing_of(p, s['x']))
-        u = (math.sin(b), math.cos(b))
+        x = sum(s['x'] for _sg, s in hits) / len(hits)
+        b = math.radians(bearing_of(p, x))
         ax = math.radians(p['cameraBearing'])
         t = (math.sin(ax), math.cos(ax))
-        wd = sighting_width(s, p, sign, float((spec or {}).get('signBoxPad', BOX_PAD)))
-        z = sign_depth(width_m, wd[0], p) if wd and wd[0] > 0 else None
-        if z is not None and not 2 <= z <= 150:
-            z = None                                    # a box around something else
-        wpx = (wd[0] * max(p.get('width') or 0, p.get('height') or 0, 1) *
-               (1 if upright_aspect(p) <= 1 else 1 / upright_aspect(p))) if z is not None else 0
-        obs.append((c, u, t, z, p, wpx))
-        seen.append({'i': s['photo'], 'lat': p['lat'], 'lon': p['lon'], 'bearing': round(math.degrees(b) % 360, 1),
-                     **({'rangeM': round(z, 1), 'w': round(wd[0], 4), 'wFrom': wd[1]} if z is not None else {})})
+        entry = {'i': i, 'lat': p['lat'], 'lon': p['lon'], 'bearing': round(math.degrees(b) % 360, 1)}
+        seen.append(entry)
+        got = set()
+        for sg, s in hits:
+            width_m = sign_width_m(sg, spec)
+            if width_m is None:
+                continue
+            wd = sighting_width(s, p, sg, pad)
+            z = sign_depth(width_m, wd[0], p) if wd and wd[0] > 0 else None
+            if z is None or not 2 <= z <= 150 or round(z, 2) in got:
+                continue                                # none, a box around something else, or counted already
+            got.add(round(z, 2))
+            wpx = wd[0] * max(p.get('width') or 0, p.get('height') or 0, 1) * \
+                (1 if upright_aspect(p) <= 1 else 1 / upright_aspect(p))
+            r = {'rangeM': round(z, 1), 'w': round(wd[0], 4), 'wFrom': wd[1]}
+            if len(signs) > 1:
+                r['code'] = sg.get('code')
+            ranges.append({'c': c, 't': t, 'z': z, 'p': p, 'wpx': wpx, 'entry': entry, 'r': r, 'widthM': width_m})
+        rays.append({'c': c, 'u': (math.sin(b), math.cos(b)), 't': t, 'p': p, 'entry': entry})
     # each range puts the sign at camera + z along the axis; with 3+ ranges one far from the others' median
     # (more than 30 %, at least 5 m) was a box around something else
-    alongs = [(i, o[2][0] * o[0][0] + o[2][1] * o[0][1] + o[3]) for i, o in enumerate(obs) if o[3] is not None]
+    alongs = [(k, o['t'][0] * o['c'][0] + o['t'][1] * o['c'][1] + o['z']) for k, o in enumerate(ranges)]
     if len(alongs) >= 3:
-        med = sorted(a for _i, a in alongs)[len(alongs) // 2]
-        for i, a in alongs:
-            if abs(a - med) > max(5.0, 0.3 * obs[i][3]):
-                obs[i] = obs[i][:3] + (None,) + obs[i][4:5] + (0,)
-                for k in ('rangeM', 'w', 'wFrom'):
-                    seen[i].pop(k, None)
-                seen[i]['rangeDropped'] = True
-    nr = sum(1 for o in obs if o[3] is not None)
+        med = sorted(a for _k, a in alongs)[len(alongs) // 2]
+        for k, a in alongs:
+            if abs(a - med) > max(5.0, 0.3 * ranges[k]['z']):
+                ranges[k]['dropped'] = True
+    for o in ranges:                                    # what each photo's sighting says (the first range on top)
+        e = o['entry']
+        if o.get('dropped'):
+            if 'rangeM' not in e:
+                e['rangeDropped'] = True
+            continue
+        e.pop('rangeDropped', None)
+        if 'rangeM' not in e:
+            e.update(o['r'])
+        else:
+            e.setdefault('ranges', [{k: e[k] for k in ('rangeM', 'w', 'wFrom', 'code') if k in e}]).append(o['r'])
+    ranges = [o for o in ranges if not o.get('dropped')]
+    nr = len(ranges)
     if not nr:
-        return locate(sign, photos, default_d, gate)
+        return locate(fallback, photos, default_d, gate)
+    z_at = {}
+    for o in ranges:
+        z_at.setdefault(o['entry']['i'], o['z'])
     sol = None
     for _round in range(3):
         a11 = a12 = a22 = b1 = b2 = 0.0
@@ -345,27 +398,31 @@ def locate_sign(sign, photos, default_d, gate=(3, 80), spec=None):
             w = 1.0 / var
             a11 += w * a[0] * a[0]; a12 += w * a[0] * a[1]; a22 += w * a[1] * a[1]
             b1 += w * a[0] * rhs; b2 += w * a[1] * rhs
-        for (px, py), (ux, uy), (tx, ty), z, p, wpx in obs:
+        for o in rays:
+            (px, py), (ux, uy), p = o['c'], o['u'], o['p']
             acc2 = (p.get('accuracyM') or 5) ** 2
-            d = (z if z is not None else default_d) if sol is None else max(5.0, math.hypot(sol[0] - px, sol[1] - py))
+            d = z_at.get(o['entry']['i'], default_d) if sol is None else max(5.0, math.hypot(sol[0] - px, sol[1] - py))
             n = (uy, -ux)                               # across the ray: n . P = n . c
             add(n, n[0] * px + n[1] * py, (d * math.radians(RAY_ERR_DEG)) ** 2 + acc2)
-            if z is not None:                           # along the camera axis: t . P = t . c + z
-                rel = math.hypot(RANGE_REL_ERR, RANGE_PX_ERR / max(1.0, wpx))
-                add((tx, ty), tx * px + ty * py + z, (z * rel) ** 2 + acc2)
+        for o in ranges:                                # along the camera axis: t . P = t . c + z
+            (px, py), (tx, ty), z = o['c'], o['t'], o['z']
+            acc2 = (o['p'].get('accuracyM') or 5) ** 2
+            rel = math.hypot(RANGE_REL_ERR, RANGE_PX_ERR / max(1.0, o['wpx']))
+            add((tx, ty), tx * px + ty * py + z, (z * rel) ** 2 + acc2)
         det = a11 * a22 - a12 * a12
         if abs(det) < 1e-12:
-            return locate(sign, photos, default_d, gate)
+            return locate(fallback, photos, default_d, gate)
         sol = ((a22 * b1 - a12 * b2) / det, (a11 * b2 - a12 * b1) / det)
-    dist = [math.hypot(sol[0] - px, sol[1] - py) for (px, py), *_r in obs]
-    in_front = all((sol[0] - px) * tx + (sol[1] - py) * ty > 0 for (px, py), _u, (tx, ty), *_r in obs)
+    dist = [math.hypot(sol[0] - o['c'][0], sol[1] - o['c'][1]) for o in rays]
+    in_front = all((sol[0] - o['c'][0]) * o['t'][0] + (sol[1] - o['c'][1]) * o['t'][1] > 0 for o in rays)
     if not (in_front and lo <= min(dist) and max(dist) <= hi):
-        return locate(sign, photos, default_d, gate)
+        return locate(fallback, photos, default_d, gate)
     lat, lon = to_ll(sol[0], sol[1], lat0, lon0)
     tr = a11 + a22
     big = (tr + math.sqrt(max(tr * tr - 4 * det, 0))) / 2 / det
-    rays = f', {len(obs)} rays' if len(obs) > 1 else ''
-    return lat, lon, {'method': f'ranged from the sign size ({width_m:.2f} m) on {nr} photo{"s" if nr > 1 else ""}{rays}',
+    rays_txt = f', {len(rays)} rays' if len(rays) > 1 else ''
+    sizes = ' / '.join(f'{w:.2f}' for w in dict.fromkeys(o['widthM'] for o in ranges))
+    return lat, lon, {'method': f'ranged from the sign size ({sizes} m) on {nr} photo{"s" if nr > 1 else ""}{rays_txt}',
                       'uncertaintyM': round(2 * math.sqrt(big), 1), 'sightings': seen}
 
 
@@ -535,6 +592,84 @@ def snap_sign(sign, lat, lon, how, photos, spec):
     return la, lo, how
 
 
+def post_groups(signs):
+    """{post id: [index into signs, ...]} for the signs that name a "post", in their order on it: "order" (1 = top),
+    else the order in places.json; on a gantry (every sign "side": "over") without "order", from the left (the
+    highest "lane" first), as a driver reads them."""
+    groups = {}
+    for k, s in enumerate(signs):
+        if s.get('post') not in (None, ''):
+            groups.setdefault(str(s['post']), []).append(k)
+    for pid, ks in groups.items():
+        gantry = all(signs[k].get('side') == 'over' for k in ks)
+        ks.sort(key=lambda k: (signs[k]['order'] if signs[k].get('order') is not None else
+                               -float(signs[k].get('lane') or 0) if gantry else 1e9, k))
+    return groups
+
+
+def frame_of(lat, lon, c):
+    """(along, across) metres of (lat, lon) in the frame of ride photo c (along travel, + = right of it)."""
+    x, y = to_xy(lat, lon, c['lat'], c['lon'])
+    tb = math.radians(c['travelBearing'])
+    tx, ty = math.sin(tb), math.cos(tb)
+    return x * tx + y * ty, x * ty - y * tx
+
+
+def from_frame(along, across, c):
+    tb = math.radians(c['travelBearing'])
+    tx, ty = math.sin(tb), math.cos(tb)
+    return to_ll(along * tx + across * ty, along * ty - across * tx, c['lat'], c['lon'])
+
+
+def locate_post(signs, pid, photos, default_d, spec):
+    """[(lat, lon, how)] for the signs of one post, in the given order (post_groups).
+    A pole (or any post not all "over"): ONE position, solved once from all their sightings and ranges
+    (locate_signs), then snapped like one sign (snap_sign); every sign gets it.
+    A gantry (every sign "side": "over"): a line across the road. Each board is located and snapped over its own
+    lane as before, then all take the same along-road position: the mean of theirs weighted by 1 / uncertainty^2
+    (a board put the default distance ahead, with no range and no ray on its lane line, counts as +-default
+    distance), in the frame of the ride photo nearest the gantry; each keeps its own across-road place (its lane)."""
+    n = len(signs)
+    if not all(s.get('side') == 'over' for s in signs):
+        lat, lon, how = locate_signs(signs, photos, default_d, gate=(3, 80), spec=spec)
+        lat, lon, how = snap_sign(post_sightings(signs), lat, lon, how, photos, spec)
+        how = dict(how)
+        how['post'] = {'id': pid, 'mount': 'pole', 'signs': n}
+        how['method'] += f'; one position for the {n} signs on post {pid}'
+        return [(lat, lon, dict(how)) for _s in signs]
+    each = []
+    for s in signs:
+        lat, lon, how = locate_sign(s, photos, default_d, gate=(3, 80), spec=spec)
+        each.append(snap_sign(s, lat, lon, how, photos, spec))
+    c, _a, _x = ride_frame(sum(e[0] for e in each) / n, sum(e[1] for e in each) / n, photos)
+    if c is None:
+        return each
+    num = den = 0.0
+    parts = []
+    for s, (lat, lon, how) in zip(signs, each):
+        along, _across = frame_of(lat, lon, c)
+        sd = (how.get('uncertaintyM') or default_d) / 2
+        m = how.get('method') or ''
+        if m.startswith('single-photo estimate') and 'cross' not in m:
+            sd = max(sd, default_d)                     # only the default distance: a guess
+        num += along / sd ** 2
+        den += 1 / sd ** 2
+        parts.append((along, sd))
+    along = num / den
+    unc = round(2 / math.sqrt(den), 1)
+    out = []
+    for s, (lat, lon, how), (a_i, sd) in zip(signs, each, parts):
+        _a, across = frame_of(lat, lon, c)
+        la, lo = from_frame(along, across, c)
+        how = dict(how)
+        how['post'] = {'id': pid, 'mount': 'gantry', 'signs': n, 'alongMovedM': round(along - a_i, 1),
+                       'alone': {'lat': round(lat, 6), 'lon': round(lon, 6), 'uncertaintyM': how.get('uncertaintyM')}}
+        how['method'] += f'; along the road with the {n} boards of gantry {pid} (moved {along - a_i:+.1f} m)'
+        how['uncertaintyM'] = unc
+        out.append((la, lo, how))
+    return out
+
+
 def facade_snap(lat, lon, photos, d):
     """The pin moved onto the shopfront line: same position along the street as (lat, lon), at distance d from the
     ride on the side the pin is on. Uses the nearest photo's camera position and travel direction."""
@@ -617,6 +752,27 @@ def check_spec(spec):
     for k, seg in enumerate(spec.get('streets') or []):
         if not seg.get('street'):
             bad.append(f'streets[{k}]: no "street"')
+    signs = spec.get('signs') or []
+    for k, x in enumerate(signs):
+        if x.get('post') is not None and (isinstance(x['post'], bool) or not isinstance(x['post'], (str, int))):
+            bad.append(f"signs[{k}] {x.get('code') or ''}: post must be a string (\"p12\")")
+        if x.get('order') is not None and (isinstance(x['order'], bool) or not isinstance(x['order'], int)
+                                           or x['order'] < 1):
+            bad.append(f"signs[{k}] {x.get('code') or ''}: order must be 1, 2, ... (1 = top)")
+        if x.get('order') is not None and x.get('post') in (None, ''):
+            bad.append(f"signs[{k}] {x.get('code') or ''}: order without a post")
+    groups = {}
+    for k, x in enumerate(signs):
+        if isinstance(x.get('post'), (str, int)) and not isinstance(x.get('post'), bool) and x['post'] != '':
+            groups.setdefault(str(x['post']), []).append(x)
+    for pid, xs in groups.items():
+        sides = {x.get('side') for x in xs}
+        if len(sides) > 1:
+            bad.append(f"post {pid}: its signs have different sides {sorted(map(str, sides))} (one pole stands on "
+                       "one side; a gantry: every board \"over\")")
+        orders = [x['order'] for x in xs if isinstance(x.get('order'), int)]
+        if len(orders) != len(set(orders)):
+            bad.append(f'post {pid}: two signs with the same order')
     return bad
 
 
@@ -824,10 +980,22 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
     items = ([dict(pl, layer='place') for pl in spec.get('places') or []]
              + [address_item(x, photos, spec.get('street'), spec) for x in spec.get('addresses') or []]
              + [sign_item(x) for x in spec.get('signs') or []])
+    # signs on one post (pole or gantry): placed together; each gets its order on the post (1 = top)
+    sign_items = [x for x in items if x['layer'] == 'sign']
+    at_post = {}
+    for pid, ks in post_groups(sign_items).items():
+        members = [sign_items[k] for k in ks]
+        for o, (k, fix) in enumerate(zip(ks, locate_post(members, pid, fwd, sign_d, spec)), 1):
+            sign_items[k]['post'], sign_items[k]['order'] = pid, o
+            at_post[id(sign_items[k])] = fix
+    # house numbers read on a shop's own address entry (placeRef): its Google check uses them (result.google_check)
+    shop_nums = result.shop_numbers([x for x in items if x['layer'] == 'address'])
     for n, pl in enumerate(items, 1):
         a, b = pl['photos']
         layer = pl['layer']
-        if layer == 'sign':   # seen ahead, along the road: anywhere from a few metres to a block away
+        if id(pl) in at_post:
+            lat, lon, how = at_post[id(pl)]
+        elif layer == 'sign':   # seen ahead, along the road: anywhere from a few metres to a block away
             lat, lon, how = locate_sign(pl, fwd, sign_d, gate=(3, 80), spec=spec)
             lat, lon, how = snap_sign(pl, lat, lon, how, fwd, spec)
         else:
@@ -879,7 +1047,11 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             # facing: the way a driver who sees it drives = the travel bearing when it was photographed
             tb = cover.get('travelBearing') if cover.get('travelBearing') is not None else cover.get('cameraBearing')
             extra = {'sign': {'code': pl.get('code'), 'group': pl.get('group'),
-                              'facingDeg': None if tb is None else round(tb % 360, 1), 'side': pl.get('side')}}
+                              'facingDeg': None if tb is None else round(tb % 360, 1), 'side': pl.get('side'),
+                              **({'lane': pl['lane']} if pl.get('lane') is not None else {}),
+                              **({'post': pl['post'], 'order': pl['order']} if pl.get('post') else {})}}
+        elif layer == 'place' and shop_nums.get(result.ref_key(pl['name'])):
+            extra = {'addressNumbers': shop_nums[result.ref_key(pl['name'])]}
         meta = {
             'place': {'layer': layer, **extra,
                       'name': pl['name'], 'category': pl.get('category'), 'signText': pl.get('signText'),
@@ -955,6 +1127,12 @@ def address_props(m):
             'altNumbers': nb.get('altNumbers') or None, 'partial': bool(nb.get('partial'))}
 
 
+def sign_post(m):
+    """(post, order) of a sign on a post shared with other signs (place.sign), else (None, None)."""
+    sg = (m['place'].get('sign') or {}) if layer_of(m) == 'sign' else {}
+    return sg.get('post'), sg.get('order')
+
+
 def address_cols(m):
     p = address_props(m)
     return [p.get('houseNumber'), p.get('numberSource'), p.get('oldNumber'), ' | '.join(p.get('altNumbers') or [])]
@@ -971,19 +1149,21 @@ def write_indexes(out, session=None):
         w.writerow(['#', 'layer', 'name', 'category', 'signCode', 'confidence', 'photos', 'lat', 'lon', 'position',
                     'review link',
                     'google name', 'google address', 'google phone', 'google hours', 'google website', 'google link',
-                    'google distance m', 'folder', 'house number', 'number source', 'old number', 'other numbers'])
+                    'google distance m', 'folder', 'house number', 'number source', 'old number', 'other numbers',
+                    'sign post', 'sign order'])
         for d, m in rows:
             p = m['place']; pos = p['position']
             w.writerow([csv_cell(x) for x in [folder_no(d), layer_of(m), p['name'], p['category'], sign_code(m),
                         p['confidence'], len(m['photos']), pos['lat'], pos['lon'],
                         pos['method'], pos['googleMaps'], g(m, 'name'), g(m, 'address'), g(m, 'phone'),
                         ' | '.join(g(m, 'openingHours') or []), g(m, 'website'), g(m, 'url'), g(m, 'distanceM'), d]
-                        + address_cols(m)])
+                        + address_cols(m) + list(sign_post(m))])
     feats = [{'type': 'Feature', 'geometry': {'type': 'Point', 'coordinates': [m['place']['position']['lon'], m['place']['position']['lat']]},
               'properties': {'folder': d, 'layer': layer_of(m), 'name': m['place']['name'],
                              'category': m['place']['category'], 'confidence': m['place']['confidence'],
                              'googleName': g(m, 'name'),
                              **({'signCode': sign_code(m)} if layer_of(m) == 'sign' else {}),
+                             **({'signPost': sign_post(m)[0], 'signOrder': sign_post(m)[1]} if sign_post(m)[0] else {}),
                              **address_props(m)}} for d, m in rows]
     json.dump({'type': 'FeatureCollection', 'features': feats}, open(os.path.join(out, 'places.geojson'), 'w', encoding='utf-8'),
               ensure_ascii=False, indent=1)
@@ -1010,7 +1190,7 @@ def write_indexes(out, session=None):
                   (f'<br><a href="{e(gm["url"])}" target="_blank">open on Google Maps</a>' if gm.get('url') else '') + '</p>'
                   ) if gm.get('name') else ('<p class="g muted">Google Maps: ' + e(gm.get('status') or 'not looked up yet') + '</p>')
         if layer_of(m) != 'place':   # never looked up on Google: say what it is instead
-            gblock = f'<p class="muted">{e(layer_of(m))}' + (f' · {e(str(sign_code(m)))}' if sign_code(m) else '') + '</p>'
+            gblock = f'<p class="muted">{e(layer_of(m))}' + (f' · {e(str(sign_code(m)))}' if sign_code(m) else '') +                 (f' · post {e(str(sign_post(m)[0]))}, no. {sign_post(m)[1]}' if sign_post(m)[0] else '') + '</p>'
         tr = m.get('groundTruth')
         tline = (f'<p class="t">Door captured on site ({e(tr["label"])}): <b>{tr["errorM"]} m</b> from the estimate</p>'
                  if tr else '')

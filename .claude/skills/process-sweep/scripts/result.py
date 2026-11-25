@@ -7,7 +7,8 @@ result.json (schema "poi-result/1"):
   track     [[lat, lon], ...] the ride (sweeps), shots [[photoIndex, lat, lon, cameraBearing], ...]
   places    one per place folder (docs/sweep-targets.md for the layers):
             layer (place | address | sign), placeRef (address: the shop it is on),
-            sign {code, group, facingDeg, side} (sign),
+            sign {code, group, facingDeg, side, lane?, post?, order?} (sign; post: the id of the pole / gantry
+                 it shares with other signs, order: 1 = top, on a gantry the leftmost board),
             id, folder, name, category, status (open | closed | for_rent | under_construction | gone | unknown),
             confidence, fields {name|phone|houseNumber|street|openingHours|website|signText|other:
                                 {value, photo, sure}}  (read from the photos; photo = sweep index or photo id;
@@ -17,7 +18,9 @@ result.json (schema "poi-result/1"):
             pins {algorithm | contributor: {lat, lon, method, uncertaintyM, sightings, unsnapped?, snap?},
                   google: {lat, lon, name, distanceM, url} | null,      (for review only: never published)
                   agent: {lat, lon, why} | null},
-            google {the review block}, review {status: todo}
+            google {the review block; merge {merged, why, addressNumbers?}: addressNumbers = the sure house numbers
+                    of the shop's own address entries (placeRef), used in the check (google_check)},
+            review {status: todo}
   tasks     [{type: visit | verify_removal | removal, place (id) | null, name, lat, lon, why, photo}]
             visit: new to Google (no result close enough to merge: google_mergeable), changed, or partly read ->
             Place capture; removal: closed / for rent / gone seen
@@ -252,12 +255,46 @@ def _base_number(h):
     return m.group(1).lstrip('0') or '0' if m else None
 
 
-def google_check(g, fields=None):
+HOUSE_MIN_MATCH = 0.25   # a weaker name match passes with the same house number (photos or the shop's address entry)
+
+
+def ref_key(name):
+    """A shop name as an address's placeRef is matched to it: folded, words only."""
+    return ' '.join(re.findall(r'[a-z0-9]+', _fold(str(name or ''))))
+
+
+def shop_numbers(addresses):
+    """{ref_key(shop name): ["106", ...]}: the house numbers read surely on the address entries that say which shop
+    they are on (placeRef). Each entry: {placeRef, fields: {houseNumber}, numbering, confidence} (build.py's
+    address items, or a place.json's place block with its fields). Not sure: confidence low, read in part, or an
+    unclear reading (_unclear)."""
+    out = {}
+    for a in addresses:
+        hv = (a.get('fields') or {}).get('houseNumber') or {}
+        if not a.get('placeRef') or not hv.get('value') or _unclear(hv) or a.get('confidence') == 'low' \
+                or (a.get('numbering') or {}).get('partial'):
+            continue
+        nums = out.setdefault(ref_key(a['placeRef']), [])
+        if str(hv['value']) not in nums:
+            nums.append(str(hv['value']))
+    return out
+
+
+def address_numbers(m):
+    """The house numbers of a shop's own address entries (place.json place.addressNumbers, written by build.py and
+    refreshed by write() from the address folders)."""
+    return [str(x) for x in ((m or {}).get('place') or {}).get('addressNumbers') or []]
+
+
+def google_check(g, fields=None, address_numbers=None):
     """(merged, why): is this Google result this place? Found, within 100 m, not marked `notThisPlace`, and
     - the house number the photos show (read sure) is not another one than Google's ("553" on the sign, Google
-      "644 Nguyễn Thị Định": another shop of the same kind);
+      "644 Nguyễn Thị Định": another shop of the same kind); nor is the number of the shop's own address entry
+      (`address_numbers`: the sure numbers of the addresses whose placeRef is this shop; Google's must be one of
+      them);
     - the name matches (>= 0.5), or the phone the photos show is Google's (long names like "Rửa Xe ĐT MotorBike -
-      Rửa Xe, Thay Nhớt" fall under 0.5 against the same shop 7 m away);
+      Rửa Xe, Thay Nhớt" fall under 0.5 against the same shop 7 m away), or the name matches a little (>= 0.25)
+      and the house number is Google's (on the photos or on the shop's address entry);
     - a generic name ("Mắt Kính", "Phở") needs the same phone or house number too.
     `"thisPlace": true` on the googleMaps block (set by the agent after looking) passes the name, house number and
     generic checks; the distance still counts. Without fields (older callers) only name and distance are checked."""
@@ -278,26 +315,34 @@ def google_check(g, fields=None):
     b = _base_number(gf.get('houseNumber'))
     if a and b and a != b:
         return False, f"house number differs: photos {h_photo.get('value')}, Google {gf.get('houseNumber')}"
-    house_ok = bool(a and b and a == b)
-    if nm < GOOGLE_MIN_MATCH and not phone_ok:
-        return False, f'name match {nm} (under {GOOGLE_MIN_MATCH})'
+    entry = [x for x in address_numbers or [] if _base_number(x)]
+    bases = {_base_number(x) for x in entry}
+    if bases and b and b not in bases:
+        return False, (f"house number differs: the shop's address entry {', '.join(entry)}, "
+                       f"Google {gf.get('houseNumber')}")
+    house_ok = bool(b and (a == b or b in bases))
+    house_why = 'same house number' + ('' if a == b else " as the shop's address entry")
+    if nm < GOOGLE_MIN_MATCH and not phone_ok and not (house_ok and nm >= HOUSE_MIN_MATCH):
+        return False, f'name match {nm} (under {GOOGLE_MIN_MATCH})' + (
+            f'; with the same house number it needs {HOUSE_MIN_MATCH}' if house_ok else '')
     name = _photo_values(fields, 'name')
     if name and generic_name(name) and not (phone_ok or house_ok):
         return False, f'generic name "{name}": needs the same phone or house number'
-    return True, ('same phone (name match only %s)' % nm) if nm < GOOGLE_MIN_MATCH else \
-        'same phone' if phone_ok else 'same house number' if house_ok else 'name and distance'
+    if nm < GOOGLE_MIN_MATCH:
+        return True, f'same phone (name match only {nm})' if phone_ok else f'{house_why} (name match only {nm})'
+    return True, 'same phone' if phone_ok else house_why if house_ok else 'name and distance'
 
 
-def google_mergeable(g, fields=None):
+def google_mergeable(g, fields=None, address_numbers=None):
     """A Google result that is this place (google_check). Only such a result is merged, counts as "on Google Maps"
     and lends its website (a farther or weaker one is probably another branch / shop). `notThisPlace` (set by the
     agent: another shop, e.g. a generic sign name matched a neighbour) is never merged."""
-    return google_check(g, fields)[0]
+    return google_check(g, fields, address_numbers)[0]
 
 
-def merge_google(fields, g):
+def merge_google(fields, g, address_numbers=None):
     """fields (from the photos) merged with a matched Google place, each field marked as above."""
-    if not google_mergeable(g, fields):
+    if not google_mergeable(g, fields, address_numbers):
         return fields
     gv = _google_fields(g)
     out = merge_source(fields, gv, 'google')
@@ -312,24 +357,25 @@ def _host(u):
     return urllib.parse.urlsplit(u if '//' in u else '//' + u).netloc.lower().removeprefix('www.')
 
 
-def _site_from_far_google(w, fields, g):
+def _site_from_far_google(w, fields, g, address_numbers=None):
     """The site was taken from a Google result too far or too unlike the sign to be this place (before enrich_web.py
     checked that): neither its fields nor its images are used."""
-    if (fields.get('website') or {}).get('value') or not g or google_mergeable(g, fields) or not g.get('website'):
+    if (fields.get('website') or {}).get('value') or not g or google_mergeable(g, fields, address_numbers) \
+            or not g.get('website'):
         return False
     return _host(w.get('url')) == _host(g.get('website'))
 
 
-def _web_fields(w, fields, g):
+def _web_fields(w, fields, g, address_numbers=None):
     """Fields from the place's own website (enrich_web.py), only when its address is this place's: a chain's site
     gives the head office's address and hotline, not this branch's (then only its description and images are kept)."""
     if not w or w.get('status') != 'ok' or w.get('notThisPlace'):   # the agent saw it is another business's site
         return {}
-    if _site_from_far_google(w, fields, g):
+    if _site_from_far_google(w, fields, g, address_numbers):
         return {}
     f = w.get('fields') or {}
     addr = _fold(w.get('address') or '')
-    known = _google_fields(g) if google_mergeable(g, fields) else {}
+    known = _google_fields(g) if google_mergeable(g, fields, address_numbers) else {}
     street = (fields.get('street') or {}).get('value') or known.get('street') or ''
     house = (fields.get('houseNumber') or {}).get('value') or known.get('houseNumber') or ''
     house = re.match(r'\s*([\dA-Za-z/-]+)', house).group(1) if re.match(r'\s*([\dA-Za-z/-]+)', house) else ''
@@ -346,9 +392,11 @@ def _site_is_this_place(m):
     """The website is this place's (its images are shown): its address is this place's, or its domain carries the
     place's name (Google sometimes lists an unrelated site)."""
     w = m.get('website') or {}
-    if w.get('status') != 'ok' or w.get('notThisPlace') or _site_from_far_google(w, m.get('fields') or {}, m.get('googleMaps')):
+    nums = address_numbers(m)
+    if w.get('status') != 'ok' or w.get('notThisPlace') or \
+            _site_from_far_google(w, m.get('fields') or {}, m.get('googleMaps'), nums):
         return False
-    if _web_fields(w, m.get('fields') or {}, m.get('googleMaps')):
+    if _web_fields(w, m.get('fields') or {}, m.get('googleMaps'), nums):
         return True
     import urllib.parse
     host = re.sub(r'[^a-z0-9]', '', _fold(urllib.parse.urlsplit(w.get('url') or '').netloc).replace('www.', ''))
@@ -412,25 +460,28 @@ def place_entry(folder, m, session_id):
     first = 'contributor' if (m.get('session') or {}).get('kind') == 'poi' else 'algorithm'
     pins.setdefault(first, {'lat': pos['lat'], 'lon': pos['lon'], 'method': pos.get('method'),
                             'uncertaintyM': pos.get('uncertaintyM'), 'sightings': pos.get('sightings') or [],
-                            # a sign moved onto the road layout: the estimate before, and the move
-                            **{k: pos[k] for k in ('unsnapped', 'snap') if pos.get(k)}})
+                            # a sign moved onto the road layout: the estimate before, and the move; placed with
+                            # the other signs of its post (pole or gantry)
+                            **{k: pos[k] for k in ('unsnapped', 'snap', 'post') if pos.get(k)}})
     pins['google'] = _google_pin(m.get('googleMaps'))
     pins.setdefault('agent', None)
     layer = layer_of(m)
     extra = ({'placeRef': p.get('placeRef'), 'numbering': p.get('numbering')} if layer == 'address'
              else {'sign': p.get('sign')} if layer == 'sign' else {})
     g = m.get('googleMaps')
+    nums = address_numbers(m) if layer == 'place' else []
     if g and g.get('name') and layer == 'place':
-        ok, why = google_check(g, m.get('fields') or {})
-        g = {**g, 'merge': {'merged': ok, 'why': why}}   # why it was (not) merged, for the reviewer
+        ok, why = google_check(g, m.get('fields') or {}, nums)
+        g = {**g, 'merge': {'merged': ok, 'why': why,     # why it was (not) merged, for the reviewer
+                            **({'addressNumbers': nums} if nums else {})}}
     return {
         'id': f'{session_id}-{folder_no(folder)}', 'folder': folder, 'layer': layer, **extra,
         'name': p['name'], 'category': p.get('category'),
         'status': p.get('status') or 'open', 'confidence': p.get('confidence'),
         'fields': add_ride_street(
             merge_google(merge_source(m.get('fields') or {}, _web_fields(m.get('website'), m.get('fields') or {},
-                                                                         m.get('googleMaps')), 'website'),
-                         m.get('googleMaps')), place_road(m) if layer != 'sign' else None), 'note': p.get('note'),
+                                                                         m.get('googleMaps'), nums), 'website'),
+                         m.get('googleMaps'), nums), place_road(m) if layer != 'sign' else None), 'note': p.get('note'),
         'website': {k: (m.get('website') or {}).get(k) for k in ('status', 'url', 'title', 'description', 'address')}
                    if m.get('website') else None,
         'photos': [{'file': f"{folder}/{x['file']}", 'index': x.get('sweepIndex'), 'cover': x.get('cover'),
@@ -486,6 +537,15 @@ def write(out):
     ses['street'] = sw.get('street')
     ses['target'] = ses.get('target') or 'shops'   # older rides and Place capture
     removals = json.load(open(os.path.join(out, 'removals.json'), encoding='utf-8')) if os.path.isfile(os.path.join(out, 'removals.json')) else []
+    # a shop's own address entries (placeRef): their sure house numbers count in its Google check
+    nums = shop_numbers([{**m['place'], 'fields': m.get('fields')} for _d, m in metas if layer_of(m) == 'address'])
+    has_addresses = any(layer_of(m) == 'address' for _d, m in metas)
+    for _d, m in metas:
+        if layer_of(m) == 'place':
+            if nums.get(ref_key(m['place'].get('name'))):
+                m['place']['addressNumbers'] = nums[ref_key(m['place'].get('name'))]
+            elif has_addresses:
+                m['place'].pop('addressNumbers', None)
     places = [place_entry(d, m, ses.get('id')) for d, m in metas]
     res = {'schema': 'poi-result/1', 'generatedAt': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
            'session': ses, 'track': sw.get('track') or [], 'shots': sw.get('photos') or [],

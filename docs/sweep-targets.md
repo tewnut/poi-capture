@@ -79,7 +79,7 @@ photos where it changes while the phone's `roadName` stays the same (overrides r
 whose cover is in the stretch).
 For positions (section 4) a sign may also have, per sighting, `w` / `h` (its width / height in the photo, as a fraction
 of the photo's), and `lane` (gantry: 1 = rightmost lane, 2.5 = the line between lanes 2 and 3), `sizeM` or
-`sizeFactor`; the ride has `"road"` (the cross-section per stretch of photos), `"signSizeFactor"`, `"maxSnapM"`,
+`sizeFactor`, and `post` + `order` (section 5: signs on one pole or gantry); the ride has `"road"` (the cross-section per stretch of photos), `"signSizeFactor"`, `"maxSnapM"`,
 `"signBoxPad"`. prepare.py copies the phone's boxes into photos.json `signHints`: `{code, group, label, score, x, w, h,
 box}`.
 
@@ -95,7 +95,10 @@ box}`.
   published as `addr:housenumber`.
 - A sign: `layer: "sign"`, `name` its label ("Cấm đỗ xe"), `category: "traffic_sign"`, `sign: {"code", "group",
   "facingDeg", "side"}` (`facingDeg`: the direction a driver facing the sign drives, = the travel bearing when it
-  was photographed), fields `signCode` (the code, editable), `signText`, `other` (extra plate).
+  was photographed; plus `"lane"` for a gantry board, `"post"` + `"order"` for a sign sharing a post, section 5),
+  fields `signCode` (the code, editable), `signText`, `other` (extra plate).
+- An address with `placeRef`: its house number, read surely, counts in its shop's Google check (result.py
+  `google_check`: Google's number must be the same; the same number supports a name match of 0.25-0.5).
 - No Google enrichment for addresses and signs (nothing to match).
 
 ### Web: review and publish
@@ -106,8 +109,9 @@ box}`.
 - The review panel shows the layer's fields: address = house number, street, other; sign = code, label (name), sign
   text, extra plate (other); the shop-only parts (Google, website, opening hours) are hidden for them.
 - Publish: GeoJSON / CSV get a `layer` property (and `signCode` for signs). OSM: an address → node with
-  `addr:housenumber`, `addr:street`; a sign → node with `traffic_sign=VN:<code>` (+ `direction=<facingDeg>`), only when
-  the code was confirmed.
+  `addr:housenumber`, `addr:street`; a sign → node with `traffic_sign=VN:<code>` (+ `direction`: the way the sign
+  faces, `facingDeg` + 180, as the OSM wiki says: met riding north it faces south, 180), only when the code was
+  confirmed; the signs of one pole → ONE node (section 5).
 
 ## 3. Sign boost (app 0.19)
 
@@ -164,5 +168,48 @@ estimates before it at -6.2 m (median) and +3.2 m. Two signs moved more than 15 
 camera on photos where the sign is still in view.
 
 Open: one size for all circles (some speed signs looked larger than the sign above them); the layout was measured
-with an assumed camera height and puts the median ~1 m nearer than the ranged median signs; the boards of one
-gantry are placed independently (9.6-15 m ahead of the same photo).
+with an assumed camera height and puts the median ~1 m nearer than the ranged median signs. (The boards of one
+gantry were placed independently, 9.6-15 m ahead of the same photo: section 5.)
+
+## 5. Signs on one post (25 Nov)
+
+Two signs on one pole (P.104 "Cấm xe máy" above P.127 "60 km/h") were two entries that got the same position only
+when the reader gave them the same sightings, and the five boards of one gantry were placed 9.6-15 m ahead of the
+same photo. Now places.json signs may say which post they share:
+
+```json
+{"code": "P.104", "side": "left", "post": "p1", "order": 1, "sightings": [...], ...},
+{"code": "P.127", "text": "60", "side": "left", "post": "p1", "order": 2, "sightings": [...], ...},
+{"code": "R.412", "side": "over", "lane": 4, "post": "g1", "order": 1, ...}
+```
+
+`post`: an id the reader gives, unique in the ride (merge_places.py prefixes each part's ids: `"2.p1"`); `order`:
+1 = top (gantry: from the left; left out, the gantry's boards are ordered by lane from the left, a pole's as
+listed). One post, one `side`. No `post` = as before.
+
+- **Pole** (build.py `locate_post` → `locate_signs`): one position solved once from all the signs' sightings (one ray
+  per photo, x the mean of theirs) and ranges (each sign with its own size; one range counted once), snapped like one
+  sign; every sign of the pole gets it. `position.post` = `{"id", "mount": "pole", "signs"}`.
+- **Gantry** (every board `"side": "over"`): a line across the road. Each board is located and snapped over its own
+  `lane`, then all take one along-road position, the mean of theirs weighted by 1 / uncertainty² (a board only put
+  the default distance ahead counts as ± that distance), in the frame of the ride photo nearest the gantry.
+  `position.post` = `{"id", "mount": "gantry", "signs", "alongMovedM", "alone": {lat, lon, uncertaintyM}}`.
+- result.json `sign.post` / `sign.order` (+ `sign.lane`), the algorithm pin's `post`; places.geojson
+  `signPost` / `signOrder`; places.csv `sign post` / `sign order`; web GeoJSON / CSV / Shapefile `signPost` /
+  `signOrder` (DBF `sign_post`, `sign_order`).
+- Web map: a pole is one marker with its signs' drawings stacked top first (a tap opens the sign tapped; a sign
+  whose pin the reviewer moved is drawn on its own); a gantry's boards stay markers of their own. The review panel
+  lists the other signs of the post ("On the same post" / "On the same gantry") and says "post p1: 1 of 2 from the
+  top".
+- OSM (web/src/publish.ts): a pole → ONE node at the top sign's position with
+  `traffic_sign=VN:P.104;VN:P.127` (the confirmed codes, top first). The OSM wiki
+  (https://wiki.openstreetmap.org/wiki/Key:traffic_sign) separates unrelated signs with `;` and related ones (a sign
+  and its additional plate) with `,`; the country prefix may be repeated before each code. Our supplementary plate
+  is the sign's `extra`, not a sign of its own, so only `;` is used. A gantry's boards stay one node each: they hang
+  over different lanes at different points, and a combined node would lose which lane each is for.
+
+Check on the first ride (Đồng Văn Cống, 24 Nov; 19 poles of 2 signs and one gantry of 5 boards marked by hand):
+before, 6 of the 19 poles had their two signs 0.3-1.25 m apart (the same sightings but other ranges); after, every
+pole has one position (0 m), its uncertainty the same or smaller (p2 5.1 → 4.4 m, p14 8.2 → 5.8 m). The gantry's
+boards, 9.6-15.0 m ahead of photo 233 before, are all 11.2 m ahead of it, each over its lane (0, -2.4, -3.5, -4.7,
+-7.0 m across), ±2.9 m along the road (was 4.4-8 m each).

@@ -49,8 +49,11 @@ export type Place = {
   pins: { algorithm?: Pin; contributor?: Pin; google?: GooglePin | null; agent?: Pin | null }
   google?: Record<string, any> | null
   layer?: Layer
-  /** A traffic sign: QCVN 41 code and group, which way a driver facing it drives, left / right / over the road. */
-  sign?: { code?: string; group?: string; facingDeg?: number | null; side?: string }
+  /** A traffic sign: QCVN 41 code and group, which way a driver facing it drives, left / right / over the road;
+   *  lane (over the road: 1 = rightmost); post = the id of the pole / gantry it shares with other signs of the ride,
+   *  order = its place on it (1 = top; on a gantry the leftmost board). See signPosts.ts. */
+  sign?: { code?: string; group?: string; facingDeg?: number | null; side?: string; lane?: number | null
+    post?: string | null; order?: number | null }
   /** An address: the place (shop) whose house number it is, when there is one. */
   placeRef?: string | null
   /** An address, optional (newer processing): where the number was read (plate | sign | painted | other), the old

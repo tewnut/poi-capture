@@ -83,7 +83,8 @@ export function gpx(places: Published[], removed: Removed[]) {
 
 /** DBF field names (at most 10 characters) for the CSV columns. lat / lon are numbers (N 18.7), the rest text (C). */
 export const DBF_FIELDS: Record<(typeof CSV_COLS)[number], string> = {
-  id: 'id', change: 'change', name: 'name', category: 'category', layer: 'layer', signCode: 'sign_code', status: 'status',
+  id: 'id', change: 'change', name: 'name', category: 'category', layer: 'layer', signCode: 'sign_code', signPost: 'sign_post',
+  signOrder: 'sign_order', status: 'status',
   phone: 'phone', houseNumber: 'house_no', street: 'street', openingHours: 'open_hours', website: 'website',
   fromGoogle: 'from_ggl', lat: 'lat', lon: 'lon', pinSource: 'pin_source', session: 'session', sessionName: 'sess_name',
   captured: 'captured', reviewer: 'reviewer', reviewedAt: 'reviewed', comment: 'comment', photos: 'photos',
