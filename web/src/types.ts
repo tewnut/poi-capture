@@ -53,6 +53,9 @@ export type Place = {
   sign?: { code?: string; group?: string; facingDeg?: number | null; side?: string }
   /** An address: the place (shop) whose house number it is, when there is one. */
   placeRef?: string | null
+  /** An address, optional (newer processing): where the number was read (plate | sign | painted | other), the old
+   *  number on the same plate, other numbers on the gate, read only in part. Read by addresses.ts addressExtras. */
+  numbering?: { source?: string | null; oldNumber?: string | null; altNumbers?: string[] | null; partial?: boolean } | null
 }
 
 export const layerOf = (p: Place): Layer => p.layer || 'place'

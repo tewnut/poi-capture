@@ -221,3 +221,13 @@ describe('addresses and signs (docs/sweep-targets.md)', () => {
     expect(c[3].split(',')[cols.indexOf('layer')]).toBe('place')
   })
 })
+
+import { partlyRead } from './publish'
+describe('partly read house numbers', () => {
+  it('are recognised and never become addr:housenumber', () => {
+    expect(partlyRead('1…')).toBe(true)
+    expect(partlyRead('19...')).toBe(true)
+    expect(partlyRead('170-172')).toBe(false)
+    expect(partlyRead(undefined)).toBe(false)
+  })
+})

@@ -3,7 +3,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Photo from './Photo.vue'
 import CropEditor from './CropEditor.vue'
-import { state, rkey, reviewOf, putReview, gstat, photoUrl, putPhoto, delPhoto, cropPhoto } from '../store'
+import { state, rkey, reviewOf, putReview, gstat, photoUrl, putPhoto, delPhoto, cropPhoto, seqFlags, dupes } from '../store'
+import { placeHints } from '../hints'
+import { duplicateComment, type Dupe } from '../dupes'
+import { to } from '../router'
 import { keptPhotos, removedPhotos } from '../photos'
 import { confirmFields, pendingSuggestions, suggestionKind, missingStreet } from '../fields'
 import { t } from '../i18n'
@@ -258,6 +261,19 @@ function marks(k: FieldKey) {
   return out
 }
 
+// hints (hints.ts): confidence, a house number's source / partly read / out of order; the same place on another ride
+const hints = computed(() => placeHints(props.place, r.value, { seq: seqFlags.value.get(props.place.id) }))
+const sameOn = computed<Dupe[]>(() => dupes.value.get(props.place.id) || [])
+const DECISION = { todo: 'decTodo', confirmed: 'decConfirmed', rejected: 'decRejected', visit: 'decVisit' } as const
+/** Reject this one as a duplicate of [d]: the review has no reason field, so the comment says which one it duplicates. */
+async function rejectAsDupe(d: Dupe) {
+  if (ro.value) return
+  r.value.comment = duplicateComment(d, r.value.comment)
+  await decide('rejected')
+}
+/** A value read on the photos: not one filled from Google / the website, nor the ride's road. */
+const fromPhoto = (k: FieldKey) => { const s = props.place.fields[k]?.source; return !!props.place.fields[k] && (!s || !['google', 'website', 'ride'].includes(s)) }
+
 const signCodeNow = computed(() => r.value.fields.signCode?.value || props.place.fields.signCode?.value || props.place.sign?.code || '')
 const signArt = computed(() => signSvg(signCodeNow.value, r.value.fields.signText?.value || props.place.fields.signText?.value))
 </script>
@@ -273,7 +289,7 @@ const signArt = computed(() => signSvg(signCodeNow.value, r.value.fields.signTex
           <span v-if="layer !== 'place'" class="chip">{{ t('layerOne_' + layer) }}</span>
           <input v-else class="cat" :disabled="ro" :value="r.category ?? place.category ?? ''" :placeholder="t('category')" @change="r.category = ($event.target as HTMLInputElement).value; save()" />
           · <span :class="['chip', place.status !== 'open' ? 'bad' : '']">{{ t('status_' + place.status) }}</span>
-          <span v-if="place.confidence === 'low'" class="chip warn">{{ t('namePartly') }}</span>
+          <span v-for="h in hints" :key="h.key" :class="['chip', 'hint', h.cls]" :title="h.title">{{ h.text }}</span>
           <span v-if="noStreet" class="chip warn">{{ t('noStreet') }}</span>
           <span v-if="layer === 'place'" :class="['chip', 'g-' + gstat(place)]">{{ t(G_LABEL[gstat(place)]) }}</span>
         </div>
@@ -318,6 +334,20 @@ const signArt = computed(() => signSvg(signCodeNow.value, r.value.fields.signTex
     </div>
     <p v-if="place.note" class="note">{{ place.note }}</p>
 
+    <section v-if="sameOn.length" class="dupes">
+      <h3>{{ t('dupesH') }}</h3>
+      <p class="muted small">{{ t('dupesHint') }}</p>
+      <div v-for="d in sameOn" :key="d.ds.id + '|' + d.place.id" class="dupe">
+        <div class="dtext">
+          <b>{{ d.place.name }}</b>
+          <div class="muted small">{{ d.ds.session.name || d.ds.id }} · {{ d.distM }} m · {{ t('dupeWhy_' + d.why) }}
+            · {{ t('dupeThere', { d: t(DECISION[reviewOf(d.ds.id, d.place).decision]) }) }}</div>
+        </div>
+        <RouterLink class="button secondary small" :to="to.place(d.ds.id, d.place.id)">{{ t('dupeOpen') }}</RouterLink>
+        <button v-if="!ro && r.decision !== 'rejected'" class="secondary small" :title="t('rejectDupeTitle')" @click="rejectAsDupe(d)">{{ t('rejectDupe') }}</button>
+      </div>
+    </section>
+
     <h3>{{ t('whatPhotosSay') }}</h3>
     <table class="fields">
       <tr v-for="k in keys" :key="k" :class="rowClass(k)">
@@ -325,7 +355,7 @@ const signArt = computed(() => signSvg(signCodeNow.value, r.value.fields.signTex
           <button v-if="marks(k).length" type="button" class="marks" :aria-expanded="openMarks === k" :aria-label="t('marksT')"
             @click="openMarks = openMarks === k ? null : k"><span v-for="(m, i) in marks(k)" :key="i" :class="['mark', m.cls]" :title="m.tip"></span></button>
           <ul v-if="openMarks === k" class="marktips"><li v-for="(m, i) in marks(k)" :key="i"><span :class="['mark', m.cls]"></span>{{ m.tip }}</li></ul>
-          <div v-if="place.fields[k] && !place.fields[k]?.source" class="src">{{ t('photoN', { n: place.fields[k]?.photo ?? '?' }) }}<span v-if="place.fields[k]?.sure && place.fields[k]?.sure !== 'high'"> · {{ t('sure_' + place.fields[k]?.sure) }}</span></div>
+          <div v-if="fromPhoto(k)" class="src">{{ t('photoN', { n: place.fields[k]?.photo ?? '?' }) }}<span v-if="place.fields[k]?.sure && place.fields[k]?.sure !== 'high'"> · {{ t('sure_' + place.fields[k]?.sure) }}</span></div>
           <div v-if="suggestion(k)" class="sugg">{{ t(suggestion(k) === 'ride' ? 'suggestRide' : 'suggestLow') }}</div>
         </th>
         <td><input :disabled="ro" :value="shown(k)" :placeholder="place.fields[k] ? '' : k === 'street' ? t('streetMissing') : t('notOnPhotos')" @change="edit(k, $event)" /></td>
@@ -487,6 +517,12 @@ textarea { width: 100%; min-height: 54px; border: 1px solid var(--line); border-
 footer { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; bottom: 0; background: var(--card); padding: 8px 0 2px; }
 .chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #e7f6ec; color: #2c4f00; font-weight: 600; margin-left: 2px; }
 .chip.bad { background: #fde8ef; color: #9b1c47; } .chip.warn { background: #fdecea; color: #9b1c1c; }
+.dupes { display: grid; gap: 6px; background: #f5f8ff; border-radius: 10px; padding: 8px 10px; }
+.dupes h3 { margin: 0; }
+.dupes p { margin: 0; }
+.dupe { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dupe .dtext { flex: 1; min-width: 160px; }
+.dupe a.button { padding: 4px 10px; font-size: 13px; }
 .chip.g-found { background: #e8f0fe; color: #123f8c; } .chip.g-new { background: #fff0e6; color: #a23b05; } .chip.g-todo { background: #eef0f2; color: #555; }
 
 /* touch: 44 px targets (buttons, field checks, thumbnails, position chips) */

@@ -13,7 +13,8 @@ import Photo from './components/Photo.vue'
 import AdminPanel from './components/AdminPanel.vue'
 import SettingsPage from './components/SettingsPage.vue'
 import ReviewBar from './components/ReviewBar.vue'
-import { state, load, remove, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, stageOf, STAGES } from './store'
+import { state, load, remove, reviewOf, photoBlob, gstat, openDataset, openPlace, openTask, stageOf, STAGES, seqFlags, dupes } from './store'
+import { placeHints } from './hints'
 import { to } from './router'
 import { t, relTime } from './i18n'
 import { keptPhotos, exportNames } from './photos'
@@ -529,6 +530,8 @@ function cover(p: Place) { const d = openDataset.value; return d ? keptPhotos(p,
                 <b>{{ i + 1 }}. {{ p.name }}</b>
                 <div class="muted"><span v-if="layerOf(p) !== 'place'" :class="['lymark', 'ly-' + layerOf(p)]"></span>{{ placeLine(p) }}</div>
                 <span :class="['chip', reviewOf(openDataset.id, p).decision]">{{ t(DECISION[reviewOf(openDataset.id, p).decision]) }}</span>
+                <span v-for="h in placeHints(p, reviewOf(openDataset.id, p), { seq: seqFlags.get(p.id), dupes: dupes.get(p.id), list: true })" :key="h.key"
+                  :class="['chip', 'hint', h.cls]" :title="h.title">{{ h.text }}</span>
                 <span v-if="gstat(p) === 'new'" class="chip new">{{ t('notOnGoogleChip') }}</span>
                 <span v-if="missingStreet(p, reviewOf(openDataset.id, p))" class="chip new">{{ t('noStreet') }}</span>
                 <span v-else-if="reviewOf(openDataset.id, p).decision === 'confirmed' && pendingSuggestions(p, reviewOf(openDataset.id, p)).length" class="chip visit"

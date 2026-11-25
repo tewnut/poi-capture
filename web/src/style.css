@@ -92,6 +92,11 @@ button.small { padding: 4px 10px; font-size: 13px; }
 .lymark { display: inline-block; width: 9px; height: 9px; margin-right: 5px; vertical-align: 0; }
 .lymark.ly-address { background: #475569; border-radius: 2px; }
 .lymark.ly-sign { border: 2px solid #d6336c; border-radius: 50%; background: #fff; width: 7px; height: 7px; }
+/* review hints (hints.ts), in the list and the review panel: a warning (unsure, partly read, out of order), a note
+   (also on another ride, fairly sure), where a house number was read (plate, shop sign, painted) */
+.chip.hint.h-warn { background: #fff4db; color: #8a5a00; }
+.chip.hint.h-info { background: #e6f0fb; color: #1d4f8a; }
+.chip.hint.h-src { background: #eef0f2; color: #475569; font-weight: 500; }
 
 .ptitle { display: flex; justify-content: space-between; align-items: center; }
 .prow { display: flex; gap: 10px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: #fff; padding: 6px; }

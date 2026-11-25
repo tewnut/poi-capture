@@ -6,6 +6,8 @@ import type { Dataset, Review, RemovalReview, Place, Decision, Layer } from './t
 import type { Imported } from './importer'
 import { googleMergeable } from './fields'
 import type { Conflict, ReviewSet } from './merge'
+import { seqEntries, sequenceFlags, type SeqFlag } from './addresses'
+import { crossRideDupes, type Dupe } from './dupes'
 
 const meta = createStore('poi-capture-reviewer', 'meta')      // dataset json, reviews
 const blobs = createStore('poi-capture-reviewer-files', 'files') // photos: `${datasetId}/${path}`
@@ -202,6 +204,17 @@ export async function putRemoval(ds: string, i: number, decision: RemovalReview[
 
 export const openDataset = computed(() => state.datasets.find((d) => d.id === state.open) || null)
 export const openPlace = computed(() => openDataset.value?.places.find((p) => p.id === state.place) || null)
+/** The open session's house numbers out of order along the ride (addresses.ts), with the reviewer's edits. */
+export const seqFlags = computed<Map<string, SeqFlag>>(() => {
+  const d = openDataset.value
+  return d ? sequenceFlags(seqEntries(d.places, (p) => reviewOf(d.id, p))) : new Map()
+})
+/** The open session's places that are also on another session shown on the map (dupes.ts). */
+export const dupes = computed<Map<string, Dupe[]>>(() => {
+  const d = openDataset.value
+  const others = d ? state.datasets.filter((x) => x.id !== d.id && state.shown.has(x.id)) : []
+  return d && others.length ? crossRideDupes(d, others, (ds, p) => reviewOf(ds.id, p)) : new Map()
+})
 export const openTask = computed(() => (state.task == null ? null : openDataset.value?.tasks[state.task] || null))
 
 export function counts(d: Dataset) {

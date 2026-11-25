@@ -114,9 +114,12 @@ export function osmHours(v: string | null): string | null {
   return `Mo-Su ${t(m[1], m[2])}-${t(m[3], m[4])}`
 }
 
-/** OSM tags of a house number: only the address, and only with a confirmed number. */
+/** A house number with unread digits ("1…", "…01", "19..."): never published as an address. */
+export const partlyRead = (n: unknown) => typeof n === 'string' && /…|\.\.\./.test(n)
+
+/** OSM tags of a house number: only the address, and only with a confirmed, fully read number. */
 function addressTags(r: Record<string, any>): Record<string, string> | null {
-  if (!r.houseNumber) return null
+  if (!r.houseNumber || partlyRead(r.houseNumber)) return null
   const tags: Record<string, string> = { 'addr:housenumber': r.houseNumber }
   if (r.street) tags['addr:street'] = r.street.split(',')[0].trim()
   return tags
@@ -157,7 +160,7 @@ export function osm(places: Published[]) {
     }
     const tags: Record<string, string> = { name: r.name, ...(OSM_TAGS[r.category || ''] || {}) }
     if (r.phone) tags.phone = r.phone.split(/[,;]\s*/).map((p: string) => p.replace(/^0/, '+84 ').replace(/\s+/g, ' ')).join(';')
-    if (r.houseNumber) tags['addr:housenumber'] = r.houseNumber
+    if (r.houseNumber && !partlyRead(r.houseNumber)) tags['addr:housenumber'] = r.houseNumber
     if (r.street) tags['addr:street'] = r.street.split(',')[0].trim()
     const oh = osmHours(r.openingHours)
     if (oh) tags.opening_hours = oh
