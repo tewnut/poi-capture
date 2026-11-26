@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings: the list of rows and its pages (offline maps, about). -->
+<resources>
+    <string name="settings_row_contributor">Contributor</string>
+    <string name="settings_not_set">Not set</string>
+    <string name="settings_maps_title">Offline maps</string>
+    <string name="settings_maps_none">No region downloaded</string>
+    <plurals name="settings_maps_summary">
+        <item quantity="one">%1$d region · %2$s</item>
+        <item quantity="other">%1$d regions · %2$s</item>
+    </plurals>
+    <string name="settings_row_tasks">Tasks</string>
+    <string name="settings_tasks_empty">No tasks</string>
+    <plurals name="settings_tasks_open">
+        <item quantity="one">%1$d to do</item>
+        <item quantity="other">%1$d to do</item>
+    </plurals>
+    <string name="settings_upload_connected">Connected</string>
+    <string name="settings_upload_not_set">Not set up</string>
+    <string name="settings_about">About</string>
+    <string name="settings_about_version">Version %1$s</string>
+    <string name="settings_about_licences">Licences</string>
+    <string name="about_lic_app">Quét Phố app</string>
+    <string name="about_lic_osm">Road data © OpenStreetMap contributors</string>
+    <string name="about_lic_vnts">Traffic-sign detector trained on the Vietnam Road Signs Dataset (VNTS) by Thanh Hiep Vo</string>
+    <string name="about_lic_font">Be Vietnam Pro typeface</string>
+    <string name="about_notice">The full texts are in the NOTICE and LICENSE files of the app\'s source code.</string>
+
+    <plurals name="maps_on_phone">
+        <item quantity="one">%1$d region on this phone</item>
+        <item quantity="other">%1$d regions on this phone</item>
+    </plurals>
+    <string name="maps_update_all">Update all</string>
+    <string name="maps_downloaded">Downloaded</string>
+    <string name="maps_add">Add a region</string>
+    <string name="maps_refresh">Refresh list</string>
+    <string name="maps_no_list">The list of regions isn\'t loaded yet.</string>
+    <string name="maps_search">Search a region, e.g. da nang</string>
+    <string name="maps_search_clear">Clear search</string>
+    <string name="maps_suggested">Suggested · where you are</string>
+    <string name="maps_all_downloaded">Every region in the list is on this phone.</string>
+    <string name="maps_no_match">No region matches “%1$s”.</string>
+    <string name="maps_source">List source and pack file</string>
+    <string name="maps_zone_north">North</string>
+    <string name="maps_zone_central">Central</string>
+    <string name="maps_zone_south">South</string>
+    <plurals name="maps_regions">
+        <item quantity="one">%1$d region</item>
+        <item quantity="other">%1$d regions</item>
+    </plurals>
+    <string name="maps_installed_line">%1$s · data from %2$s · downloaded %3$s</string>
+    <string name="maps_newer">New data: %1$s (%2$s)</string>
+</resources>

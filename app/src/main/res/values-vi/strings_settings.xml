@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cài đặt: danh sách các mục và từng trang (bản đồ ngoại tuyến, giới thiệu). -->
+<resources>
+    <string name="settings_row_contributor">Người thu thập</string>
+    <string name="settings_not_set">Chưa đặt</string>
+    <string name="settings_maps_title">Bản đồ ngoại tuyến</string>
+    <string name="settings_maps_none">Chưa tải vùng nào</string>
+    <plurals name="settings_maps_summary">
+        <item quantity="other">%1$d vùng · %2$s</item>
+    </plurals>
+    <string name="settings_row_tasks">Nhiệm vụ</string>
+    <string name="settings_tasks_empty">Chưa có việc</string>
+    <plurals name="settings_tasks_open">
+        <item quantity="other">%1$d việc cần làm</item>
+    </plurals>
+    <string name="settings_upload_connected">Đã kết nối</string>
+    <string name="settings_upload_not_set">Chưa cấu hình</string>
+    <string name="settings_about">Giới thiệu</string>
+    <string name="settings_about_version">Phiên bản %1$s</string>
+    <string name="settings_about_licences">Giấy phép</string>
+    <string name="about_lic_app">Ứng dụng Quét Phố</string>
+    <string name="about_lic_osm">Dữ liệu đường © OpenStreetMap contributors</string>
+    <string name="about_lic_vnts">Bộ nhận biển báo, huấn luyện trên bộ dữ liệu Vietnam Road Signs Dataset (VNTS) của Thanh Hiep Vo</string>
+    <string name="about_lic_font">Phông chữ Be Vietnam Pro</string>
+    <string name="about_notice">Toàn văn giấy phép có trong tệp NOTICE và LICENSE của mã nguồn ứng dụng.</string>
+
+    <plurals name="maps_on_phone">
+        <item quantity="other">%1$d vùng trên máy</item>
+    </plurals>
+    <string name="maps_update_all">Cập nhật tất cả</string>
+    <string name="maps_downloaded">Đã tải</string>
+    <string name="maps_add">Thêm vùng</string>
+    <string name="maps_refresh">Làm mới danh sách</string>
+    <string name="maps_no_list">Chưa tải danh sách vùng.</string>
+    <string name="maps_search">Tìm vùng, ví dụ da nang</string>
+    <string name="maps_search_clear">Xoá ô tìm</string>
+    <string name="maps_suggested">Gợi ý · nơi bạn đang ở</string>
+    <string name="maps_all_downloaded">Đã tải tất cả các vùng trong danh sách.</string>
+    <string name="maps_no_match">Không có vùng nào khớp “%1$s”.</string>
+    <string name="maps_source">Nguồn danh sách và tệp gói</string>
+    <string name="maps_zone_north">Miền Bắc</string>
+    <string name="maps_zone_central">Miền Trung</string>
+    <string name="maps_zone_south">Miền Nam</string>
+    <plurals name="maps_regions">
+        <item quantity="other">%1$d vùng</item>
+    </plurals>
+    <string name="maps_installed_line">%1$s · dữ liệu ngày %2$s · tải ngày %3$s</string>
+    <string name="maps_newer">Có dữ liệu mới: %1$s (%2$s)</string>
+</resources>

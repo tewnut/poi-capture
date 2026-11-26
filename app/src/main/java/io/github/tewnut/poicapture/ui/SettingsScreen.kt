@@ -1,127 +1,228 @@
 package io.github.tewnut.poicapture.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.tewnut.poicapture.AppLanguage
 import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.R
-import io.github.tewnut.poicapture.core.CapturePlan
-import io.github.tewnut.poicapture.core.Onboarding
-import androidx.compose.ui.text.input.KeyboardType
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
+import io.github.tewnut.poicapture.capture.CaptureService
+import io.github.tewnut.poicapture.capture.UploadServer
+import io.github.tewnut.poicapture.ui.settings.CardHead
+import io.github.tewnut.poicapture.ui.settings.NavGroup
+import io.github.tewnut.poicapture.ui.settings.NavItem
+import io.github.tewnut.poicapture.ui.settings.OfflineMapsPage
+import io.github.tewnut.poicapture.ui.settings.SectionLabel
+import io.github.tewnut.poicapture.ui.settings.SettingsLogic
+import io.github.tewnut.poicapture.ui.settings.SettingsPage
+import io.github.tewnut.poicapture.ui.settings.WhiteBox
+import io.github.tewnut.poicapture.ui.settings.installedPacks
+
+/** The pages of Settings; [HOME] is the list that opens them. */
+private object Page {
+    const val HOME = "home"
+    const val CONTRIBUTOR = "contributor"
+    const val LANGUAGE = "language"
+    const val MAPS = "maps"
+    const val TASKS = "tasks"
+    const val UPLOAD = "upload"
+    const val ADVANCED = "advanced"
+    const val ABOUT = "about"
+}
 
 /**
- * Settings (first filled in by the onboarding): the contributor ID, language, offline road data, and folded away the
- * advanced options (mount angle, photo kinds). Every change is saved as it is made.
+ * Settings (first filled in by the onboarding): a short list of rows, each with its current value, each opening its own
+ * page (contributor ID, language, offline maps, tasks, upload server, advanced, about). Every change is saved as it is
+ * made; back (the arrow or the system back) goes from a page to the list, from the list out of Settings.
  */
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
     val ctx = LocalContext.current
     var id by remember { mutableStateOf(Prefs.contributorId(ctx)) }
     var settings by remember { mutableStateOf(Prefs.settings(ctx)) }
+    var page by rememberSaveable { mutableStateOf(Page.HOME) }
 
     fun save() {
         Prefs.saveContributorId(ctx, id)
         Prefs.saveSettings(ctx, settings)
     }
 
-    // every change is saved as it is made; leaving saves once more (back arrow or the system back)
+    // every change is saved as it is made; leaving saves once more
     fun leave() { save(); onBack() }
-    androidx.activity.compose.BackHandler { leave() }
+    fun home() { save(); page = Page.HOME }
+    androidx.activity.compose.BackHandler { if (page == Page.HOME) leave() else home() }
 
-    Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
-    ScreenHeader(stringResource(R.string.settings_title), onBack = ::leave)
-    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)) {
-
-        SettingsCard("🪪", stringResource(R.string.settings_contributor), stringResource(R.string.settings_email_ok)) {
-            ContributorIdField(id, { id = it; save() })
-        }
-
-        SettingsCard("🌐", stringResource(R.string.language_title)) { LanguageList() }
-
-        SettingsCard("🗺️", stringResource(R.string.settings_road_data)) { RoadPacksCard() }
-
-        SettingsCard("📋", stringResource(R.string.settings_tasks)) { TasksCard() }
-
-        SettingsCard("☁️", stringResource(R.string.upload_title), stringResource(R.string.upload_sub)) { UploadServerCard() }
-
-        var advanced by remember { mutableStateOf(false) }
-        SettingsRow("⚙️", stringResource(R.string.settings_advanced), stringResource(R.string.settings_advanced_sub),
-            trailing = if (advanced) "▴" else "▾") { advanced = !advanced }
-        if (advanced) SettingsCard("🛵", stringResource(R.string.settings_mount_title), stringResource(R.string.settings_mount_hint)) {
-            val deg = settings.mountOffsetDeg.toInt()
-            Stepper(if (deg == 0) "0°" else "${kotlin.math.abs(deg)}°",
-                onMinus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg - 5).coerceAtLeast(-45.0)); save() },
-                onPlus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg + 5).coerceAtMost(45.0)); save() },
-                caption = stringResource(when { deg > 0 -> R.string.settings_mount_forward; deg < 0 -> R.string.settings_mount_backward
-                    else -> R.string.settings_mount_square }),
-                minus = "−5°", plus = "+5°")
-        }
-
-        if (advanced) SettingsCard("🏷️", stringResource(R.string.settings_roles_title), stringResource(R.string.settings_roles_hint)) {
-            var ask by remember { mutableStateOf(Prefs.askPhotoRole(ctx)) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(stringResource(R.string.settings_roles_ask), modifier = Modifier.weight(1f), color = Palette.Ink)
-                androidx.compose.material3.Switch(ask, { ask = it; Prefs.setAskPhotoRole(ctx, it) })
+    when (page) {
+        Page.CONTRIBUTOR -> SettingsPage(stringResource(R.string.settings_row_contributor), ::home) {
+            item {
+                WhiteBox {
+                    CardHead("🪪", stringResource(R.string.settings_contributor), stringResource(R.string.settings_email_ok))
+                    ContributorIdField(id, { id = it; save() }, onDone = ::home)
+                }
             }
-            if (ask) PhotoRolesCard()
         }
+        Page.LANGUAGE -> SettingsPage(stringResource(R.string.language_title), ::home) {
+            item { WhiteBox { LanguageList() } }
+        }
+        Page.MAPS -> OfflineMapsPage(onBack = ::home)
+        Page.TASKS -> SettingsPage(stringResource(R.string.settings_row_tasks), ::home) {
+            item {
+                WhiteBox {
+                    CardHead("📋", stringResource(R.string.settings_tasks))
+                    TasksCard()
+                }
+            }
+        }
+        Page.UPLOAD -> SettingsPage(stringResource(R.string.upload_title), ::home) {
+            item {
+                WhiteBox {
+                    CardHead("☁️", stringResource(R.string.upload_title), stringResource(R.string.upload_sub))
+                    UploadServerCard()
+                }
+            }
+        }
+        Page.ADVANCED -> SettingsPage(stringResource(R.string.settings_advanced), ::home) {
+            item {
+                WhiteBox {
+                    CardHead("🛵", stringResource(R.string.settings_mount_title), stringResource(R.string.settings_mount_hint))
+                    val deg = settings.mountOffsetDeg.toInt()
+                    Stepper(if (deg == 0) "0°" else "${kotlin.math.abs(deg)}°",
+                        onMinus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg - 5).coerceAtLeast(-45.0)); save() },
+                        onPlus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg + 5).coerceAtMost(45.0)); save() },
+                        caption = stringResource(when { deg > 0 -> R.string.settings_mount_forward; deg < 0 -> R.string.settings_mount_backward
+                            else -> R.string.settings_mount_square }),
+                        minus = "−5°", plus = "+5°")
+                }
+            }
+            item {
+                WhiteBox {
+                    CardHead("🏷️", stringResource(R.string.settings_roles_title), stringResource(R.string.settings_roles_hint))
+                    var ask by remember { mutableStateOf(Prefs.askPhotoRole(ctx)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.settings_roles_ask), modifier = Modifier.weight(1f), color = Palette.Ink)
+                        Switch(ask, { ask = it; Prefs.setAskPhotoRole(ctx, it) })
+                    }
+                    if (ask) PhotoRolesCard()
+                }
+            }
+        }
+        Page.ABOUT -> SettingsPage(stringResource(R.string.settings_about), ::home) { aboutPage(onReplayOnboarding) }
+        else -> SettingsHome(id, onOpen = { page = it }, onBack = ::leave)
+    }
+}
 
-        SettingsRow("📖", stringResource(R.string.settings_replay_onboarding), stringResource(R.string.settings_replay_sub),
-            trailing = "›", onClick = onReplayOnboarding)
+/** The list of Settings: one row per page with its current value. Values are read again each time it shows. */
+@Composable
+private fun SettingsHome(contributorId: String, onOpen: (String) -> Unit, onBack: () -> Unit) {
+    val ctx = LocalContext.current
+    val language = AppLanguage.current(ctx)
+    val storage = remember { SettingsLogic.storage(runCatching { installedPacks(ctx).map { it.bytes } }.getOrDefault(emptyList())) }
+    val openTasks = remember { runCatching { CaptureService.tasks(ctx).all().count { it.open } }.getOrDefault(0) }
+    val uploadOk = remember { UploadServer.configured(ctx) }
+    val version = remember { appVersion(ctx) }
 
+    val items1 = listOf(
+        NavItem("🪪", stringResource(R.string.settings_row_contributor),
+            contributorId.takeIf { it.isNotBlank() }?.let { SettingsLogic.maskContributor(it) } ?: stringResource(R.string.settings_not_set)) { onOpen(Page.CONTRIBUTOR) },
+        NavItem("🌐", stringResource(R.string.language_title), stringResource(when (language) {
+            "vi" -> R.string.language_vi
+            "en" -> R.string.language_en
+            else -> R.string.onboarding_language_phone
+        })) { onOpen(Page.LANGUAGE) },
+    )
+    val items2 = listOf(
+        NavItem("🗺️", stringResource(R.string.settings_maps_title),
+            if (storage.count == 0) stringResource(R.string.settings_maps_none)
+            else pluralStringResource(R.plurals.settings_maps_summary, storage.count, storage.count, SettingsLogic.formatBytes(storage.bytes)),
+            valueColor = if (storage.count == 0) Palette.Amber else Palette.Muted) { onOpen(Page.MAPS) },
+        NavItem("📋", stringResource(R.string.settings_row_tasks),
+            if (openTasks == 0) stringResource(R.string.settings_tasks_empty)
+            else pluralStringResource(R.plurals.settings_tasks_open, openTasks, openTasks)) { onOpen(Page.TASKS) },
+        NavItem("☁️", stringResource(R.string.upload_title),
+            stringResource(if (uploadOk) R.string.settings_upload_connected else R.string.settings_upload_not_set),
+            valueColor = if (uploadOk) Palette.Green else Palette.Amber) { onOpen(Page.UPLOAD) },
+    )
+    val items3 = listOf(
+        NavItem("⚙️", stringResource(R.string.settings_advanced), stringResource(R.string.settings_advanced_sub)) { onOpen(Page.ADVANCED) },
+        NavItem("ℹ️", stringResource(R.string.settings_about),
+            version?.let { stringResource(R.string.settings_about_version, it) } ?: "") { onOpen(Page.ABOUT) },
+    )
+    SettingsPage(stringResource(R.string.settings_title), onBack) {
+        item { NavGroup(items1) }
+        item { NavGroup(items2) }
+        item { NavGroup(items3) }
+    }
+}
+
+private fun appVersion(ctx: Context): String? =
+    runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull()
+
+/** About: the version and when it was installed, the intro again, the licences of what the app is built with. */
+private fun androidx.compose.foundation.lazy.LazyListScope.aboutPage(onReplayOnboarding: () -> Unit) {
+    item {
+        val ctx = LocalContext.current
         // the version, and when this copy was installed or last updated (which build is on the phone)
         val info = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0) }.getOrNull() }
-        if (info != null) {
-            val installed = remember(info) {
-                java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
-                    .format(java.util.Date(info.lastUpdateTime))
+        WhiteBox {
+            Text(stringResource(R.string.app_name), fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, color = Palette.Ink)
+            if (info != null) {
+                val installed = remember(info) {
+                    java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
+                        .format(java.util.Date(info.lastUpdateTime))
+                }
+                Hint(stringResource(R.string.settings_about_version, info.versionName.orEmpty()) + "\n" +
+                    stringResource(R.string.settings_installed, installed))
             }
-            Hint(stringResource(R.string.app_name) + " " + info.versionName + "\n" + stringResource(R.string.settings_installed, installed),
-                Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp))
         }
     }
+    item {
+        NavGroup(listOf(NavItem("📖", stringResource(R.string.settings_replay_onboarding), stringResource(R.string.settings_replay_sub),
+            onClick = onReplayOnboarding)))
     }
+    item { SectionLabel(stringResource(R.string.settings_about_licences)) }
+    item {
+        val lines = listOf(
+            stringResource(R.string.about_lic_app) to "Apache License 2.0",
+            stringResource(R.string.about_lic_osm) to "ODbL 1.0",
+            stringResource(R.string.about_lic_vnts) to "CC BY-SA 4.0",
+            "YOLOX (Megvii)" to "Apache License 2.0",
+            "ONNX Runtime (Microsoft)" to "MIT License",
+            stringResource(R.string.about_lic_font) to "SIL Open Font License 1.1",
+        )
+        WhiteBox {
+            lines.forEachIndexed { i, (what, licence) ->
+                Column(Modifier.fillMaxWidth()) {
+                    Text(what, color = Palette.Ink, fontSize = 14.sp)
+                    Text(licence, color = Palette.Green, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                }
+                if (i < lines.lastIndex) HorizontalDivider(color = Palette.Line)
+            }
+        }
+    }
+    item { Hint(stringResource(R.string.about_notice), Modifier.padding(horizontal = 4.dp)) }
 }
 
 /** System / English / Tiếng Việt: the app's UI language (Android 13+: the system per-app language). */
@@ -151,41 +252,4 @@ internal fun Context.findActivity(): Activity? {
         c = c.baseContext
     }
     return null
-}
-
-/** A settings section: an icon in a green circle, the title (and a line under it), then its controls. */
-@Composable
-private fun SettingsCard(icon: String, title: String, sub: String? = null, content: @Composable () -> Unit) {
-    Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Palette.Line), elevation = CardDefaults.cardElevation(0.dp)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SectionHead(icon, title, sub)
-            content()
-        }
-    }
-}
-
-/** A tappable settings line (opens or folds something): icon, title, one line under it, a mark on the right. */
-@Composable
-private fun SettingsRow(icon: String, title: String, sub: String, trailing: String, onClick: () -> Unit) {
-    Card(onClick = onClick, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Palette.Line), elevation = CardDefaults.cardElevation(0.dp)) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { SectionHead(icon, title, sub) }
-            Text(trailing, fontSize = 22.sp, color = Palette.Muted, modifier = Modifier.padding(start = 8.dp))
-        }
-    }
-}
-
-@Composable
-private fun SectionHead(icon: String, title: String, sub: String?) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Box(Modifier.size(40.dp).background(Palette.GreenLight, CircleShape), contentAlignment = Alignment.Center) {
-            Text(icon, fontSize = 18.sp)
-        }
-        Column(Modifier.weight(1f)) {
-            Text(title, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-            if (sub != null) Hint(sub)
-        }
-    }
 }
