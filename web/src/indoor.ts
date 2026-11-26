@@ -1,7 +1,7 @@
 // Indoor walks (docs/indoor.md): one building, several levels. The map shows one level at a time (its places,
 // its part of the walk, its photos); the review panel has level and unit fields; the OSM export writes level=* and
 // addr:unit=* with the building's address (never a street from the phone).
-import type { Building, Dataset, Place, Review, Shot } from './types'
+import type { Building, Dataset, FloorPlan, Place, PlanUnit, Review, Shot, ToMap } from './types'
 
 export const isIndoor = (d: Dataset | null | undefined) => d?.session.kind === 'indoor'
 /** A place of an indoor walk (the processing marks them; a level or unit says it too). */
@@ -122,4 +122,61 @@ export function osmLevel(name: unknown, names: string[] = []): number | null {
   if (n === 'G') return 0
   if (/^\d+$/.test(n)) return names.map((x) => normLevel(x)).includes('G') ? Number(n) : Number(n) - 1
   return null
+}
+
+// ---------- floor plans (docs/indoor.md §7) ----------
+
+/** Plan pixel (x right, y down) -> metres [east, north] of toMap's origin: rotated rotationDeg clockwise (as seen
+ *  on the map), scaled, y flipped. The same as the processing's indoor.py plan_xy. */
+export function planXY(px: number, py: number, tm: ToMap): [number, number] {
+  const th = ((tm.rotationDeg || 0) * Math.PI) / 180
+  const s = tm.scaleMPerPx, c = Math.cos(th), sn = Math.sin(th)
+  return [s * (px * c - py * sn), -s * (px * sn + py * c)]
+}
+
+/** Plan pixel -> [lat, lon] (the processing's local frame: 110540 m per degree of latitude, 111320 cos(lat) per
+ *  degree of longitude; indoor.py to_ll). */
+export function planToLatLon(px: number, py: number, tm: ToMap): [number, number] {
+  const [e, n] = planXY(px, py, tm)
+  const [lat0, lon0] = tm.origin
+  return [lat0 + n / 110540, lon0 + e / (111320 * Math.cos((lat0 * Math.PI) / 180))]
+}
+
+/** The plan image's top-left, top-right and bottom-left corners on the map (what the overlay is pinned to). */
+export function planCorners(p: FloorPlan): [[number, number], [number, number], [number, number]] {
+  const [w, h] = p.size
+  return [planToLatLon(0, 0, p.toMap), planToLatLon(w, 0, p.toMap), planToLatLon(0, h, p.toMap)]
+}
+
+/** The CSS matrix(a, b, c, d, e, f) (transform-origin 0 0) that puts a w x h image's corners (0, 0), (w, 0),
+ *  (0, h) on the screen points p0, p1, p2: an affine map, so a rotated, scaled plan stays exact. */
+export function overlayMatrix(p0: { x: number; y: number }, p1: { x: number; y: number }, p2: { x: number; y: number },
+  w: number, h: number): [number, number, number, number, number, number] {
+  return [(p1.x - p0.x) / w, (p1.y - p0.y) / w, (p2.x - p0.x) / h, (p2.y - p0.y) / h, p0.x, p0.y]
+}
+
+/** The plans of one level (none when every level is shown: they would lie on top of each other). */
+export function plansOn(d: Dataset, level: string | null | undefined): FloorPlan[] {
+  if (!level) return []
+  return (d.plans || []).filter((p) => normLevel(p.level) === level)
+}
+
+/** The plan units of one level (none when every level is shown). */
+export function planUnitsOn(d: Dataset, level: string | null | undefined): PlanUnit[] {
+  if (!level) return []
+  return (d.planUnits || []).filter((u) => normLevel(u.level) === level)
+}
+
+/** The place in a plan unit (by its folder), if any. */
+export function placeOfUnit(d: Dataset, u: PlanUnit): Place | undefined {
+  return u.place ? d.places.find((p) => p.folder === u.place) : undefined
+}
+
+/** [lat, lon] -> plan pixel (planToLatLon inverted; indoor.py ll_to_plan). */
+export function latLonToPlan(lat: number, lon: number, tm: ToMap): [number, number] {
+  const [lat0, lon0] = tm.origin
+  const e = (lon - lon0) * 111320 * Math.cos((lat0 * Math.PI) / 180), n = (lat - lat0) * 110540
+  const th = ((tm.rotationDeg || 0) * Math.PI) / 180
+  const x = e / tm.scaleMPerPx, y = -n / tm.scaleMPerPx
+  return [x * Math.cos(th) + y * Math.sin(th), -x * Math.sin(th) + y * Math.cos(th)]
 }

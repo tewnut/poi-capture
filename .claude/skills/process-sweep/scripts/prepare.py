@@ -12,6 +12,10 @@ Writes into <workdir>:
   indoor_track.json  an indoor walk (session.kind "indoor", docs/indoor.md): the walk recomputed from indoor.jsonl
                 (anchors, footprint), [[lat, lon, level], ...]; photos.json then has each photo's corrected position,
                 livePosition (the phone's), level, uncertaintyM, unitHints, and the sheets say the level
+  plans/        an indoor walk with floor plans (session.building.plans or plans/plans.json, docs/indoor.md §7): per
+                plan plan_<level>_<n>.jpg (the straightened board, whole, with a grid and rulers in plan pixels every
+                100 px) and plan_<level>_<n>_tNN.jpg (tiles of it, enlarged, same grid) to outline the units in plan
+                pixels (places.json planUnits); plans.json = the plans with their image's path (build.py reads it)
 Prints the ride's target (session.target: shops | addresses | signs; what to read, docs/sweep-targets.md).
 """
 import json, math, os, sys, zipfile
@@ -168,8 +172,14 @@ def sheet_label(p):
     lines = [f"#{p['idx']}" + (f"  lvl {p['level']}" if p.get('level') not in (None, '') else '')]
     if p.get('trigger') == 'directory':
         lines.append('DIRECTORY')
+    if p.get('trigger') == 'plan':
+        lines.append('FLOOR PLAN')
     if p.get('unitHints'):
         lines.append(' '.join(u + '?' for u in p['unitHints'][:4]))
+    nu = p.get('nearUnit') or {}
+    if nu.get('unit'):   # the app's guess of the unit in front (from the plan): a hint
+        d = nu.get('distanceM')
+        lines.append(f"near {nu['unit']}" + (f" {d:.0f}m" if isinstance(d, (int, float)) else '') + '?')
     return lines
 
 
@@ -221,7 +231,168 @@ def target_line(session):
     return 'target: ' + TARGETS.get(t, f'{t} (unknown: read it as shops)')
 
 
-def indoor_positions(src, work, session, items, photos):
+def find_plans(src, work, session):
+    """The walk's floor plans (indoor.plans_of: session.building.plans, else plans/plans.json), each with `path`: its
+    image in the session folder / export (or <work>/raw), checked to stay inside it; a plan whose image is missing
+    gets path None."""
+    dirs = [d for d in (src, os.path.join(work, 'raw')) if d and os.path.isdir(d)]
+    pj = None
+    for d in dirs:
+        f = os.path.join(d, 'plans', 'plans.json')
+        if os.path.isfile(f):
+            try:
+                pj = json.load(open(f, encoding='utf-8'))
+            except ValueError:
+                pj = None
+            break
+    out = []
+    for p in indoor.plans_of(session, pj):
+        p['path'] = None
+        for d in dirs:
+            try:
+                f = inside(d, p['file'])
+            except ValueError:
+                break   # a path leaving the session: not used
+            if os.path.isfile(f):
+                p['path'] = f
+                break
+        out.append(p)
+    return out
+
+
+def _grid_sheet(im, box, k, step, file, title, marks=(), labels=()):
+    """The part `box` (x0, y0, x1, y1 in plan px) of the plan, scaled by k, with a grid every `step` plan px (every
+    5th line stronger) and rulers on all four sides labelled in plan px; marks = [(x, y, text)] in plan px; labels =
+    the unit numbers the phone read (plan "units": a green box round each, its reading above)."""
+    from PIL import Image, ImageDraw, ImageFont
+    x0, y0, x1, y1 = box
+    try:
+        font = ImageFont.load_default(size=20)
+        big = ImageFont.load_default(size=26)
+    except TypeError:
+        font = big = ImageFont.load_default()
+    w, h = max(1, round((x1 - x0) * k)), max(1, round((y1 - y0) * k))
+    M, T = 56, 40
+    part = im.crop((x0, y0, x1, y1)).resize((w, h)).convert('RGBA')
+    over = Image.new('RGBA', part.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(over)
+    sheet = Image.new('RGB', (w + 2 * M, h + 2 * M + T), 'white')
+    ds = ImageDraw.Draw(sheet)
+    ds.text((M, 6), title, fill='black', font=big)
+    first = lambda a: (a + step - 1) // step * step
+    for x in range(first(x0), x1 + 1, step):
+        X = round((x - x0) * k)
+        strong = x % (5 * step) == 0
+        d.line([(X, 0), (X, h)], fill=(220, 0, 0, 170 if strong else 90), width=2 if strong else 1)
+        for y in (T + M - 24, T + M + h + 4):
+            ds.text((M + X, y), str(x), fill=(200, 0, 0), font=font, anchor='mt')
+    for y in range(first(y0), y1 + 1, step):
+        Y = round((y - y0) * k)
+        strong = y % (5 * step) == 0
+        d.line([(0, Y), (w, Y)], fill=(220, 0, 0, 170 if strong else 90), width=2 if strong else 1)
+        ds.text((M - 4, T + M + Y), str(y), fill=(200, 0, 0), font=font, anchor='rm')
+        ds.text((M + w + 4, T + M + Y), str(y), fill=(200, 0, 0), font=font, anchor='lm')
+    for mx, my, text in marks:
+        if x0 <= mx <= x1 and y0 <= my <= y1:
+            X, Y = (mx - x0) * k, (my - y0) * k
+            d.ellipse([X - 12, Y - 12, X + 12, Y + 12], outline=(0, 90, 255, 255), width=4)
+            d.text((X + 16, Y - 12), text, fill=(0, 90, 255, 255), font=font)
+    for u in labels:
+        if x0 <= u['x'] <= x1 and y0 <= u['y'] <= y1:
+            X, Y = (u['x'] - x0) * k, (u['y'] - y0) * k
+            hh = max(6.0, (u.get('h') or 14) * k * 0.7)
+            ww = max(hh * 2, hh * 0.6 * len(u['unit']))
+            d.rectangle([X - ww, Y - hh, X + ww, Y + hh], outline=(0, 150, 60, 230), width=2)
+            d.text((X - ww, Y - hh - 2), 'phone: ' + u['unit'], fill=(0, 130, 50, 255), font=font, anchor='lb')
+    sheet.paste(Image.alpha_composite(part, over).convert('RGB'), (M, T + M))
+    sheet.save(file, quality=88)
+
+
+def plan_sheets(plans, work, step=100, whole_px=1800, tile=800, overlap=100, tile_px=1600):
+    """Sheets to read a floor plan from: the whole plan (long edge whole_px) and, when that shrinks it, tiles of
+    `tile` plan px (overlapping by `overlap`, starting on the grid) enlarged to about tile_px, all with the grid
+    and rulers in plan px (step). Writes <work>/plans/ and <work>/plans.json. -> [(plan, [sheet files])]."""
+    from PIL import Image, ImageOps
+    d = os.path.join(work, 'plans')
+    os.makedirs(d, exist_ok=True)
+    res = []
+    for p in plans:
+        files = []
+        if p.get('path'):
+            im = ImageOps.exif_transpose(Image.open(p['path'])).convert('RGB')
+            W, H = im.size
+            stem = os.path.splitext(os.path.basename(p['file']))[0]
+            stem = ''.join(c if c.isalnum() or c in '-_' else '_' for c in stem) or 'plan'
+            marks = [(p['youAreHere'][0], p['youAreHere'][1], 'you are here')] if p.get('youAreHere') else []
+            labels = indoor.phone_units(p)
+            k = min(2.0, whole_px / max(W, H))
+            f = os.path.join(d, f'{stem}.jpg')
+            _grid_sheet(im, (0, 0, W, H), k, step, f,
+                        f"{p['file']}  level {p.get('level')}  {W} x {H} px  (grid: plan px every {step})", marks, labels)
+            files.append(f)
+            if k < 1.0:
+                n = 0
+                for ty in range(0, max(1, H - overlap), tile - overlap):
+                    for tx in range(0, max(1, W - overlap), tile - overlap):
+                        box = (tx, ty, min(W, tx + tile), min(H, ty + tile))
+                        kt = min(3.0, tile_px / max(box[2] - box[0], box[3] - box[1]))
+                        f = os.path.join(d, f'{stem}_t{n:02d}.jpg')
+                        _grid_sheet(im, box, kt, step, f, f"{p['file']}  tile {n}: x {box[0]}-{box[2]}, "
+                                                          f"y {box[1]}-{box[3]} (plan px)", marks, labels)
+                        files.append(f)
+                        n += 1
+        p['sheets'] = files
+        res.append((p, files))
+    json.dump(plans, open(os.path.join(work, 'plans.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    return res
+
+
+def plans_line(res):
+    """The prepare printout's lines about the floor plans."""
+    if not res:
+        return None
+    lines = [f'floor plans: {len(res)} (read every one: places.json planUnits, SKILL.md "Floor plans")']
+    for p, files in res:
+        tm = p['toMap']
+        lines.append(f"  level {p.get('level')}: {p['file']} {p.get('size')} placed by {p.get('placedBy')}, "
+                     f"{tm['scaleMPerPx']} m/px, rotated {tm.get('rotationDeg') or 0} deg"
+                     + (f", you are here at {p['youAreHere']}" if p.get('youAreHere') else '')
+                     + (f" -> {len(files)} sheet(s): {files[0]}" + (' + tiles' if len(files) > 1 else '')
+                        if files else ' -> IMAGE MISSING in the session'))
+        pu = indoor.phone_units(p)
+        if pu:
+            lines.append(f"    the phone read {len(pu)} unit label(s) (green on the sheets; a start: check, correct, "
+                         f"outline): " + ', '.join(f"{u['unit']} ({u['x']:.0f}, {u['y']:.0f})" for u in pu[:15])
+                         + (' ...' if len(pu) > 15 else ''))
+    return '\n'.join(lines)
+
+
+def diagnostics_line(session, ev, summary):
+    """For tuning the phone's dead reckoning: the anchors by how, the drift each anchor corrected (metres and % of
+    the distance walked since the one before), the other (diagnostic) lines in indoor.jsonl, session.indoor.diag."""
+    ind = (session or {}).get('indoor') or {}
+    hows = {}
+    for a in (ev or {}).get('anchors', []):
+        hows[a.get('how')] = hows.get(a.get('how'), 0) + 1
+    out = [f"indoor diagnostics: anchors {hows or 'none'}; step {summary.get('stepLengthM') or ind.get('stepLengthM')} m "
+           f"({ind.get('stepSource') or '?'}), {summary.get('steps', ind.get('steps'))} steps, walked {ind.get('walkedM')} m, "
+           f"barometer {ind.get('barometer')}"]
+    cs = summary.get('corrections') or []
+    if cs:
+        pc = sorted(c['pct'] for c in cs if c['pct'] is not None)
+        out.append('  drift corrected at each anchor: ' + ', '.join(
+            f"{c['gapM']} m / {c['walkedM']} m" + (f" ({c['pct']} %)" if c['pct'] is not None else '') + f" [{c['how']}]"
+            for c in cs[:12]) + (f' ... ({len(cs)})' if len(cs) > 12 else '')
+            + (f"; median {pc[len(pc) // 2]} %, max {pc[-1]} %" if pc else ''))
+    if (ev or {}).get('other'):
+        out.append(f"  other lines in indoor.jsonl: {ev['other']}")
+    if ind.get('diag') is not None:
+        d = json.dumps(ind['diag'], ensure_ascii=False)
+        out.append('  session.indoor.diag: ' + (d if len(d) <= 600 else d[:600] + ' ...'))
+    return '\n'.join(out)
+
+
+def indoor_positions(src, work, session, items, photos, plans=()):
     """An indoor walk (docs/indoor.md): every photo's position recomputed from indoor.jsonl (indoor.recompute: the
     walk split at the anchors, each stretch rotated / scaled onto them, kept inside the building), the phone's live
     one kept as livePosition; level, uncertainty, unit hints. Writes <work>/indoor_track.json (the corrected walk
@@ -229,6 +400,8 @@ def indoor_positions(src, work, session, items, photos):
     -> a line for the report."""
     log = indoor.find_log(src, work)
     ev = indoor.load(log) if log else None
+    n_plan = sum(1 for a in (ev or {}).get('anchors', []) if a.get('how') == 'plan')
+    replaced = indoor.plan_anchors(ev, list(plans)) if ev and plans else 0
     times = [i.get('elapsedNanos') for i in items]
     fixes, track, summary = indoor.recompute(ev, times, session) if ev else ([None] * len(items), [], {})
     moved, placed = [], 0
@@ -241,6 +414,7 @@ def indoor_positions(src, work, session, items, photos):
         p['sinceAnchorM'] = i.get('sinceAnchorM')
         p['positionSource'] = i.get('positionSource')
         p['unitHints'] = indoor.unit_hints(p.get('ocrText'))
+        p['nearUnit'] = i.get('nearUnit') if isinstance(i.get('nearUnit'), dict) else None   # the app's hint
         p['roadName'] = None   # no road indoors
         if f:
             placed += 1
@@ -277,6 +451,10 @@ def indoor_positions(src, work, session, items, photos):
         how = (f"{placed} photo positions recomputed from {summary['steps']} steps and {summary['anchors']} anchors "
                f"({summary['stretches'] or 'translated only'})"
                + (f"; moved from the live estimate median {m[len(m) // 2]:.1f} m, max {m[-1]:.1f} m" if m else ''))
+    if n_plan:
+        how += (f"; {n_plan} anchor(s) tapped on a floor plan"
+                + (f", {replaced} placed again through the plan's final position" if replaced else ''))
+    how += '\n' + diagnostics_line(session, ev, summary)
     return (f"indoor walk in {b.get('name') or 'no building'} ({b.get('osm') or 'no footprint'}): {how}\n"
             f"levels (photos): {levels}; directory photos: {sum(1 for p in photos if p.get('trigger') == 'directory')}")
 
@@ -321,7 +499,9 @@ def main():
             'trigger': i.get('trigger'), 'signBoost': i.get('signBoost'),
             'signHints': sign_hints(i),
         })
-    indoor_line = indoor_positions(src, work, session, items, photos) if in_door else None
+    plans = find_plans(src, work, session) if in_door else []
+    indoor_line = indoor_positions(src, work, session, items, photos, plans) if in_door else None
+    plan_line = plans_line(plan_sheets(plans, work)) if plans else None
     json.dump(photos, open(os.path.join(work, 'photos.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     json.dump(session, open(os.path.join(work, 'session.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     sheets(photos, os.path.join(work, 'sheets'))
@@ -334,6 +514,8 @@ def main():
                       + '; crops.py band / boxes for the rest (SKILL.md)')
     if indoor_line:
         print(indoor_line)
+    if plan_line:
+        print(plan_line)
     roads = {}
     for p in photos:
         roads[p['roadName']] = roads.get(p['roadName'], 0) + 1

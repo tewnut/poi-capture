@@ -1,7 +1,7 @@
 // Turn dropped files (a folder from the agentic processing, or a zip of it, or a raw session zip from the phone)
 // into a Dataset plus its photo files. Nothing leaves the browser.
 import { unzipSync, strFromU8 } from 'fflate'
-import { LAYERS, type Dataset, type Place, type Shot, type Target, type Task } from './types'
+import { LAYERS, type Dataset, type FloorPlan, type Place, type PlanUnit, type Shot, type Target, type Task } from './types'
 
 export type Imported = { dataset: Dataset; files: Map<string, Blob> }
 
@@ -70,6 +70,15 @@ function keepImages(files: Map<string, Blob>, wanted: Set<string>): Map<string, 
   return m
 }
 
+const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+/** A plan the map can draw: an image file, a positive size, an origin and a positive scale. */
+function planOk(p: any): p is FloorPlan {
+  const tm = p?.toMap
+  return !!p && typeof p.file === 'string' && !!p.file && Array.isArray(p.size) && num(p.size[0]) && num(p.size[1])
+    && p.size[0] > 0 && p.size[1] > 0 && Array.isArray(tm?.origin) && num(tm.origin[0]) && num(tm.origin[1])
+    && num(tm.scaleMPerPx) && tm.scaleMPerPx > 0 && (tm.rotationDeg == null || num(tm.rotationDeg))
+}
+
 const TARGETS: Target[] = ['shops', 'addresses', 'signs']
 /** The ride's target; older apps and Place capture send none (= shops). */
 const targetOf = (v: unknown): Target => (TARGETS.includes(v as Target) ? (v as Target) : 'shops')
@@ -79,15 +88,20 @@ function fromResult(r: any, files: Map<string, Blob>): Imported {
   // addresses and signs come as entries of their own (docs/sweep-targets.md); an older result has places only
   const places: Place[] = (r.places || []).map((p: any) => ({ ...p, layer: LAYERS.includes(p.layer) ? p.layer : 'place' }))
   const tasks: Task[] = r.tasks || []
-  const wanted = new Set<string>([...places.flatMap((p) => p.photos.map((x) => x.file)), ...tasks.map((t) => t.photo || '').filter(Boolean)])
+  const indoor = r.session.kind === 'indoor'
+  // floor plans (docs/indoor.md §7): only those with an image, a size and a usable toMap
+  const plans: FloorPlan[] = indoor ? (Array.isArray(r.plans) ? r.plans : []).filter(planOk) : []
+  const planUnits: PlanUnit[] = indoor ? (Array.isArray(r.planUnits) ? r.planUnits : []).filter((u: any) => u && typeof u === 'object') : []
+  const wanted = new Set<string>([...places.flatMap((p) => p.photos.map((x) => x.file)), ...tasks.map((t) => t.photo || '').filter(Boolean),
+    ...plans.map((p) => p.file)])
   const kept = keepImages(files, wanted)
   return {
     dataset: {
       id: r.session.id, source: 'result', importedAt: new Date().toISOString(), session: { ...r.session, target: targetOf(r.session.target) },
       track: r.track || [], shots: r.shots || [], places, tasks, files: [...kept.keys()],
       // indoor walks (docs/indoor.md)
-      ...(r.session.kind === 'indoor' ? { building: r.building || null, levels: r.levels || [], trackLevels: r.trackLevels || [],
-        directory: r.directory || [] } : {}),
+      ...(indoor ? { building: r.building || null, levels: r.levels || [], trackLevels: r.trackLevels || [],
+        directory: r.directory || [], plans, planUnits } : {}),
     },
     files: kept,
   }

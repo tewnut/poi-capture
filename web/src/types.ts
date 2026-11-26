@@ -85,6 +85,18 @@ export type Building = {
   levels_seen?: string[] | null; indoorMapped?: boolean; addr?: Record<string, string> | null
 }
 
+/** A floor plan of an indoor walk (docs/indoor.md §7): the straightened mall board (file: its image in the dataset),
+ *  its size in pixels and toMap, the similarity transform from plan pixels (x right, y down) to the map: rotated
+ *  rotationDeg clockwise, scaled scaleMPerPx, y flipped -> metres east / north of origin [lat, lon]. */
+export type ToMap = { origin: [number, number]; scaleMPerPx: number; rotationDeg: number }
+export type FloorPlan = { level?: string | null; file: string; source?: string; size: [number, number]; toMap: ToMap
+  placedBy?: string | null; youAreHere?: [number, number] | null; photo?: string | null }
+/** A unit read on a floor plan: its outline on the map ([lat, lon]; null when only the phone's label placed it),
+ *  centre, the plan it is on (file), place = the folder of the place in it, visit = a visit task was made for it. */
+export type PlanUnit = { level?: string | null; unit?: string | null; name?: string | null; plan?: string | null
+  polygon?: [number, number][] | null; centre?: [number, number] | null; place?: string | null; by?: string | null
+  visit?: boolean; from?: 'agent' | 'phone label' }
+
 export const layerOf = (p: Place): Layer => p.layer || 'place'
 
 export type Task = {
@@ -116,6 +128,9 @@ export type Dataset = {
   levels?: string[]
   trackLevels?: (string | null)[]
   directory?: DirectoryEntry[]
+  /** Indoor walks with floor plans: the plans (drawn under their level) and the units outlined on them. */
+  plans?: FloorPlan[]
+  planUnits?: PlanUnit[]
   shotFiles?: Record<number, string>                  // raw zips: photo index -> file path
   places: Place[]
   tasks: Task[]

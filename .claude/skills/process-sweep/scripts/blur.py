@@ -500,6 +500,8 @@ def zoom_sheets(out, check, done, per_file, y=(0.40, 0.95), width=1400):
     import crops
     best = {}
     for rel in done:
+        if rel.startswith('_plans/'):
+            continue   # a floor plan (a drawing of the mall): no kerb band
         k = photo_key(rel) or rel
         n = len(per_file.get(rel, []))
         if k not in best or n < best[k][0]:

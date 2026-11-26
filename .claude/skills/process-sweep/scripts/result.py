@@ -10,6 +10,11 @@ result.json (schema "poi-result/1"):
             (session.building as the phone had it), levels ["B1", "G", "1", ...] (lowest first), trackLevels [level
             of each track point], shots get a 5th element (the photo's level), directory [{level, unit, name, by,
             photo (file), photoIndex, place (folder) | null, lat?, lon?, where?}] (the shops on the directory boards)
+            floor plans (docs/indoor.md §7): plans [{level, file (_plans/...: the straightened board, blurred like
+            every photo), source (its path in the session), size [w, h], toMap {origin, scaleMPerPx, rotationDeg},
+            placedBy, youAreHere, photo}], planUnits [{level, unit, name, plan (file), polygon [[lat, lon], ...],
+            centre [lat, lon], place (folder) | null, by (unit | name) | null, visit (a visit task)}]; a place on
+            its unit: pins.algorithm.method "floor plan unit" with walkPosition (the walk's estimate) and planUnit
   places    one per place folder (docs/sweep-targets.md for the layers):
             layer (place | address | sign), placeRef (address: the shop it is on),
             sign {code, group, facingDeg, side, lane?, post?, order?} (sign; post: the id of the pole / gantry
@@ -33,7 +38,8 @@ result.json (schema "poi-result/1"):
             visit: new to Google (no result close enough to merge: google_mergeable), changed, or partly read ->
             Place capture; removal: closed / for rent / gone seen
             on the photos; verify_removal: gone but the facade was not clearly in view; indoors also a visit for each
-            directory-board entry no place matches (place null)
+            directory-board entry no place matches (place null), and for each named floor-plan unit no place and
+            no directory entry matches
 """
 import json, os, sys
 from datetime import datetime, timezone
@@ -471,7 +477,8 @@ def place_entry(folder, m, session_id):
                             'uncertaintyM': pos.get('uncertaintyM'), 'sightings': pos.get('sightings') or [],
                             # a sign moved onto the road layout: the estimate before, and the move; placed with
                             # the other signs of its post (pole or gantry)
-                            **{k: pos[k] for k in ('unsnapped', 'snap', 'post') if pos.get(k)}})
+                            **{k: pos[k] for k in ('unsnapped', 'snap', 'post', 'walkPosition', 'planUnit')
+                               if pos.get(k)}})
     pins['google'] = _google_pin(m.get('googleMaps'))
     pins.setdefault('agent', None)
     layer = layer_of(m)
@@ -507,7 +514,7 @@ def place_entry(folder, m, session_id):
     }
 
 
-def tasks_for(places, removals, directory=None):
+def tasks_for(places, removals, directory=None, plan_units=None):
     out = []
     for p in places:
         if (p.get('layer') or 'place') != 'place':
@@ -542,6 +549,14 @@ def tasks_for(places, removals, directory=None):
                         'why': f"on the directory board ({at}) but not seen on the walk" if at else
                                'on the directory board but not seen on the walk',
                         'photo': e.get('photo'), 'level': e.get('level'), 'unit': e.get('unit')})
+    for u in plan_units or []:
+        if u.get('visit') and u.get('centre'):   # named on a floor plan, not seen on the walk
+            at = ', '.join(x for x in (f"level {u['level']}" if u.get('level') else None, u.get('unit')) if x)
+            out.append({'type': 'visit', 'place': None, 'name': u.get('name') or u.get('unit') or 'shop',
+                        'lat': u['centre'][0], 'lon': u['centre'][1],
+                        'why': f"on the floor plan ({at}) but not seen on the walk" if at else
+                               'on the floor plan but not seen on the walk',
+                        'photo': u.get('plan'), 'level': u.get('level'), 'unit': u.get('unit')})
     for r in removals:
         t = 'removal' if r.get('inView', True) and r.get('status') in STATUS_GONE else 'verify_removal'
         out.append({'type': t, 'place': None, 'name': r.get('name'), 'lat': r.get('lat'), 'lon': r.get('lon'),
@@ -572,10 +587,11 @@ def write(out):
     ind = sw.get('indoor') or {}
     res = {'schema': 'poi-result/1', 'generatedAt': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
            'session': ses, 'track': sw.get('track') or [], 'shots': sw.get('photos') or [],
-           'places': places, 'tasks': tasks_for(places, removals, ind.get('directory'))}
+           'places': places, 'tasks': tasks_for(places, removals, ind.get('directory'), ind.get('planUnits'))}
     if sw.get('indoor') is not None:
         res.update({'building': ind.get('building'), 'levels': ind.get('levels') or [],
-                    'trackLevels': sw.get('trackLevels') or [], 'directory': ind.get('directory') or []})
+                    'trackLevels': sw.get('trackLevels') or [], 'directory': ind.get('directory') or [],
+                    'plans': ind.get('plans') or [], 'planUnits': ind.get('planUnits') or []})
     f = os.path.join(out, 'result.json')
     json.dump(res, open(f, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     return f

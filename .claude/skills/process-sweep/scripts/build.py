@@ -56,6 +56,14 @@ read); "directory": [{"level", "unit", "name", "photo"}] lists the shops read on
 address from its OSM tags; no street from the phone) and, when a directory entry matches it (same level and unit,
 or a similar name on the same level), a note; a directory entry no place matches becomes a "visit" task.
 defaultFacadeDistanceM defaults to 6 m indoors.
+Floor plans (docs/indoor.md §7; <work>/plans.json from prepare.py): "planUnits": [{"level": "2", "plan":
+"plans/plan_2_1.jpg", "unit": "L2-15", "polygon": [[x, y], ...] (plan px), "name": "..." | null}] are mapped onto the
+map through their plan's toMap; a place in a unit (the same level and unit, or a similar name on the same level:
+the directory matching) is placed on the unit's centre (method "floor plan unit", uncertainty half the unit's size,
+the walk's estimate kept as walkPosition); a named unit no place matches becomes a visit task (one per shop: a
+directory entry for the same shop takes the unit's centre instead). The plan images go to <out>/_plans/; sweep.json
+(-> result.json) gets plans [{level, file, size, toMap, ...}] and planUnits [{level, unit, name, plan, polygon
+[[lat, lon]], centre, place}].
 """
 import csv, html, json, math, os, re, shutil, sys, tempfile, urllib.parse
 
@@ -786,6 +794,28 @@ def check_spec(spec):
     return bad
 
 
+def check_plan_units(spec, plans):
+    """places.json planUnits: a known plan (its "file", e.g. "plans/plan_2_1.jpg"; may be left out when the walk
+    has one plan), a polygon of 3+ [x, y] plan pixels, a unit or a name. -> list of problems."""
+    bad = []
+    files = {p['file'] for p in plans}
+    us = spec.get('planUnits') or []
+    if us and not plans:
+        return ['planUnits given but the walk has no floor plan with a toMap (session.building.plans / plans.json)']
+    for k, u in enumerate(us):
+        label = f"planUnits[{k}] {u.get('unit') or u.get('name') or ''}".strip()
+        if u.get('plan') not in files and not (len(plans) == 1 and not u.get('plan')):
+            bad.append(f"{label}: plan {u.get('plan')!r} is not one of {sorted(files)}")
+        poly = u.get('polygon')
+        if not (isinstance(poly, list) and len(poly) >= 3 and all(
+                isinstance(q, (list, tuple)) and len(q) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                                                                    for v in q) for q in poly)):
+            bad.append(f'{label}: polygon must be 3+ [x, y] points in plan pixels')
+        if u.get('unit') in (None, '') and u.get('name') in (None, ''):
+            bad.append(f'{label}: neither a unit nor a name')
+    return bad
+
+
 def numbering(a):
     """The house-number block of an address (place.json place.numbering, result.json numbering): where the number
     was read (source: plate | sign | painted | other; None = not said), an old number on the same plate / gate
@@ -1011,6 +1041,82 @@ def directory_task_pos(e, placed, fp, photos):
     return None, None
 
 
+def load_plans(work, session):
+    """The walk's floor plans: <work>/plans.json (prepare.py: with each image's path), else session.building.plans
+    (no images then)."""
+    f = os.path.join(work, 'plans.json')
+    if os.path.isfile(f):
+        return indoor.plans_of({}, json.load(open(f, encoding='utf-8')))
+    return indoor.plans_of(session)
+
+
+def plan_units(spec, plans):
+    """places.json planUnits on the map: each {level, unit, name, plan (the plan entry), geo (indoor.plan_unit_geo)};
+    a unit listed twice (two boards of one level) is kept once (the first). A plan the agent outlined no unit on
+    but whose unit labels the phone read (plan "units") gives those labels as units without an outline (label True:
+    the label's centre stands for the unit's, method "floor plan label")."""
+    by_file = {p['file']: p for p in plans}
+    out, seen, outlined = [], set(), set()
+    for u in spec.get('planUnits') or []:
+        plan = by_file.get(u.get('plan')) or (plans[0] if len(plans) == 1 and not u.get('plan') else None)
+        if plan is None:
+            continue
+        outlined.add(plan['file'])
+        level = indoor.norm_level(u.get('level')) or plan.get('level')
+        unit = str(u['unit']).strip() if u.get('unit') not in (None, '') else None
+        key = (level, indoor.norm_unit(unit))
+        if unit and key in seen:
+            continue
+        seen.add(key)
+        name = str(u['name']).strip() if u.get('name') not in (None, '') else None
+        out.append({'level': level, 'unit': unit, 'name': name, 'plan': plan, 'geo': indoor.plan_unit_geo(u, plan),
+                    'label': False})
+    for plan in plans:
+        if plan['file'] in outlined:
+            continue
+        for u in indoor.phone_units(plan):
+            key = (plan.get('level'), indoor.norm_unit(u['unit']))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({'level': plan.get('level'), 'unit': u['unit'], 'name': None, 'plan': plan,
+                        'geo': indoor.label_unit_geo(u, plan), 'label': True})
+    return out
+
+
+def plan_matches(pitems, units):
+    """The plan units matched to the indoor places (indoor.match_directory: same level and unit, else a similar name
+    on the same level). A matched place gets its unit (and the plan's unit when it had none) -> {id(place): unit};
+    each unit gets `match` (the place item) or None."""
+    ms = indoor.match_directory([{'level': u['level'], 'unit': u['unit'], 'name': u['name']} for u in units],
+                                [{'name': p['name'], 'level': p.get('level'), 'unit': p.get('unit')} for p in pitems])
+    snap = {}
+    for u, m in zip(units, ms):
+        u['match'], u['by'] = (pitems[m['match']], m['by']) if m['match'] is not None else (None, None)
+        if u['match'] is None:
+            continue
+        pl = u['match']
+        snap[id(pl)] = u
+        if u['unit'] and not pl.get('unit'):
+            pl['fields']['unit'] = {'value': u['unit'], 'photo': None, 'sure': 'medium', 'note': 'from the floor plan'}
+            pl['unit'] = u['unit']
+    return snap
+
+
+def snap_to_unit(lat, lon, how, u):
+    """A place put on its plan unit's centre: (lat, lon, how) with method "floor plan unit", uncertainty half the
+    unit's size (at least 1 m); a unit known only by the phone's label: "floor plan label", indoor.LABEL_UNC_M. The
+    walk's estimate is kept as walkPosition with how far the unit is from it."""
+    clat, clon = u['geo']['centre']
+    off = math.hypot(*to_xy(clat, clon, lat, lon))
+    walk = {'lat': round(lat, 6), 'lon': round(lon, 6), 'method': how.get('method'),
+            'uncertaintyM': how.get('uncertaintyM'), 'offsetM': round(off, 1)}
+    new = {'method': 'floor plan label' if u.get('label') else 'floor plan unit', 'uncertaintyM': round(max(1.0, u['geo']['radiusM']), 1),
+           'sightings': how.get('sightings') or [], 'walkPosition': walk,
+           'planUnit': {'unit': u['unit'], 'level': u['level'], 'plan': u['plan']['file'], 'by': u['by']}}
+    return clat, clon, new
+
+
 def build(work, out, best_n=2, keep_all=False, door_folder=None):
     photos = json.load(open(os.path.join(work, 'photos.json'), encoding='utf-8'))
     session = json.load(open(os.path.join(work, 'session.json'), encoding='utf-8'))
@@ -1026,6 +1132,11 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             p['cameraBearing'] = photos[j]['cameraBearing']
             p['cameraBearingSource'] = (photos[j].get('cameraBearingSource') or 'assumed') + '+neighbour'
     in_door = indoor.is_indoor(session)
+    plans = load_plans(work, session) if in_door else []
+    bad = check_plan_units(spec, plans) if in_door else []
+    if bad:
+        raise SystemExit('places.json: ' + '; '.join(bad[:10]) + (f' (and {len(bad) - 10} more)' if len(bad) > 10 else ''))
+    units = plan_units(spec, plans) if in_door else []
     building = session.get('building') if in_door else None
     fp = indoor.Footprint(building) if in_door else None
     bblock = indoor.building_block(building) if in_door and building else None
@@ -1081,6 +1192,7 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             if x['layer'] == 'place' and (x.get('agentPin') or {}).get('snap'):
                 x.pop('agentPin')   # no street facade to snap onto indoors
         directory = directory_notes([x for x in items if x['layer'] == 'place'], spec.get('directory'))
+    in_unit = plan_matches([x for x in items if x['layer'] == 'place'], units) if units else {}
     placed = []   # (indoor place item, (lat, lon)): where the unseen directory entries probably are
     # house numbers read on a shop's own address entry (placeRef): its Google check uses them (result.google_check)
     shop_nums = result.shop_numbers([x for x in items if x['layer'] == 'address'])
@@ -1104,6 +1216,16 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
                 if moved:
                     how['method'] += f'; moved {moved:.1f} m back inside the building'
                     how['clampedM'] = round(moved, 1)
+            if id(pl) in in_unit:   # on the floor plan: its unit's centre
+                u = in_unit[id(pl)]
+                lat, lon, how = snap_to_unit(lat, lon, how, u)
+                w = how['walkPosition']
+                said = (f"unit {u['unit'] or u['name']} on the floor plan"
+                        + (" (the phone's label, no outline)" if u['label'] else '')
+                        + f" (by {u['by']}), {w['offsetM']} m from the walk's estimate")
+                pl['note'] = '; '.join(x for x in (pl.get('note'), said) if x)
+                if w['offsetM'] > 2 * (w.get('uncertaintyM') or 0) + u['geo']['radiusM'] + 5:
+                    pl['note'] += ': far, check the unit'
             placed.append((pl, (lat, lon)))
         prefix = {'address': 'addr_', 'sign': 'sign_'}.get(layer, '')
         d = os.path.join(out, f"{n:02d}_{prefix}{safe(pl['name'])}")
@@ -1207,6 +1329,44 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
     folder_of = {}
     for n, pl in enumerate(items, 1):
         folder_of[id(pl)] = f"{n:02d}_{safe(pl['name'])}"
+    # the floor plans: their images in _plans/ (blurred like every photo), the units on the map; a named unit no
+    # place matches is a visit, unless a directory entry no place matches is the same shop (it takes the unit)
+    plan_out, plan_file = [], {}
+    for p in plans:
+        if not p.get('path') or not os.path.isfile(p['path']):
+            continue
+        fn = ''.join(c if c.isalnum() or c in '-_.' else '_' for c in os.path.basename(p['file'])) or 'plan.jpg'
+        os.makedirs(os.path.join(out, '_plans'), exist_ok=True)
+        shutil.copy2(p['path'], os.path.join(out, '_plans', fn))
+        size = p.get('size')
+        try:
+            from PIL import Image
+            with Image.open(p['path']) as im:
+                size = list(im.size)
+        except Exception:
+            pass
+        plan_file[p['file']] = f'_plans/{fn}'
+        plan_out.append({'level': p.get('level'), 'file': f'_plans/{fn}', 'source': p['file'], 'size': size,
+                         'toMap': p['toMap'], 'placedBy': p.get('placedBy'), 'youAreHere': p.get('youAreHere'),
+                         'photo': p.get('photo')})
+    loose_dir = [e for e in directory if e['match'] is None]
+    loose_units = [u for u in units if u['match'] is None and u['name']]
+    for e, m in zip(loose_dir, indoor.match_directory(
+            [{k: e.get(k) for k in ('level', 'unit', 'name')} for e in loose_dir],
+            [{'name': u['name'], 'level': u['level'], 'unit': u['unit']} for u in loose_units])):
+        if m['match'] is not None:
+            e['unitOnPlan'] = loose_units[m['match']]
+            loose_units[m['match']]['directory'] = True
+    units_out = []
+    for u in units:
+        g = u['geo']
+        units_out.append({'level': u['level'], 'unit': u['unit'], 'name': u['name'],
+                          'plan': plan_file.get(u['plan']['file']),
+                          'polygon': [[round(a, 7), round(b, 7)] for a, b in g['polygon']] if g['polygon'] else None,
+                          'from': 'phone label' if u['label'] else 'agent',
+                          'centre': [round(g['centre'][0], 7), round(g['centre'][1], 7)],
+                          'place': folder_of.get(id(u['match'])) if u['match'] is not None else None,
+                          'by': u['by'], 'visit': bool(u['match'] is None and u['name'] and not u.get('directory'))})
     dir_out, copied = [], {}
     for e in directory:
         x = {k: e.get(k) for k in ('level', 'unit', 'name', 'by')}
@@ -1221,6 +1381,11 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             x['photo'] = copied[e['photo']]
         if e['match'] is not None:
             x['place'] = folder_of.get(id(e['match']))
+        elif e.get('unitOnPlan'):
+            ll = e['unitOnPlan']['geo']['centre']
+            x['place'] = None
+            x['lat'], x['lon'], x['where'] = round(ll[0], 6), round(ll[1], 6), 'its unit on the floor plan'
+            x['unit'] = x['unit'] or e['unitOnPlan']['unit']
         else:
             ll, where = directory_task_pos(e, placed, fp, photos)
             x['place'] = None
@@ -1247,7 +1412,9 @@ def build(work, out, best_n=2, keep_all=False, door_folder=None):
             sw['trackLevels'] = [x[4] for x in shots]
         levels = {str(x) for x in sw['trackLevels'] if x not in (None, '')}
         levels |= {str(pl['level']) for pl in items if pl.get('level') not in (None, '')}
-        sw['indoor'] = {'building': building, 'levels': sorted(levels, key=indoor.level_key), 'directory': dir_out}
+        levels |= {str(u['level']) for u in units if u['level']}
+        sw['indoor'] = {'building': building, 'levels': sorted(levels, key=indoor.level_key), 'directory': dir_out,
+                        'plans': plan_out, 'planUnits': units_out}
     json.dump(sw, open(os.path.join(out, 'sweep.json'), 'w', encoding='utf-8'), ensure_ascii=False)
     write_indexes(out, session)
 

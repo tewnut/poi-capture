@@ -4,12 +4,13 @@
 import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { state, reviewOf, gstat, openPlace, openDataset, openTask } from '../store'
+import { state, reviewOf, gstat, openPlace, openDataset, openTask, photoUrl } from '../store'
 import { t, lang } from '../i18n'
 import { layerOf, type Dataset, type Place, type Review } from '../types'
 import { signSvg } from '../signArt'
 import { markerGroups } from '../signPosts'
-import { buildingRings, isIndoor, onLevel, shotsOn, trackOn } from '../indoor'
+import { buildingRings, isIndoor, onLevel, placeOfUnit, plansOn, planUnitsOn, shotsOn, trackOn } from '../indoor'
+import { PLAN_PANE, PlanOverlay } from '../planOverlay'
 
 // On the session list (no session open) the map follows the list's filters: only: the ids of the sessions listed
 // (null = every one); routes: the listed rides not downloaded yet that carry a track (upload metadata), drawn dashed;
@@ -112,6 +113,7 @@ function drawAll() {
   }
   if (!fitted && bounds.length) { map.fitBounds(L.latLngBounds(bounds), { padding: [30, 30] }); fitted = true }
   drawSelected()
+  void drawPlans()
 }
 
 function drawDataset(d: Dataset, bounds: L.LatLngExpression[]) {
@@ -142,10 +144,83 @@ function drawDataset(d: Dataset, bounds: L.LatLngExpression[]) {
       emit('select', d.id, group.find((x) => x.id === hit)?.id || p.id)
     })
   }
+  if (level) drawUnits(d, level, !!dim)
   for (const tk of d.tasks.filter((x) => x.type !== 'visit' && (!level || !x.level || x.level === level))) {
     L.marker([tk.lat, tk.lon], { icon: L.divIcon({ className: '', iconSize: [18, 18], iconAnchor: [9, 9], html: '<div class="rm">✕</div>' }) })
       .bindTooltip(t(tk.type === 'removal' ? 'removalTip' : 'verifyTip', { name: esc(tk.name) })).addTo(base)
   }
+}
+
+/** The units outlined on the level's floor plans: thin outlines, their numbers shown from zoom 19 (CSS: units-on);
+ *  a click opens the place in the unit. A unit placed only from the phone's reading of the plan: a dot. */
+function drawUnits(d: Dataset, level: string, dim: boolean) {
+  for (const u of planUnitsOn(d, level)) {
+    const p = placeOfUnit(d, u)
+    const label = esc(u.unit || u.name || '')
+    const tip = [t('unitN', { u: esc(u.unit || '?') }), u.name ? esc(u.name) : '', p && p.name !== u.name ? esc(p.name) : '',
+      p ? t('unitOpen') : u.visit ? t('unitOnPlanOnly') : '', u.from === 'phone label' ? t('unitFromLabel') : ''].filter(Boolean).join('<br>')
+    const style = { color: p ? '#1659c7' : '#6b7280', weight: 1, opacity: dim ? 0.3 : 0.75, fillColor: p ? '#1659c7' : '#9ca3af',
+      fillOpacity: dim ? 0.02 : 0.06, dashArray: u.visit ? '3 3' : undefined }
+    let shape: L.Path | null = null
+    if (u.polygon && u.polygon.length >= 3) shape = L.polygon(u.polygon, style)
+    else if (u.centre) shape = L.circleMarker(u.centre, { ...style, radius: 3, fillOpacity: 0.5 })
+    if (!shape) continue
+    shape.bindTooltip(tip, { sticky: true }).addTo(base)
+    // the unit number in the middle, shown only when zoomed in (units-on)
+    if (label && (u.centre || u.polygon)) {
+      const at = u.centre || u.polygon![0]
+      L.marker(at, { interactive: false, keyboard: false,
+        icon: L.divIcon({ className: 'unit-label', iconSize: [60, 14], iconAnchor: [30, 7], html: `<span>${label}</span>` }) }).addTo(base)
+    }
+    if (p) shape.on('click', () => emit('select', d.id, p.id))
+  }
+}
+
+/** The open indoor walk's floor plans on the level shown (planOverlay.ts), under everything else; rebuilt only when
+ *  the session, the level or its plans change (their images come from the stored files, asynchronously). */
+let planKey = ''
+let planLayers: PlanOverlay[] = []
+const planOpacity = ref(0.7)
+let opacityBox: HTMLDivElement | null = null
+async function drawPlans() {
+  const d = openDataset.value
+  const level = d && isIndoor(d) ? state.level : ''
+  const plans = d ? plansOn(d, level) : []
+  const key = d && plans.length ? `${d.id}|${level}|${plans.map((p) => p.file).join(',')}` : ''
+  if (key === planKey) return
+  planKey = key
+  for (const l of planLayers) l.remove()
+  planLayers = []
+  if (opacityBox) opacityBox.style.display = plans.length ? '' : 'none'
+  for (const p of plans) {
+    const url = await photoUrl(d!.id, p.file)
+    if (!url || planKey !== key || !map) continue
+    planLayers.push(new PlanOverlay(p, url, planOpacity.value).addTo(map))
+  }
+}
+
+/** The floor plan's opacity slider (top right, under the layer switch); shown while a plan is drawn. */
+function opacityControl() {
+  const Ctl = L.Control.extend({
+    onAdd() {
+      const box = L.DomUtil.create('div', 'leaflet-bar plan-opacity') as HTMLDivElement
+      box.title = t('planOpacityTitle')
+      box.innerHTML = `<label><span>${esc(t('planOpacity'))}</span><input type="range" min="0" max="1" step="0.05"></label>`
+      const input = box.querySelector('input')!
+      input.value = String(planOpacity.value)
+      input.setAttribute('aria-label', t('planOpacityTitle'))
+      input.addEventListener('input', () => {
+        planOpacity.value = Number(input.value)
+        for (const l of planLayers) l.setOpacity(planOpacity.value)
+      })
+      L.DomEvent.disableClickPropagation(box)
+      L.DomEvent.disableScrollPropagation(box)
+      box.style.display = 'none'
+      opacityBox = box
+      return box
+    },
+  })
+  new Ctl({ position: 'topright' }).addTo(map)
 }
 
 /** The building's footprint (outer rings, courtyard holes): a thin outline, the inside lightly filled. */
@@ -223,6 +298,12 @@ onMounted(() => {
   })
   L.control.layers({ [t('osmLayer')]: osm, [t('satLayer')]: sat }, undefined, { position: 'topright' }).addTo(map)
   map.setView([10.776, 106.757], 15)
+  // floor plans: over the tiles, under the outlines and the markers
+  map.createPane(PLAN_PANE).style.zIndex = '350'
+  opacityControl()
+  const units = () => map.getContainer().classList.toggle('units-on', map.getZoom() >= 19)
+  map.on('zoomend', units)
+  units()
   base = L.layerGroup().addTo(map)
   sel = L.layerGroup().addTo(map)
   drawAll()
@@ -319,6 +400,13 @@ defineExpose({ fitOpen, focusOpen })
   color: #fff; font: 700 8px/10px system-ui; text-align: center; background: #8a949c; }
 .srow.confirmed > b { background: #3d6b00; }
 .leaflet-marker-icon > .rm { width: 18px; height: 18px; border-radius: 4px; background: #d6336c; color: #fff; font: 700 11px/18px system-ui; text-align: center; }
+.unit-label { pointer-events: none; }
+.unit-label span { display: none; font: 600 10px/14px system-ui; color: #1e3a8a; text-align: center; white-space: nowrap;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff; }
+.units-on .unit-label span { display: block; }
+.plan-opacity { background: #fff; padding: 4px 8px; font: 12px system-ui; }
+.plan-opacity label { display: flex; align-items: center; gap: 6px; }
+.plan-opacity input { width: 90px; }
 .final-pin { width: 30px; height: 40px; background: no-repeat center/contain
   url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 40'%3E%3Cpath d='M15 39C15 39 2 22 2 14a13 13 0 0 1 26 0c0 8-13 25-13 25z' fill='%23f59f00' stroke='white' stroke-width='2'/%3E%3Ccircle cx='15' cy='14' r='5' fill='white'/%3E%3C/svg%3E"); }
 </style>

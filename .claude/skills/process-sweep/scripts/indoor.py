@@ -8,7 +8,11 @@ matching, the building's address). Nothing here asks Overpass: the building come
 indoor.jsonl (one JSON per line, t = elapsedRealtimeNanos, the photos' elapsedNanos clock):
   {"type": "step"} | {"type": "yaw", "deg"} | {"type": "pressure", "hPa"} |
   {"type": "anchor", "lat", "lon", "level", "how", "headingDeg"} | {"type": "level", "level", "how"} |
-  {"type": "align", "offsetDeg", "how"}
+  {"type": "align", "offsetDeg", "how"} | {"type": "plan", "level", "file"} (a floor plan placed or moved: not used here;
+  its "you are here" tap is an anchor with how "plan", placed again through the plan's final toMap by plan_anchors)
+
+Floor plans (docs/indoor.md §7): plan_xy / plan_to_ll map a straightened board's pixels onto the map (toMap), the
+plan units' outlines (places.json planUnits) become polygons with a centre (plan_unit_geo).
 
 recompute(): the walk is dead-reckoned again from the steps and the (aligned) yaw, then split at the anchors:
 - a stretch between two anchors is rotated and scaled about its first anchor so it starts and ends on them (the
@@ -56,7 +60,7 @@ def find_log(src, work):
 def parse(lines):
     """{steps: [t], yaws: [(t, deg)], anchors: [{t, lat, lon, level, how, headingDeg}], levels: [(t, level, how)]}.
     Lines that are not JSON, or lack t, are skipped (a log cut short by a crash)."""
-    ev = {'steps': [], 'yaws': [], 'anchors': [], 'levels': []}
+    ev = {'steps': [], 'yaws': [], 'anchors': [], 'levels': [], 'other': {}}
     for line in lines:
         try:
             o = json.loads(line)
@@ -74,6 +78,8 @@ def parse(lines):
                                   'how': o.get('how'), 'headingDeg': o.get('headingDeg')})
         elif k == 'level' and o.get('level') not in (None, ''):
             ev['levels'].append((o['t'], _lv(o['level']), o.get('how')))
+        else:   # diagnostics (lookup, plan-corners, plan-place, pdr, floor-prompt, gps, align, plan...): counted only
+            ev['other'][str(k)] = ev['other'].get(str(k), 0) + 1
     ev['steps'].sort()
     ev['yaws'].sort()
     ev['anchors'].sort(key=lambda a: a['t'])
@@ -335,6 +341,13 @@ def recompute(ev, times, session):
         fixes.append(fix(x, y, walked, level_at(ev, t)))
     for _f, _r, how in pieces:
         summary['stretches'][how] = summary['stretches'].get(how, 0) + 1
+    # how far the dead-reckoned walk was off at each anchor, from the one before: the drift corrected
+    summary['corrections'] = []
+    for i in range(1, len(anchors)):
+        gap = math.hypot((A[i][0] - A[i - 1][0]) - (R[i][0] - R[i - 1][0]), (A[i][1] - A[i - 1][1]) - (R[i][1] - R[i - 1][1]))
+        w = D[i] - D[i - 1]
+        summary['corrections'].append({'how': anchors[i].get('how'), 'gapM': round(gap, 1), 'walkedM': round(w, 1),
+                                       'pct': round(100 * gap / w, 1) if w > 0 else None})
     track, last = [], None
     for t, x, y, walked in path:
         lv = level_at(ev, t)
@@ -476,3 +489,132 @@ def match_directory(directory, places):
                 used.add(i)
                 break
     return out
+
+
+# ---------- floor plans (docs/indoor.md §7) ----------
+#
+# A plan is a mall board photographed by the walker and straightened by the app (plans/plan_<level>_<n>.jpg), placed
+# on the map by a similarity transform: toMap = {origin: [lat, lon], scaleMPerPx, rotationDeg}. A plan pixel (x right,
+# y down) is rotated by rotationDeg clockwise (as seen on the map), scaled to metres and y flipped: metres east /
+# north of origin, then degrees with to_ll (the same local frame as the walk).
+
+def plan_xy(px, py, tm):
+    """Plan pixel -> (metres east, metres north) of toMap's origin."""
+    th = math.radians(float(tm.get('rotationDeg') or 0))
+    s = float(tm['scaleMPerPx'])
+    c, sn = math.cos(th), math.sin(th)
+    return s * (px * c - py * sn), -s * (px * sn + py * c)
+
+
+def plan_px(e, n, tm):
+    """(metres east, metres north) of toMap's origin -> plan pixel (plan_xy inverted)."""
+    th = math.radians(float(tm.get('rotationDeg') or 0))
+    s = float(tm['scaleMPerPx'])
+    c, sn = math.cos(th), math.sin(th)
+    x, y = e / s, -n / s
+    return x * c + y * sn, -x * sn + y * c
+
+
+def plan_to_ll(px, py, tm):
+    """Plan pixel -> (lat, lon)."""
+    e, n = plan_xy(px, py, tm)
+    return to_ll(e, n, float(tm['origin'][0]), float(tm['origin'][1]))
+
+
+def ll_to_plan(lat, lon, tm):
+    """(lat, lon) -> plan pixel."""
+    return plan_px(*to_xy(lat, lon, float(tm['origin'][0]), float(tm['origin'][1])), tm)
+
+
+def plan_ok(p):
+    """A plan entry that can be drawn: a file, a size and a usable toMap."""
+    tm = (p or {}).get('toMap') or {}
+    o = tm.get('origin')
+    return (isinstance(p, dict) and isinstance(p.get('file'), str) and p['file'] != ''
+            and isinstance(o, (list, tuple)) and len(o) >= 2 and all(isinstance(v, (int, float)) for v in o[:2])
+            and isinstance(tm.get('scaleMPerPx'), (int, float)) and tm['scaleMPerPx'] > 0
+            and isinstance(tm.get('rotationDeg', 0), (int, float)))
+
+
+def plans_of(session, plans_json=None):
+    """The walk's floor plans: session.building.plans, else plans/plans.json (a list, or {"plans": [...]}); only those
+    with a file and a usable toMap; level tidied (norm_level)."""
+    b = (session or {}).get('building') or {}
+    raw = b.get('plans') or ((session or {}).get('indoor') or {}).get('plans')   # a walk without a building
+    if not raw and plans_json:
+        raw = plans_json.get('plans') if isinstance(plans_json, dict) else plans_json
+    out = []
+    for p in raw or []:
+        if plan_ok(p):
+            out.append(dict(p, level=norm_level(p.get('level'))))
+    return out
+
+
+def plan_anchors(ev, plans, max_dt_s=120):
+    """The "plan" anchors ("you are here" tapped on a board) placed again through their plan's final toMap: the walker
+    may have moved the plan after tapping. The plan of the anchor's level whose time is nearest (within max_dt_s),
+    with youAreHere. -> how many anchors moved (more than 0.5 m)."""
+    moved = 0
+    for a in ev.get('anchors') or []:
+        if a.get('how') != 'plan':
+            continue
+        cands = [p for p in plans if p.get('youAreHere') and len(p['youAreHere']) >= 2
+                 and (a.get('level') is None or norm_level(p.get('level')) == norm_level(a.get('level')))]
+        timed = [p for p in cands if isinstance(p.get('t'), (int, float))]
+        if timed:
+            p = min(timed, key=lambda q: abs(q['t'] - a['t']))
+            if abs(p['t'] - a['t']) > max_dt_s * 1e9:
+                continue
+        elif len(cands) == 1:
+            p = cands[0]
+        else:
+            continue
+        la, lo = plan_to_ll(p['youAreHere'][0], p['youAreHere'][1], p['toMap'])
+        if math.hypot(*to_xy(la, lo, a['lat'], a['lon'])) > 0.5:
+            a['lat'], a['lon'], a['fromPlan'] = la, lo, p.get('file')
+            moved += 1
+    return moved
+
+
+def polygon_centre(pts):
+    """Area centroid of a polygon [(x, y), ...] (vertex mean when degenerate)."""
+    a = cx = cy = 0.0
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:] + pts[:1]):
+        c = x1 * y2 - x2 * y1
+        a += c
+        cx += (x1 + x2) * c
+        cy += (y1 + y2) * c
+    if abs(a) < 1e-12:
+        return sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+    return cx / (3 * a), cy / (3 * a)
+
+
+def plan_unit_geo(u, plan):
+    """A plan unit ({level, unit, polygon in plan px, name}) on the map: {polygon [[lat, lon]], centre (lat, lon),
+    radiusM (the farthest corner from the centre: half the unit's size), areaM2}."""
+    tm = plan['toMap']
+    xy = [plan_xy(float(p[0]), float(p[1]), tm) for p in u['polygon']]
+    ce, cn = polygon_centre(xy)
+    o = tm['origin']
+    area = abs(sum(x1 * y2 - x2 * y1 for (x1, y1), (x2, y2) in zip(xy, xy[1:] + xy[:1]))) / 2
+    return {'polygon': [list(to_ll(e, n, o[0], o[1])) for e, n in xy], 'centre': to_ll(ce, cn, o[0], o[1]),
+            'radiusM': max(math.hypot(e - ce, n - cn) for e, n in xy), 'areaM2': area}
+
+
+LABEL_UNC_M = 5.0   # a unit placed from the phone's label only (no outline): its size is unknown
+
+
+def phone_units(plan):
+    """The unit numbers the phone read on a plan ("units": [{unit, x, y, h}] in plan px: the label's centre and text
+    height): usable ones only, unit tidied for matching kept as read."""
+    out = []
+    for u in (plan or {}).get('units') or []:
+        if (isinstance(u, dict) and u.get('unit') not in (None, '') and all(
+                isinstance(u.get(k), (int, float)) and not isinstance(u.get(k), bool) for k in ('x', 'y'))):
+            out.append({'unit': str(u['unit']).strip(), 'x': u['x'], 'y': u['y'], 'h': u.get('h')})
+    return out
+
+
+def label_unit_geo(u, plan):
+    """A unit known only by its label on the plan: the label's centre is the unit's centre, no outline."""
+    return {'polygon': None, 'centre': plan_to_ll(u['x'], u['y'], plan['toMap']), 'radiusM': LABEL_UNC_M, 'areaM2': None}

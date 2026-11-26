@@ -314,7 +314,46 @@ changes:
 - **Google**: the lookup works as outdoors (a mall's Google listings often carry the unit in the address); the
   house-number check has no number to compare indoors.
 - **Report**: the anchors and how much the positions moved from the live estimate, the levels walked, the
-  directory entries not found on the walk (the visit tasks).
+  directory entries not found on the walk (the visit tasks). prepare.py also prints **indoor diagnostics** (the
+  anchors by `how`: tap / gps / plan / unit; the drift each anchor corrected in metres and % of the distance walked
+  since the one before; the diagnostic lines in indoor.jsonl — `lookup`, `pdr`, `floor-prompt`, … are counted,
+  never used for positions; `session.indoor.diag`): copy the drift line into the report, it tunes the phone.
+- Contact sheets also show the app's `nearUnit` guess (`near L2-15 3m?`): a hint from the plan, not a reading.
+
+### Floor plans (`session.building.plans`, docs/indoor.md §7)
+
+The walker photographs the mall's floor-plan boards ("Bạn đang ở đây"); the app straightens each one
+(`plans/plan_<level>_<n>.jpg`) and places it on the map (`toMap`: plan pixels → map). Plan photos say
+`FLOOR PLAN` on the contact sheets (not a shop). What changes:
+
+- **prepare.py** lists the plans (level, file, scale, rotation, "you are here") and writes per plan
+  `<work>/plans/plan_<level>_<n>.jpg` — the whole plan with a red grid and rulers in **plan pixels** every 100 px
+  (every 500 stronger), the "you are here" dot in blue — and, for a big plan, `plan_<level>_<n>_tNN.jpg` tiles of
+  800 plan px enlarged with the same grid (their titles give the x / y range). Unit labels the phone already read
+  (plan `units`) are boxed in green (`phone: L2-15`) and listed in the printout: a start, check and correct them.
+  An anchor tapped on a plan (`how: "plan"`) is placed again through the plan's final `toMap` (the walker may
+  have moved the plan after tapping).
+- **Read every plan, every tile**, and write in places.json:
+  ```json
+  "planUnits": [{"level": "2", "plan": "plans/plan_2_1.jpg", "unit": "L2-15",
+                 "polygon": [[212, 180], [318, 180], [318, 262], [212, 262]], "name": "Highlands Coffee"}]
+  ```
+  one entry per unit drawn on the plan: `plan` = the plan's `file` as listed (may be left out when the walk has
+  one plan), `unit` as printed, `polygon` = the unit's outline in plan pixels read off the grid (4 corners for a
+  rectangle; more for an L-shape; ±10 px is fine), `name` only when the plan prints the shop's name or logo in
+  it (else null). Outline every unit with a number, also those you did not pass; a unit with neither number nor
+  name is left out. The same unit on two boards: once.
+- **build.py** maps each outline onto the map; a place in a unit (same level and unit — the unit's own number
+  when one side has no level prefix — else a similar name on the same level, the directory matching) is put on
+  the unit's centre: method `floor plan unit`, uncertainty half the unit's size, the walk's estimate kept as
+  `walkPosition` (with `offsetM`), a note ("…m from the walk's estimate"; "far, check the unit" when it is much
+  further than the walk's uncertainty: look at it). A place without a unit gets the plan's (`from the floor
+  plan`). A named unit no place matches becomes a **visit** at the unit's centre (a directory entry for the same
+  shop makes one visit, at the unit). Units without a name are geometry only. A plan with the phone's labels but
+  no outlines from you: the labels' centres are used as unit centres (method `floor plan label`, 5 m). The plan
+  images are copied to `<out>/_plans/` (blur.py blurs and lists them like every photo); result.json has `plans`
+  and `planUnits` (lat/lon outlines) for the web's plan overlay.
+- **Report**: plans read, units outlined, places snapped (and any "far" ones), plan-only shops (visits).
 
 ## 4. Enrich from Google Maps
 

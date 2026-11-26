@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildingAddr, defaultLevel, levelOrder, levelsOf, normLevel, onLevel, placeLevel, shotsOn, trackOn } from './indoor'
+import { buildingAddr, defaultLevel, latLonToPlan, levelOrder, levelsOf, normLevel, onLevel, overlayMatrix, placeLevel, placeOfUnit, planCorners, plansOn, planToLatLon, planUnitsOn, planXY, shotsOn, trackOn } from './indoor'
 import { CSV_COLS, csv, geojson, osm, record } from './publish'
 import { DBF_FIELDS, kml, rows } from './exports'
 import { missingStreet, confirmFields } from './fields'
@@ -140,5 +140,68 @@ describe('OSM level numbers', () => {
     expect(osmLevel('G', ['G', '1'])).toBe(0)
     expect(osmLevel('1', ['G', '1'])).toBe(1)
     expect(osmLevel('Mezzanine', ['1'])).toBe(null)
+  })
+})
+
+describe('floor plans (docs/indoor.md §7)', () => {
+  // the same numbers as the processing's tests/test_plans.py ("TM")
+  const TM = { origin: [10.80213, 106.74122] as [number, number], scaleMPerPx: 0.061, rotationDeg: 33.5 }
+
+  it('maps plan pixels onto the map like the processing', () => {
+    const [e, n] = planXY(812, 640, TM)
+    expect(e).toBeCloseTo(19.7564126, 6)
+    expect(n).toBeCloseTo(-59.8934452, 6)
+    const [lat, lon] = planToLatLon(812, 640, TM)
+    expect(lat).toBeCloseTo(10.801588174, 9)
+    expect(lon).toBeCloseTo(106.741400676, 9)
+    const [la2, lo2] = planToLatLon(2048, 1365, TM)
+    expect(la2).toBeCloseTo(10.800878092, 9)
+    expect(lo2).toBeCloseTo(106.741752419, 9)
+    expect(planToLatLon(0, 0, TM)).toEqual([10.80213, 106.74122])
+  })
+
+  it('round trip, clockwise rotation, y down = south', () => {
+    for (const [px, py] of [[0, 0], [812, 640], [2048, 1365], [-30.5, 99.25]]) {
+      const [x, y] = latLonToPlan(...planToLatLon(px, py, TM), TM)
+      expect(x).toBeCloseTo(px, 6)
+      expect(y).toBeCloseTo(py, 6)
+    }
+    const tm = { origin: [10.8, 106.7] as [number, number], scaleMPerPx: 0.5, rotationDeg: 0 }
+    expect(planXY(10, 0, tm)[0]).toBeCloseTo(5)
+    expect(planXY(0, 10, tm)[1]).toBeCloseTo(-5)
+    const r = planXY(10, 0, { ...tm, rotationDeg: 90 })
+    expect(r[0]).toBeCloseTo(0)
+    expect(r[1]).toBeCloseTo(-5)
+  })
+
+  it('the overlay matrix puts the image corners on the given points', () => {
+    const w = 200, h = 100
+    const p0 = { x: 50, y: 40 }, p1 = { x: 50 + 160, y: 40 + 120 }, p2 = { x: 50 - 30, y: 40 + 40 }
+    const [a, b, c, d, e, f] = overlayMatrix(p0, p1, p2, w, h)
+    const at = (x: number, y: number) => [a * x + c * y + e, b * x + d * y + f]
+    expect(at(0, 0)).toEqual([50, 40])
+    expect(at(w, 0)).toEqual([210, 160])
+    expect(at(0, h)).toEqual([20, 80])
+    expect(at(w, h)).toEqual([180, 200])                           // the fourth corner follows (a parallelogram)
+    // the plan's own corners: pinned through toMap, so the image lands where the processing puts its pixels
+    const plan = { file: '_plans/p.jpg', size: [2048, 1365] as [number, number], toMap: TM }
+    const [c0, c1, c2] = planCorners(plan)
+    expect(c0).toEqual(planToLatLon(0, 0, TM))
+    expect(c1).toEqual(planToLatLon(2048, 0, TM))
+    expect(c2).toEqual(planToLatLon(0, 1365, TM))
+  })
+
+  it('plans and units of the level shown; a unit opens its place', () => {
+    const d = {
+      ...ds, plans: [{ level: '2', file: '_plans/a.jpg', size: [10, 10], toMap: TM }, { level: 'Tầng 3', file: '_plans/b.jpg', size: [10, 10], toMap: TM }],
+      planUnits: [{ level: '2', unit: 'L2-15', place: '01_Highlands' }, { level: '3', unit: 'L3-01', place: null }],
+      places: [{ ...shop('a', 'Highlands', '2', 'L2-15'), folder: '01_Highlands' }],
+    } as Dataset
+    expect(plansOn(d, '2').map((p) => p.file)).toEqual(['_plans/a.jpg'])
+    expect(plansOn(d, '3').map((p) => p.file)).toEqual(['_plans/b.jpg'])
+    expect(plansOn(d, '')).toEqual([])
+    expect(planUnitsOn(d, '3').map((u) => u.unit)).toEqual(['L3-01'])
+    expect(placeOfUnit(d, d.planUnits![0])?.id).toBe('a')
+    expect(placeOfUnit(d, d.planUnits![1])).toBeUndefined()
   })
 })

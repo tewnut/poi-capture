@@ -32,3 +32,36 @@ describe('importer: sweep targets and layers', () => {
     expect((await _test.fromRaw({ session: { id: 'r2' }, items: [] }, new Map())).dataset.session.target).toBe('shops')
   })
 })
+
+describe('importer: floor plans of an indoor walk', () => {
+  const tm = { origin: [10.8, 106.74], scaleMPerPx: 0.05, rotationDeg: 12 }
+  const r = {
+    ...result({ kind: 'indoor' }), levels: ['2'],
+    plans: [
+      { level: '2', file: '_plans/plan_2_1.jpg', size: [2048, 1365], toMap: tm, placedBy: 'footprint' },
+      { level: '3', file: '_plans/plan_3_1.jpg', size: [0, 10], toMap: tm },                 // no size: not drawable
+      { level: '3', file: '_plans/plan_3_2.jpg', size: [10, 10], toMap: { origin: [1], scaleMPerPx: 1 } },
+    ],
+    planUnits: [{ level: '2', unit: 'L2-15', polygon: [[10.8, 106.74], [10.8001, 106.74], [10.8001, 106.7401]], place: null }],
+  }
+  const img = () => new Blob([new Uint8Array([1, 2, 3])])
+
+  it('reads the plans and their units, and keeps the plan images as images', () => {
+    const files = new Map([['_plans/plan_2_1.jpg', img()], ['_plans/plan_3_1.jpg', img()], ['_plans/evil.html', img()]])
+    const { dataset, files: kept } = _test.fromResult(r, files)
+    expect(dataset.plans!.map((p) => p.file)).toEqual(['_plans/plan_2_1.jpg'])
+    expect(dataset.plans![0].toMap).toEqual(tm)
+    expect(dataset.planUnits![0].unit).toBe('L2-15')
+    expect([...kept.keys()]).toEqual(['_plans/plan_2_1.jpg'])
+    expect(kept.get('_plans/plan_2_1.jpg')!.type).toBe('image/jpeg')
+    expect(dataset.files).toContain('_plans/plan_2_1.jpg')
+  })
+
+  it('outdoors, or an older result: no plans', () => {
+    expect(_test.fromResult({ ...r, session: { id: 's1' } }, new Map()).dataset.plans).toBeUndefined()
+    const { plans: _p, planUnits: _u, ...older } = r
+    const d = _test.fromResult(older, new Map()).dataset
+    expect(d.plans).toEqual([])
+    expect(d.planUnits).toEqual([])
+  })
+})
