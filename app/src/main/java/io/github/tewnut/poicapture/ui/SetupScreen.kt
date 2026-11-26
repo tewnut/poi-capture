@@ -203,35 +203,17 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     val plan = CapturePlan.of(CapturePlan.facadeForRoad(currentWay?.highway), target = target)
 
     // ---------- indoor: the building under / nearest to the walker (docs/indoor.md §4) ----------
-    var building by remember { mutableStateOf<Building?>(null) }
-    var noBuilding by remember { mutableStateOf(false) }          // the walker chose to go without one
-    var buildingStatus by remember { mutableStateOf<Int?>(null) }  // loading / none found / offline, null = shown
-    var lookupAt by remember { mutableStateOf<Pair<LatLon, Double>?>(null) }   // where to look, how far (m)
-    var lookupTick by remember { mutableIntStateOf(0) }                          // "Find the building" again
     val indoor = kind == SessionKind.INDOOR
     val anyFix = loc.fix
-    LaunchedEffect(indoor, anyFix != null) {
-        if (indoor && lookupAt == null && building == null && anyFix != null)
-            lookupAt = LatLon(anyFix.lat, anyFix.lon) to BuildingQuery.NEAR_M.toDouble()
-    }
-    LaunchedEffect(lookupAt, lookupTick) {
-        val (at, maxM) = lookupAt ?: return@LaunchedEffect
-        buildingStatus = R.string.setup_building_loading
-        try {
-            val all = BuildingQuery.parseBuildings(OverpassClient.body(settings.overpassUrl, BuildingQuery.buildingsQuery(at)))
-            val b = BuildingQuery.pick(all, at, maxM)
-            if (b == null) { if (building == null) buildingStatus = R.string.setup_building_none_found else buildingStatus = null; return@LaunchedEffect }
-            building = b; noBuilding = false; buildingStatus = null
-            // what is already mapped inside: shown per level while walking (optional: the walk works without it)
-            val features = runCatching { BuildingQuery.parseFeatures(OverpassClient.body(settings.overpassUrl, BuildingQuery.featuresQuery(b)), b) }
-                .getOrNull()
-            if (features != null && building?.osm == b.osm) building = b.copy(features = features)
-        } catch (e: Exception) {
-            buildingStatus = R.string.setup_building_offline
-        }
-    }
+    // no fix yet (location just switched on, first seconds): the phone's last known position, however old
+    val lastKnown = remember(loc.status) { lastKnownFix(ctx) }
+    val mapCenter = remember { arrayOfNulls<LatLon>(1) }
+    val lookup = rememberBuildingLookup(ctx, settings.overpassUrl, indoor, anyFix ?: lastKnown)
+    val building = lookup.building
+    val noBuilding = lookup.none
+    var searching by remember { mutableStateOf(false) }
 
-    // the same rule as the capture: Start only with a GPS fix from the last 5 s; indoors a position or a building
+    // the same rule as the capture: Start only    // the same rule as the capture: Start only with a GPS fix from the last 5 s; indoors a position or a building
     val ready = if (indoor) anyFix != null || building != null else live != null
 
     androidx.activity.compose.BackHandler(onBack = onBack)
@@ -243,6 +225,9 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
             }
         }
         if (info) SetupInfo(plan.photoEveryM, plan.maxSpeedKmh) { info = false }
+        if (searching) BuildingSearchSheet(settings.overpassUrl,
+            (anyFix ?: lastKnown)?.let { LatLon(it.lat, it.lon) } ?: mapCenter[0],
+            onPick = { h -> searching = false; lookup.pick(h) }, onLog = { lookup.log(it) }, onClose = { searching = false })
         if (tasksOpen) TasksSheet(loc.fix?.let { LatLon(it.lat, it.lon) }, taskFocus, onChanged = { tasksTick++ }) { tasksOpen = false; taskFocus = null }
         // ---------- map ----------
         Box(Modifier.weight(0.38f).heightIn(min = 150.dp).fillMaxWidth()) {
@@ -250,7 +235,9 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                 { taskFocus = it; tasksOpen = true }, Modifier.fillMaxSize().clipToBounds(),
                 building = if (indoor && !noBuilding) building else null,
                 // indoor: a tap picks the building there (the guess was wrong)
-                onTap = if (indoor) { p -> lookupAt = p to 30.0 } else null)
+                onTap = if (indoor) { p -> lookup.at(p, "tap") } else null, center = mapCenter)
+            if (indoor && lookup.pickOnMap) Pill(stringResource(R.string.setup_building_tap_now), bg = Palette.Black, fg = Palette.Lime,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp))
             val openTasks = tasks.count { it.open }
             if (openTasks > 0) androidx.compose.material3.AssistChip(onClick = { taskFocus = null; tasksOpen = true },
                 label = { Text("📋 " + stringResource(R.string.setup_tasks_chip, openTasks), fontSize = 12.sp) },
@@ -305,9 +292,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             io.github.tewnut.poicapture.core.Holding.HAND to stringResource(R.string.setup_holding_hand)), holding) { holding = it; Prefs.saveHolding(ctx, it) }
                     }
                     // indoor: shops only, in the hand: no target or holding to pick; the building instead of the road
-                    if (indoor) BuildingCard(building.takeIf { !noBuilding }, buildingStatus,
-                        onNone = { noBuilding = true },
-                        onFind = { noBuilding = false; lookupTick++; anyFix?.let { lookupAt = LatLon(it.lat, it.lon) to BuildingQuery.NEAR_M.toDouble() } })
+                    if (indoor) BuildingCard(lookup, onSearch = { searching = true })
                     if (!indoor) Column {
                         Hint(stringResource(R.string.setup_you_are_on))
                         Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
@@ -359,6 +344,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                                     .put("start", anyFix?.let { f -> JSONObject().put("lat", f.lat).put("lon", f.lon)
                                         .put("accuracyM", f.accuracyM.toDouble()).put("gps", f.gps && f.freshGps()) } ?: JSONObject.NULL))
                             CaptureService.store(ctx).create(s)
+                            // how the building was found (or not): the walk's first indoor.jsonl lines (docs/indoor.md §5)
+                            lookup.flushTo(CaptureService.store(ctx).indoorFile(s.id))
                             onStart(s.id)
                         }
                     startRef[0] = onStartClick
@@ -405,7 +392,7 @@ fun Hint(t: String, modifier: Modifier = Modifier, color: Color = Palette.Muted)
 @Composable
 private fun LiveMap(tileUrl: String, me: LiveLocation?, mine: CoverLayer,
                     tasks: List<io.github.tewnut.poicapture.core.FieldTask>, onTask: (String) -> Unit, modifier: Modifier,
-                    building: Building? = null, onTap: ((LatLon) -> Unit)? = null) {
+                    building: Building? = null, onTap: ((LatLon) -> Unit)? = null, center: Array<LatLon?>? = null) {
     val ctx = LocalContext.current
     val map = remember {
         MapView(ctx).apply {
@@ -444,6 +431,16 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, mine: CoverLayer,
         }
     }
     val tap = androidx.compose.runtime.rememberUpdatedState(onTap)
+    // the map's centre, for the name search when there is no position at all
+    DisposableEffect(map, center) {
+        if (center == null) return@DisposableEffect onDispose {}
+        val l = object : org.osmdroid.events.MapListener {
+            override fun onScroll(e: org.osmdroid.events.ScrollEvent?): Boolean { center[0] = map.mapCenter.let { LatLon(it.latitude, it.longitude) }; return false }
+            override fun onZoom(e: org.osmdroid.events.ZoomEvent?): Boolean = false
+        }
+        map.addMapListener(l)
+        onDispose { map.removeMapListener(l) }
+    }
     AndroidView({ map }, modifier) { m ->
         m.overlays.clear()
         if (onTap != null) m.overlays.add(org.osmdroid.views.overlay.MapEventsOverlay(object : org.osmdroid.events.MapEventsReceiver {

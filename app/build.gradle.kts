@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.tewnut.poicapture"
         minSdk = 30            // Android 11+: raw GNSS, camera/location foreground-service types
         targetSdk = 35
-        versionCode = 24
-        versionName = "0.21.1"
+        versionCode = 25
+        versionName = "0.22.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -81,6 +81,9 @@ dependencies {
     // "Scan setup QR" (upload server settings): Google's code scanner runs its own camera screen in Play services, so
     // the app asks for no camera permission and ships no scanner UI or model (module downloaded at install, manifest).
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // indoor floor plans (docs/indoor.md §7): Google's document scanner finds, straightens and crops the mall's board
+    // in its own screen (Play services module, downloaded on first use; minSdk 21). Without it: the app's corner editor.
+    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
     // traffic-signs ride: the sign detector (assets/signs, ml/signs) on the CPU. MIT licence; native libs, so release
     // builds keep only the ARM ABIs real phones use; debug keeps arm64 and x86_64 (the emulator).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")

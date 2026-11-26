@@ -20,10 +20,18 @@ data class Xy(val x: Double, val y: Double) {
     val bearing: Double get() = Geo.norm360(atan2(x, y) * 180 / PI)
 }
 
-/** Flat metres around an origin (equirectangular): exact enough over one building. */
+/**
+ * Flat metres around an origin (equirectangular): exact enough over one building. 110540 m per degree of latitude and
+ * 111320·cos(lat) m per degree of longitude, as processing and the web use (docs/indoor.md §7): a plan's `toMap` and
+ * the walk's metres convert to degrees the same way everywhere.
+ */
 class LocalFrame(val origin: LatLon) {
-    private val mLat = PI / 180 * 6371008.8
-    private val mLon = mLat * cos(origin.lat * PI / 180)
+    private val mLat = M_PER_DEG_LAT
+    private val mLon = M_PER_DEG_LON * cos(origin.lat * PI / 180)
+    companion object {
+        const val M_PER_DEG_LAT = 110540.0
+        const val M_PER_DEG_LON = 111320.0
+    }
     fun xy(p: LatLon) = Xy((p.lon - origin.lon) * mLon, (p.lat - origin.lat) * mLat)
     fun ll(p: Xy) = LatLon(origin.lat + p.y / mLat, origin.lon + p.x / mLon)
 }
@@ -62,6 +70,13 @@ class Pdr(
     private var unitSum = Xy(0.0, 0.0)        // sum of the steps' unit vectors since the last anchor (unclamped)
     private var lastAnchor: Xy? = if (anchored) Xy(0.0, 0.0) else null
     private var pushedOutM = 0.0              // metres the steps kept pushing through the wall
+    private var clampedM = 0.0                // metres of steps slid along the wall in the current episode
+
+    /**
+     * Diagnostics (indoor.jsonl `pdr` lines): "restep" (old, new step length), "reheading" (the offset's change),
+     * "clamp" (an episode of steps held at the wall ended: metres pushed), "release" (the steps went through: metres).
+     */
+    var onEvent: ((event: String, values: Map<String, Double>) -> Unit)? = null
 
     val latLon: LatLon get() = frame.ll(position)
     val headingDeg: Double? get() = rawYawDeg?.let { Geo.norm360(it + offsetDeg) }
@@ -114,13 +129,16 @@ class Pdr(
                 val w = min(1.0, truth.length / FULL_TRUST_M)
                 val s = truth.length / dr
                 if (s in MIN_STEP_M..MAX_STEP_M) {
+                    val old = stepLengthM
                     stepLengthM = (stepLengthM + w * (s - stepLengthM)).coerceIn(MIN_STEP_M, MAX_STEP_M)
                     newStep = stepLengthM
+                    onEvent?.invoke("restep", mapOf("old" to old, "new" to stepLengthM))
                 }
                 val r = norm180(truth.bearing - unitSum.bearing)
                 if (abs(r) <= MAX_ROTATION_DEG) {
                     offsetDeg = norm180(offsetDeg + w * r)
                     rot = w * r
+                    onEvent?.invoke("reheading", mapOf("changeDeg" to w * r, "offsetDeg" to offsetDeg))
                 }
             }
         }
@@ -129,7 +147,7 @@ class Pdr(
         unitSum = Xy(0.0, 0.0)
         stepsSinceAnchor = 0
         sinceAnchorM = 0.0
-        pushedOutM = 0.0
+        endClamp(); pushedOutM = 0.0
         anchored = true
         anchors++
         if (headingDeg != null) alignTo(headingDeg)
@@ -146,16 +164,25 @@ class Pdr(
      */
     private fun constrain(from: Xy, to: Xy): Xy {
         if (rings.isEmpty()) return to
-        if (inRings(to, rings)) { pushedOutM = 0.0; return to }
+        if (inRings(to, rings)) { endClamp(); pushedOutM = 0.0; return to }
         if (!inRings(from, rings)) return to
         pushedOutM += (to - from).length
-        if (pushedOutM > RELEASE_M) { pushedOutM = 0.0; return to }
+        if (pushedOutM > RELEASE_M) {
+            onEvent?.invoke("release", mapOf("pushedM" to pushedOutM))
+            clampedM = 0.0; pushedOutM = 0.0; return to
+        }
+        clampedM += (to - from).length
         val q = nearestOnRings(to, rings) ?: return from
         // from the point outside to the wall is the inward normal there: a little further, along the wall
         val inward = q - to
         if (inward.length < 1e-9) return from
         val inside = q + inward * (WALL_GAP_M / inward.length)
         return if (inRings(inside, rings)) inside else from
+    }
+
+    private fun endClamp() {
+        if (clampedM > 0) onEvent?.invoke("clamp", mapOf("pushedM" to clampedM))
+        clampedM = 0.0
     }
 
     companion object {

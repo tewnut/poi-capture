@@ -1,6 +1,6 @@
 # Indoor mode ("Trong nhà"): malls and other big buildings
 
-Status: design for app 0.21; processing (`.claude/skills/process-sweep`, scripts/indoor.py) and web (web/src/indoor.ts)
+Status: design for app 0.21 (0.22: building lookup, diagnostics, floor plans §7); processing (`.claude/skills/process-sweep`, scripts/indoor.py) and web (web/src/indoor.ts)
 built against it on 25 Nov. The shared contract between the three is this file.
 
 ## 1. What it is for
@@ -63,6 +63,20 @@ existing Overpass client (`net/OverpassClient.kt`), and shows it on the setup an
   footprint constraint).
 - Kept in the session (`session.building`, §5) so processing and the web have it without asking Overpass again.
 
+App 0.22 (the lookup was silent and sometimes never showed a building):
+- A mall or market mapped only as an area, `shop=mall` / `amenity=marketplace` without `building=*`, counts as the
+  building (same `building` object; its `osm` is that area).
+- The lookup starts at once from the phone's last known position (even stale) and runs again when a better fix
+  comes (moved > 100 m, or accuracy at least halved from > 30 m). Overpass mirrors are tried in turn (a runtime
+  error in the answer counts as a failure); requests are spaced 1.5 s apart but no longer queue behind a slow one.
+- The building card always says where it stands (waiting for a position / searching / none nearby / network error ·
+  Try again) and offers **Search by name** (buildings, `shop=mall`, `amenity=marketplace`, ways, relations and
+  nodes, name matched case- and accent-insensitively, within a 30 km box around the position or the map centre;
+  a node is looked up as a building at its point), **Pick on the map** (tap) and **No building**.
+- The last 30 buildings picked are cached on the phone (shown at once, offline too) while Overpass is asked again.
+- Every lookup is logged (logcat tag `QuetPho`) and written as a `lookup` line at the top of the walk's
+  `indoor.jsonl` (§5).
+
 ## 5. Data (session export)
 
 `session.json`:
@@ -114,6 +128,26 @@ What app 0.21 writes besides the above (all additive):
   "indoor"`); the road fields (`wayId`, `roadName`, `travel`, `sideOfTravel`, `sideOfWay`) are null. The manifest
   has `indoorFile: "indoor.jsonl"`. An indoor walk is never cut per street at upload.
 
+Diagnostics written into the walk by app 0.22 (all additive, so a real walk can be tuned from its upload):
+- `{"type": "lookup", "how": "auto|tap|name|name-picked", "fix": {"lat", "lon", "accM", "provider", "ageS"} | null,
+  "at": [lat, lon], "maxM", "ms", "http", "mirror", "tries", "found", "picked": "way/…" | null, "error": "…" | null}`:
+  every building lookup and name search at setup (coordinates to 4 decimals; a name search also has `text`, the
+  name typed, and a pick from its list is a line with `how: "name"`, `found: 1`, `picked`). These lines come first
+  in the file, timed by the same clock, before the walk starts.
+- `{"type": "pdr", "event": "restep", "old", "new"}` (step length re-estimated at an anchor),
+  `"reheading", "changeDeg", "offsetDeg"`, `"clamp", "pushedM"` (an episode of steps held at the wall ended),
+  `"release", "pushedM"` (the steps went through the wall: left by a door), `"step-source", "from": "detector",
+  "to": "accelerometer", "accelSteps"`.
+- `{"type": "floor-prompt", "suggested": "3", "answer": "accepted|dismissed|timeout|other:2"}` (`other:` = the walker
+  picked another level while the prompt was up).
+- `anchor` lines also carry `jumpM` (how far the live position was from the anchor) and `sinceM` (metres walked since
+  the previous anchor); `how` may also be `"plan"` (§7, with `plan`: the file) or `"unit"` (a unit label of a plan
+  tapped, with `unit`).
+- `session.indoor.diag` at the end of the walk: `{"lines": {type: count}, "steps": {source: count},
+  "anchors": {how: count}, "corrections": n, "meanCorrectionM", "meanCorrectionPct"}`: the mean |jump| at anchors
+  after the first one (the first fixes a guess), in metres and as % of the distance walked since the previous
+  anchor (stretches ≥ 5 m); the means are left out when there is none.
+
 ## 6. Processing and output
 
 - Positions recomputed from `indoor.jsonl` (§3), kept inside the footprint; uncertainty grows with the distance
@@ -135,3 +169,75 @@ What app 0.21 writes besides the above (all additive):
 - Web: the building footprint on the map, a level switcher (chips; shows one level's places, its track and
   photos; opens on the level with the most places), level and unit fields in the review panel; the CSV / GeoJSON /
   KML / Shapefile / Excel exports have `level`, `unit`, `building` columns.
+
+## 7. Floor plans (app 0.22, processing, web)
+
+Mall boards ("Bạn đang ở đây" / "You are here") are the best map of a floor. The walker photographs one when
+starting and after every level change (the app prompts "Chụp sơ đồ tầng"), and the app turns it into a map layer
+right away:
+
+1. **Photo**: a normal full-size photo, item `trigger: "plan"`, `level` (button "Sơ đồ" on the capture screen, or the
+   prompt). It records where and when the walker stood in front of the board.
+2. **Straighten**: Google's ML Kit document scanner opens right after (its own screen: finds the board's edges,
+   corrects the perspective, lets the walker adjust the corners, gallery import allowed) and returns the flat page:
+   `capture: "mlkit-scanner"`, no `corners`. When the scanner is not available, fails or is cancelled, the app's own
+   editor on the plan photo: the board's 4 corners (detected, else the photo's corners), draggable, then "Làm thẳng"
+   warps it to a rectangle: `capture: "manual"` with `corners`. Either way saved as `plans/plan_<level>_<n>.jpg`
+   (long edge ≤ 2048 px) in the session folder.
+3. **You are here**: the walker taps the board's "you are here" dot on the straightened plan (or "no dot") →
+   `youAreHere` (plan px).
+4. **Place on the map**: a similarity transform (move, rotate, uniform scale) from plan pixels to the map. First
+   guess: fit the plan's rectangle to the building footprint (its oriented bounding box, the 4 rotations, kept by
+   how well the shapes cover each other; between a plan and the same plan turned 180°, the one whose top points
+   nearest to the camera's direction at the plan photo, as boards are drawn for whoever faces them). No footprint:
+   the "you are here" dot (or the plan's centre) at the walker's position, top toward the camera's direction, long
+   edge ≈ 150 m (`placedBy: "guess"` if accepted as is). The walker adjusts with one finger (move) / two fingers
+   (move, turn, scale), or pins 2 points (tap a spot on the plan, then where it is on the map, twice).
+5. **Use**: the plan is drawn under the current level's track on the capture map; "Tôi ở đây" (long-press) works
+   on it. The first placement of a plan with a dot becomes an **anchor** `how: "plan"` at the dot's map point, timed
+   at the plan photo (`t` of the line = the photo's `elapsedNanos`, so this line is out of time order in the file;
+   the live position is moved by what was walked since the photo). Unit labels read on the plan are shown at close
+   zoom; tapping one = "Tôi ở đây" at that unit (anchor `how: "unit"`, with `unit`).
+
+`session.building.plans` (also written to `plans/plans.json`; when the walk has no building, `building` is `null` and
+the same list is in `session.indoor.plans`):
+```json
+[{"level": "2", "photo": "<item id of the plan photo>", "file": "plans/plan_2_1.jpg", "size": [2048, 1365],
+  "capture": "mlkit-scanner|manual",
+  "corners": [[0.12, 0.08], [0.91, 0.10], [0.93, 0.88], [0.10, 0.86]],
+  "toMap": {"origin": [10.80213, 106.74122], "scaleMPerPx": 0.061, "rotationDeg": 33.5},
+  "placedBy": "footprint|drag|points|guess", "youAreHere": [812, 640], "t": 123456789,
+  "units": [{"unit": "L2-15", "x": 812, "y": 640, "h": 18}]}]
+```
+`corners`: manual only (null when scanned): the board on the photo as shown upright (EXIF orientation applied),
+fractions, clockwise from top-left. `toMap`: plan pixel (x right, y down) → metres east/north of `origin` (the map
+position of plan pixel 0,0): rotate the pixel vector by `rotationDeg` (clockwise on the map; it is also the bearing
+the plan's top points to), multiply by `scaleMPerPx`, y flipped; null until the plan is placed (the walker may
+cancel the placement and place it later with 🗺 on the map). Degrees: 110540 m/° latitude, 111320·cos(lat) m/°
+longitude (the PDR's local frame uses the same since 0.22). `youAreHere`: plan px or null. `t`: the plan photo's
+`elapsedRealtimeNanos`. `units`: unit numbers read on the phone (ML Kit text recognition on the straightened plan),
+hints only: centre `x`, `y` and height `h` of the label's box in plan px, `unit` as read upper-cased ("L2-15",
+"B1-03", "215", "2.15", "K-05", "SH 12"); a bare number is kept when ≤ 2 digits or when it starts with the plan's
+level; prices, phone numbers, years, times and sizes are left out. Filled in a few seconds after the plan is saved
+(an empty list until then, or when the reader is not on the phone).
+
+The manifest has `plansFile: "plans/plans.json"` (null without plans); the zip has `plans/` (plans.json and the
+jpgs). Each indoor photo item may have `nearUnit: {"unit", "distanceM", "plan"}`: the plan unit nearest to the live
+estimate on the photo's level (within 25 m), a hint.
+
+`indoor.jsonl` lines:
+- `{"type": "plan", "level": "2", "file": ..., "toMap": {...}, "placedBy"}` when a plan is placed or moved, and the
+  `anchor` with `how: "plan"` (first placement right after the photo, with a dot).
+- `{"type": "plan-corners", "level", "file", "capture": "mlkit-scanner|manual"}` when a plan is saved; manual adds
+  `"proposed": [[x, y] ×4]`, `"final": [[x, y] ×4]` (fractions) and `"detector": "contour|fallback"`.
+- `{"type": "plan-place", "level", "file", "proposed": {toMap} | null, "final": {toMap},
+  "how": "footprint|drag|points|guess", "dragMs"}` when a placement is accepted (`dragMs`: time in the placement).
+
+Processing re-places a `how: "plan"` anchor from `youAreHere` through the plan's final `toMap` (matched by level and
+nearest `t` within 120 s), which is why the plan entry's `t` is the plan photo's time.
+
+Processing (agent): reads every plan — unit numbers and their outlines (`planUnits: [{level, unit, polygon in
+plan px, name if printed}]` in places.json) — maps them through `toMap`, snaps each place with a unit to its
+unit's centre (position `method: "floor plan unit"`), and cross-checks the shop list against the plan like a
+directory board. Web: each level's plan drawn under that level (Leaflet image overlay with the transform), with
+the unit outlines when present.

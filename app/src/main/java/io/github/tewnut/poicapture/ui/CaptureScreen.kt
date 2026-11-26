@@ -150,6 +150,21 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     var placing by remember { mutableStateOf(false) }                                   // ⌖: the next tap is "I am here"
     var hereAt by remember { mutableStateOf<io.github.tewnut.poicapture.core.LatLon?>(null) }     // waiting for its confirmation
     var directionFrom by remember { mutableStateOf<io.github.tewnut.poicapture.core.LatLon?>(null) } // next tap = walking direction
+    // floor plans (docs/indoor.md §7): the board just photographed, the plan being placed, a unit label tapped
+    var planShot by remember { mutableStateOf<io.github.tewnut.poicapture.capture.PlanShot?>(null) }
+    var placingPlan by remember { mutableStateOf<PlanPlacing?>(null) }
+    var proposedHow by remember { mutableStateOf("footprint") }
+    var hereUnit by remember { mutableStateOf<String?>(null) }
+    val levelName = io.github.tewnut.poicapture.core.Levels.name(iu.level)
+    val levelPlan = iu.plans.lastOrNull { it.level == levelName && it.toMap != null }
+    fun startPlacing(index: Int, shot: io.github.tewnut.poicapture.capture.PlanShot?) {
+        val s = svc ?: return
+        val e = s.indoorState.value.plans.getOrNull(index) ?: return
+        val (prop, how) = e.toMap?.let { it to (e.placedBy ?: "drag") } ?: s.proposePlacement(index, shot) ?: return
+        proposedHow = how
+        placingPlan = PlanPlacing(index, e, shot, prop, how)
+        mapBig = true
+    }
     val poiMode = session?.kind == SessionKind.POI
     val askRole = session?.photoRoles != null          // POI: the contributor picks the kind of each photo (off by default)
     val photoRoles = session?.photoRoles ?: PhotoRoles.DEFAULT
@@ -304,6 +319,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 indoorMode -> {
                     pauseButton(64.dp)
                     DirectoryButton(ui.camera == "on") { svc?.takePhoto("directory") }
+                    PlanButton(ui.camera == "on" && planShot == null) { svc?.takePlanPhoto { planShot = it } }
                 }
                 else -> pauseButton(64.dp)
             }
@@ -323,6 +339,7 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 indoorMode -> {
                     pauseButton(64.dp)
                     DirectoryButton(ui.camera == "on") { svc?.takePhoto("directory") }
+                    PlanButton(ui.camera == "on" && planShot == null) { svc?.takePlanPhoto { planShot = it } }
                 }
                 else -> pauseButton(64.dp)
             }
@@ -382,7 +399,9 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                     .fillMaxWidth(0.36f).fillMaxHeight(0.55f)
             MapFrame(mapBig, mapModifier) {
                 IndoorMap(session.settings.tileUrl, session.building, iu, walked, hereAt,
-                    onLongPress = { p -> placing = false; directionFrom = null; hereAt = p },
+                    planDir = svc?.sessionDir, plan = levelPlan, placing = placingPlan,
+                    onUnit = { u, p -> placing = false; directionFrom = null; hereUnit = u.unit; hereAt = p },
+                    onLongPress = { p -> if (placingPlan == null) { placing = false; directionFrom = null; hereUnit = null; hereAt = p } },
                     onTap = { p ->
                         val from = directionFrom
                         when {
@@ -393,6 +412,9 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 Column(Modifier.align(Alignment.TopEnd).padding(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     MapIcon(if (mapBig) "✕" else "⤢") { mapBig = !mapBig }
                     MapIcon("⌖", active = placing) { placing = !placing; directionFrom = null }
+                    // "Đặt sơ đồ": move the level's plan again
+                    val idx = iu.plans.indexOfLast { it.level == levelName }
+                    if (idx >= 0 && placingPlan == null) MapIcon("🗺") { startPlacing(idx, null) }
                 }
                 val tip = when {
                     placing -> stringResource(R.string.capture_here_pick)
@@ -412,14 +434,32 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
                 FloorPrompt(iu.level, f, onAnswer = { yes -> svc?.answerFloor(yes) },
                     modifier = Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 110.dp, start = 12.dp, end = 76.dp))
             }
+            // "Chụp sơ đồ tầng": at the start and on each level without a plan
+            if (iu.floorPrompt == null && iu.planPrompt && planShot == null && placingPlan == null)
+                PlanPrompt(iu.level, onShoot = { svc?.takePlanPhoto { planShot = it } }, onDismiss = { svc?.dismissPlanPrompt() },
+                    modifier = Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 110.dp, start = 12.dp, end = 76.dp))
+            placingPlan?.let { pl ->
+                PlacementBar(pl, footprint = svc?.footprint != null,
+                    onDone = {
+                        svc?.placePlan(pl.index, pl.toMap, pl.how, pl.proposed, System.currentTimeMillis() - pl.startedMs, pl.shot)
+                        placingPlan = null
+                    },
+                    onReset = { pl.toMap = pl.proposed; pl.how = proposedHow; pl.pins.clear() },
+                    onCancel = { placingPlan = null },
+                    modifier = Modifier.align(Alignment.BottomCenter).safeDrawingPadding().padding(start = 10.dp, end = 10.dp, bottom = 12.dp + aboveBar))
+            }
         }
         hereAt?.let { p ->
             HereSheet(iu.level, iu.levels, onConfirm = { lvl, dir ->
-                svc?.anchorHere(p, lvl)
-                hereAt = null
+                svc?.anchorHere(p, lvl, unit = hereUnit)
+                hereAt = null; hereUnit = null
                 if (dir) directionFrom = p
-            }, onCancel = { hereAt = null })
+            }, onCancel = { hereAt = null; hereUnit = null }, unit = hereUnit)
         }
+        // the board just photographed: scanner (or corners), "you are here", then its placement on the map
+        val shot = planShot
+        if (shot != null && svc != null) PlanCaptureFlow(svc, shot,
+            onDone = { idx -> planShot = null; startPlacing(idx, shot) }, onCancel = { planShot = null })
 
         // ---------- no GPS yet: the session cannot start (once started, GPS lost is only an alert at the top) ----------
         if (session != null && !ui.gpsFresh && notStarted && ui.camera == "on" && !indoorMode) GpsLostCard(ui, Modifier.align(Alignment.Center),
@@ -539,6 +579,15 @@ private fun DirectoryButton(enabled: Boolean, onClick: () -> Unit) {
     Button(onClick = onClick, enabled = enabled, modifier = Modifier.height(52.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Palette.Black, contentColor = Palette.Lime)) {
         Text("🗂 " + stringResource(R.string.capture_directory), fontWeight = FontWeight.Bold)
+    }
+}
+
+/** "Sơ đồ": photograph the floor's plan board (docs/indoor.md §7). */
+@Composable
+private fun PlanButton(enabled: Boolean, onClick: () -> Unit) {
+    Button(onClick = onClick, enabled = enabled, modifier = Modifier.height(52.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = Palette.Black, contentColor = Palette.Lime)) {
+        Text("🗺 " + stringResource(R.string.capture_plan), fontWeight = FontWeight.Bold)
     }
 }
 

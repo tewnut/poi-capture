@@ -87,7 +87,9 @@ object Palette {
  * fix older than a minute, maybe from elsewhere): fine to centre a map, not to say which road the contributor is on.
  */
 data class LiveLocation(val lat: Double, val lon: Double, val accuracyM: Float, val simulated: Boolean, val atMs: Long,
-                        val gps: Boolean = true, val stale: Boolean = false, val fixNanos: Long = 0L) {
+                        val gps: Boolean = true, val stale: Boolean = false, val fixNanos: Long = 0L,
+                        /** the location provider ("gps", "fused", "network", "passive"), for the logs */
+                        val provider: String = "") {
     /** A GPS fix at most [GPS_MAX_AGE_MS] old: the same rule as the capture (every photo needs one). */
     fun freshGps(nowNanos: Long = SystemClock.elapsedRealtimeNanos()): Boolean =
         gps && !stale && (nowNanos - fixNanos) / 1_000_000 <= io.github.tewnut.poicapture.capture.GPS_MAX_AGE_MS
@@ -153,7 +155,8 @@ fun rememberLocationState(): LocationState {
             val ageMs = (SystemClock.elapsedRealtimeNanos() - l.elapsedRealtimeNanos) / 1_000_000
             val mock = if (Build.VERSION.SDK_INT >= 31) l.isMock else @Suppress("DEPRECATION") l.isFromMockProvider
             fix = LiveLocation(l.latitude, l.longitude, l.accuracy, mock || isEmulator(), System.currentTimeMillis(),
-                gps = isGps, stale = remembered && ageMs > 60_000, fixNanos = l.elapsedRealtimeNanos)
+                gps = isGps, stale = remembered && ageMs > 60_000, fixNanos = l.elapsedRealtimeNanos,
+                provider = (l.provider ?: "") + if (remembered) "-last" else "")
         }
         val listener = LocationListener { accept(it, remembered = false) }
         val providers = buildList {

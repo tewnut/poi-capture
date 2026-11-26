@@ -10,6 +10,7 @@ import io.github.tewnut.poicapture.core.Building
 import io.github.tewnut.poicapture.core.Fix
 import io.github.tewnut.poicapture.core.FloorDetector
 import io.github.tewnut.poicapture.core.Geo
+import io.github.tewnut.poicapture.core.IndoorDiag
 import io.github.tewnut.poicapture.core.LatLon
 import io.github.tewnut.poicapture.core.Levels
 import io.github.tewnut.poicapture.core.Pdr
@@ -40,6 +41,10 @@ class IndoorTracker(
     /** called on the sensor thread when the barometer suggests a change of level (the new level) */
     private val onFloor: (Int) -> Unit,
 ) : SensorEventListener {
+    /** the walk's diagnostics summary (session.indoor.diag); the setup's `lookup` lines already in the file count too */
+    val diag = IndoorDiag().also { d ->
+        runCatching { if (file.exists()) file.forEachLine { l -> runCatching { JSONObject(l).optString("type") }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { d.line(it) } } }
+    }
     private val out: BufferedWriter = file.also { it.parentFile?.mkdirs() }.let { java.io.FileWriter(it, true).buffered() }
     private val thread = HandlerThread("indoor").apply { start() }
     private val floor = FloorDetector()
@@ -62,6 +67,13 @@ class IndoorTracker(
     private val hasGame = sm.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR) != null
 
     fun start() {
+        // what the dead reckoning corrected by itself (indoor.jsonl `pdr` lines), called under this object's lock
+        pdr.onEvent = { ev, v ->
+            val o = JSONObject().put("t", now()).put("type", "pdr").put("event", ev)
+            for ((k, x) in v) o.put(k, Math.round(x * 1000) / 1000.0)
+            log(o)
+            android.util.Log.i("QuetPho", "pdr $ev $v")
+        }
         val h = Handler(thread.looper)
         val det = sm.getDefaultSensor(Sensor.TYPE_STEP_DETECTOR)
         useDetector = det != null && stepPermission
@@ -93,6 +105,9 @@ class IndoorTracker(
                 // the step detector says nothing while the accelerometer counts steps: some phones batch or withhold it
                 if (useDetector && detectorSteps == 0 && accelCount >= FALLBACK_STEPS) {
                     useDetector = false; stepSource = "accelerometer"
+                    synchronized(this) { log(JSONObject().put("t", e.timestamp).put("type", "pdr").put("event", "step-source")
+                        .put("from", "detector").put("to", "accelerometer").put("accelSteps", accelCount)) }
+                    android.util.Log.i("QuetPho", "pdr: no step-detector events after $accelCount steps: accelerometer")
                 }
                 if (!useDetector) step(t, "accelerometer")
             }
@@ -149,16 +164,30 @@ class IndoorTracker(
      * second tap toward where the walker goes) the yaw is re-aligned too.
      */
     @Synchronized
-    fun anchor(at: LatLon, lvl: Int, how: String, headingDeg: Double? = null): Pdr.AnchorResult {
-        val t = now()
+    fun anchor(at: LatLon, lvl: Int, how: String, headingDeg: Double? = null, extra: JSONObject? = null,
+               t: Long = now(), logAt: LatLon = at): Pdr.AnchorResult {
         if (lvl != level) setLevel(lvl, "picked")
-        log(JSONObject().put("t", t).put("type", "anchor").put("lat", at.lat).put("lon", at.lon).put("level", Levels.name(lvl))
-            .put("how", how).put("headingDeg", headingDeg?.let { r1(it) } ?: JSONObject.NULL))
+        val line = JSONObject().put("t", t).put("type", "anchor").put("lat", logAt.lat).put("lon", logAt.lon).put("level", Levels.name(lvl))
+            .put("how", how).put("headingDeg", headingDeg?.let { r1(it) } ?: JSONObject.NULL)
+        extra?.let { x -> for (k in x.keys()) line.put(k, x.get(k)) }
+        val before = pdr.anchored
+        val since = pdr.sinceAnchorM
         val r = pdr.anchor(at, null)
+        // how far the live position was off: the drift since the previous anchor (diagnostics)
+        line.put("jumpM", r1(r.jumpM)).put("sinceM", r1(since))
+        log(line)
+        diag.anchor(how, r.jumpM, since, before)
         if (r.rotationDeg != null || r.stepLengthM != null) log(JSONObject().put("t", t).put("type", "align")
             .put("offsetDeg", r1(pdr.offsetDeg)).put("how", "anchors").put("stepLengthM", Math.round(pdr.stepLengthM * 1000) / 1000.0))
         if (headingDeg != null) setHeading(headingDeg, "drag")
         return r
+    }
+
+    /** A line of the app's own (plan, plan-corners, plan-place, floor-prompt) into indoor.jsonl, timed now if no `t`. */
+    @Synchronized
+    fun logLine(o: JSONObject) {
+        if (!o.has("t")) o.put("t", now())
+        log(o)
     }
 
     /** The walking direction now is [deg] (a drag on the map, the GPS course outside). */
@@ -203,7 +232,11 @@ class IndoorTracker(
         return true
     }
 
-    private fun log(o: JSONObject) { runCatching { out.write(o.toString()); out.write("\n") } }
+    private fun log(o: JSONObject) {
+        val type = o.optString("type")
+        if (type == "step") diag.step(o.optString("src")) else if (type != "anchor") diag.line(type)   // anchors: counted in anchor()
+        runCatching { out.write(o.toString()); out.write("\n") }
+    }
 
     private fun now() = android.os.SystemClock.elapsedRealtimeNanos()
 

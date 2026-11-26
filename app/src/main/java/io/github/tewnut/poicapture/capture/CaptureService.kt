@@ -77,6 +77,12 @@ import io.github.tewnut.poicapture.core.CapturePlan
 import io.github.tewnut.poicapture.core.MountEstimate
 import io.github.tewnut.poicapture.core.MountEstimator
 import io.github.tewnut.poicapture.core.LatLon
+import io.github.tewnut.poicapture.core.FloorPlanEntry
+import io.github.tewnut.poicapture.core.PlanFit
+import io.github.tewnut.poicapture.core.PlanToMap
+import io.github.tewnut.poicapture.core.PlanUnits
+import io.github.tewnut.poicapture.core.Xy
+import android.util.Log
 import io.github.tewnut.poicapture.core.FieldTask
 import io.github.tewnut.poicapture.core.FieldTaskStore
 import io.github.tewnut.poicapture.core.FieldTasks
@@ -204,7 +210,13 @@ data class IndoorUi(
     val trackVersion: Int = 0,            // the walked track changed (the map redraws it)
     val stepSource: String = "",
     val barometer: Boolean = true,
+    val planPrompt: Boolean = false,      // "Chụp sơ đồ tầng": no plan of this level yet (start, level change)
+    val plans: List<io.github.tewnut.poicapture.core.FloorPlanEntry> = emptyList(),   // docs/indoor.md §7
 )
+
+/** The plan photo just taken (docs/indoor.md §7): what the scanner / editor and the placement need. */
+data class PlanShot(val itemId: String, val file: java.io.File, val level: Int, val tNanos: Long, val headingDeg: Double?,
+                    val position: LatLon?)
 
 /**
  * The capture engine as a foreground service (camera + location), so a session keeps recording when the screen
@@ -921,7 +933,7 @@ class CaptureService : LifecycleService() {
 
     // ---------- photos ----------
 
-    fun takePhoto(trigger: String, role: String? = null) {
+    fun takePhoto(trigger: String, role: String? = null, onSaved: ((String, java.io.File, JSONObject) -> Unit)? = null) {
         val ic = imageCapture ?: return
         if (_state.value.camera != "on") return
         // a GPS fix is needed to start; once started, GPS lost (inside a building, under an arcade) only raises an
@@ -1011,6 +1023,7 @@ class CaptureService : LifecycleService() {
                     return
                 }
                 store.appendItem(session.id, meta)
+                onSaved?.let { cb -> ContextCompat.getMainExecutor(this@CaptureService).execute { cb(id, file, meta) } }
                 if (session.kind == SessionKind.SWEEP && session.target == SweepTarget.ADDRESSES)
                     readPlates(id, file, meta.optString("roadName").takeIf { it.isNotBlank() })
                 if (signs) findSigns(id, file)
@@ -1245,7 +1258,12 @@ class CaptureService : LifecycleService() {
             (b == null || !b.contains(start)))
             t.anchor(start, level, "gps")
         levelsSeen += Levels.name(level)
-        _indoor.update { it.copy(stepSource = t.stepSource, barometer = t.hasBarometer) }
+        synchronized(plans) {
+            plans.clear()
+            plans += b?.plans?.takeIf { it.isNotEmpty() } ?: FloorPlanEntry.listOf(session.indoor?.optJSONArray("plans"))
+        }
+        _indoor.update { it.copy(stepSource = t.stepSource, barometer = t.hasBarometer, plans = plansCopy(),
+            planPrompt = plansCopy().none { p -> p.level == Levels.name(level) }) }
         publishIndoor(newSegment = true)
     }
 
@@ -1258,6 +1276,8 @@ class CaptureService : LifecycleService() {
             .put("steps", t.pdr.steps).put("walkedM", Math.round(t.pdr.walkedM * 10) / 10.0)
             .put("offsetDeg", Math.round(t.pdr.offsetDeg * 10) / 10.0).put("stepSource", t.stepSource)
             .put("barometer", t.hasBarometer)
+            .put("diag", JSONObject(t.diag.summary()))
+        Log.i("QuetPho", "indoor diag: ${t.diag.summary()}")
         session.building = session.building?.copy(levelsSeen = levelsSeen.sortedBy { Levels.parse(it) ?: 0 })
         indoorTracker = null
     }
@@ -1369,6 +1389,13 @@ class CaptureService : LifecycleService() {
                 .put("building", session.building?.osm ?: JSONObject.NULL)
             facadeFields(ll, hdg, facadeNow)?.let { fj -> for (k in fj.keys()) meta.put(k, fj.get(k)) }
             if (meta.has("facadeLat")) meta.put("facadeSource", "indoor")
+            // the plan's unit nearest to the estimate on this level: a hint for processing (docs/indoor.md §7)
+            val lvl = Levels.name(t.level)
+            plansCopy().lastOrNull { it.level == lvl && it.toMap != null && it.units.isNotEmpty() }?.let { pl ->
+                PlanUnits.nearest(pl.units, pl.toMap!!, ll)?.let { (u, d) ->
+                    meta.put("nearUnit", JSONObject().put("unit", u.unit).put("distanceM", r1(d)).put("plan", pl.file))
+                }
+            }
         }
     }
 
@@ -1377,19 +1404,24 @@ class CaptureService : LifecycleService() {
         _indoor.update { it.copy(floorPrompt = level, levels = levelRange(level)) }
         floorPromptJob?.cancel()
         // not answered (phone in a pocket on the escalator): taken as the barometer says, marked "guessed"
-        floorPromptJob = lifecycleScope.launch { delay(FLOOR_GUESS_MS); if (_indoor.value.floorPrompt == level) changeLevel(level, "guessed") }
+        floorPromptJob = lifecycleScope.launch {
+            delay(FLOOR_GUESS_MS)
+            if (_indoor.value.floorPrompt == level) { floorPromptLine(level, "timeout"); changeLevel(level, "guessed") }
+        }
     }
 
     /** "Lên tầng 2?" answered: yes = that level, no = the walker is still on this one (the pressure now is its own). */
     fun answerFloor(yes: Boolean) {
         val l = _indoor.value.floorPrompt ?: return
         floorPromptJob?.cancel()
+        floorPromptLine(l, if (yes) "accepted" else "dismissed")
         if (yes) changeLevel(l, "confirmed") else { indoorTracker?.keepLevel(); _indoor.update { it.copy(floorPrompt = null) } }
     }
 
     /** The level picker. */
     fun pickLevel(level: Int) {
         floorPromptJob?.cancel()
+        _indoor.value.floorPrompt?.let { floorPromptLine(it, "other:" + Levels.name(level)) }
         changeLevel(level, "picked")
     }
 
@@ -1397,14 +1429,21 @@ class CaptureService : LifecycleService() {
         val t = indoorTracker ?: return
         t.setLevel(level, how)
         levelsSeen += Levels.name(level)
-        _indoor.update { it.copy(floorPrompt = null) }
+        // a level without a plan yet: "Chụp sơ đồ tầng"
+        _indoor.update { it.copy(floorPrompt = null, planPrompt = plansCopy().none { p -> p.level == Levels.name(level) }) }
         publishIndoor(newSegment = true)
     }
 
+    private fun floorPromptLine(suggested: Int, answer: String) {
+        indoorTracker?.logLine(JSONObject().put("type", "floor-prompt").put("suggested", Levels.name(suggested)).put("answer", answer))
+        Log.i("QuetPho", "floor prompt ${Levels.name(suggested)}: $answer")
+    }
+
     /** "Tôi ở đây": the walker is at [at] on [level]; with [headingDeg] (second tap) the walking direction too. */
-    fun anchorHere(at: LatLon, level: Int, headingDeg: Double? = null) {
+    fun anchorHere(at: LatLon, level: Int, headingDeg: Double? = null, unit: String? = null) {
         val t = indoorTracker ?: return
-        t.anchor(at, level, "tap", headingDeg)
+        // a unit label of the plan tapped: anchor "unit" at that unit
+        t.anchor(at, level, if (unit != null) "unit" else "tap", headingDeg, unit?.let { JSONObject().put("unit", it) })
         levelsSeen += Levels.name(level)
         _indoor.update { it.copy(floorPrompt = null) }
         publishIndoor(newSegment = true)
@@ -1418,6 +1457,139 @@ class CaptureService : LifecycleService() {
 
     /** The walked track of one level, as segments (copied). */
     fun indoorTrackOf(level: Int): List<List<LatLon>> = synchronized(indoorTrack) { indoorTrack[level]?.map { it.toList() } ?: emptyList() }
+
+    // ---------- floor plans (docs/indoor.md §7) ----------
+
+    private val plans = mutableListOf<FloorPlanEntry>()
+    private fun plansCopy(): List<FloorPlanEntry> = synchronized(plans) { plans.toList() }
+
+    /** "Chụp sơ đồ tầng" closed without a photo. */
+    fun dismissPlanPrompt() = _indoor.update { it.copy(planPrompt = false) }
+
+    /**
+     * The board's photo: a normal photo (trigger "plan", its level), then [onShot] on the main thread with what the
+     * scanner / editor and the placement need (the time, the heading and the live position when it was taken).
+     */
+    fun takePlanPhoto(onShot: (PlanShot) -> Unit) {
+        val tr = indoorTracker ?: return
+        _indoor.update { it.copy(planPrompt = false) }
+        val (level, heading, pos) = synchronized(tr) { Triple(tr.level, tr.pdr.headingDeg, tr.pdr.latLon) }
+        takePhoto("plan") { id, file, meta ->
+            onShot(PlanShot(id, file, level, meta.optLong("elapsedNanos", SystemClock.elapsedRealtimeNanos()), heading, pos))
+        }
+    }
+
+    /** Where the next plan of [level] goes: (relative name "plans/plan_2_1.jpg", the file). */
+    fun newPlanFile(level: Int): Pair<String, java.io.File> {
+        val name = FloorPlanEntry.fileName(Levels.name(level), plansCopy())
+        return name to java.io.File(store.dir(session.id), name)
+    }
+
+    /** A plan's image file. */
+    fun planFile(e: FloorPlanEntry) = java.io.File(store.dir(session.id), e.file)
+    /** The session folder (plan files are relative to it). */
+    val sessionDir: java.io.File get() = store.dir(session.id)
+
+    /** The building's footprint, for the first placement (null without a building). */
+    val footprint: List<LatLon>? get() = session.building?.footprint?.takeIf { it.size >= 3 }
+
+    /**
+     * A straightened plan saved ([entry], not placed yet): kept, logged (`plan-corners`: how it was captured, the corners
+     * proposed and kept when straightened by hand), its unit numbers read in the background. Returns its index.
+     */
+    fun addPlan(entry: FloorPlanEntry, proposed: List<Xy>?, detector: String?): Int {
+        val i = synchronized(plans) { plans += entry; plans.size - 1 }
+        val line = JSONObject().put("type", "plan-corners").put("level", entry.level).put("file", entry.file).put("capture", entry.capture)
+        if (entry.capture == "manual") {
+            fun arr(c: List<Xy>?): Any = c?.let { l -> org.json.JSONArray().apply { l.forEach { put(org.json.JSONArray().put(r4(it.x)).put(r4(it.y))) } } } ?: JSONObject.NULL
+            line.put("proposed", arr(proposed)).put("final", arr(entry.corners)).put("detector", detector ?: "fallback")
+        }
+        indoorTracker?.logLine(line)
+        Log.i("QuetPho", "plan ${entry.file}: ${entry.width}x${entry.height} (${entry.capture}${detector?.let { ", $it" } ?: ""})")
+        savePlans()
+        readPlanUnits(entry.file)
+        return i
+    }
+
+    private fun r4(d: Double) = Math.round(d * 10000) / 10000.0
+
+    /** ML Kit on the straightened plan: its unit numbers (hints) with their positions in plan px. */
+    private fun readPlanUnits(file: String) {
+        val f = java.io.File(store.dir(session.id), file)
+        ocr.execute {
+            val level = synchronized(plans) { plans.firstOrNull { it.file == file }?.level }
+            val units = runCatching { PlanUnits.read(SignOcr.planWords(f), level) }
+                .onFailure { Log.i("QuetPho", "plan units: no reading (${it.message})") }.getOrNull() ?: return@execute
+            Log.i("QuetPho", "plan $file: ${units.size} unit numbers read")
+            ContextCompat.getMainExecutor(this).execute {
+                synchronized(plans) { val k = plans.indexOfFirst { it.file == file }; if (k >= 0) plans[k] = plans[k].copy(units = units) }
+                savePlans()
+            }
+        }
+    }
+
+    fun setYouAreHere(index: Int, px: Xy?) {
+        synchronized(plans) { if (index in plans.indices) plans[index] = plans[index].copy(youAreHere = px) }
+        savePlans()
+    }
+
+    /**
+     * The first placement of a plan: fitted to the building's footprint (its top toward the camera's direction when the
+     * board was photographed), else around the walker's position (the "you are here" dot on it). (transform, how)
+     */
+    fun proposePlacement(index: Int, shot: PlanShot?): Pair<PlanToMap, String>? {
+        val e = plansCopy().getOrNull(index) ?: return null
+        val up = shot?.headingDeg
+        footprint?.let { fp -> PlanFit.fitToFootprint(e.width, e.height, fp, up)?.let { return it.toMap to "footprint" } }
+        val at = shot?.position ?: indoorTracker?.pdr?.latLon ?: session.building?.center ?: return null
+        return PlanFit.guess(e.width, e.height, at, e.youAreHere, up) to "guess"
+    }
+
+    /**
+     * The walker accepted the plan's placement: kept in the session and plans/plans.json, `plan` and `plan-place` lines;
+     * the first time, the board's "you are here" dot becomes an anchor (how "plan") at the plan photo's time.
+     */
+    fun placePlan(index: Int, final: PlanToMap, how: String, proposed: PlanToMap?, dragMs: Long, shot: PlanShot?) {
+        val before = plansCopy().getOrNull(index) ?: return
+        val e = before.copy(toMap = final, placedBy = how)
+        synchronized(plans) { plans[index] = e }
+        savePlans()
+        val t = indoorTracker
+        t?.logLine(JSONObject().put("type", "plan").put("level", e.level).put("file", e.file)
+            .put("toMap", FloorPlanEntry.toMapJson(final)).put("placedBy", how))
+        t?.logLine(JSONObject().put("type", "plan-place").put("level", e.level).put("file", e.file)
+            .put("proposed", proposed?.let { FloorPlanEntry.toMapJson(it) } ?: JSONObject.NULL)
+            .put("final", FloorPlanEntry.toMapJson(final)).put("how", how).put("dragMs", dragMs))
+        Log.i("QuetPho", "plan ${e.file} placed by $how: ${String.format(java.util.Locale.ROOT, "%.4f", final.scaleMPerPx)} m/px, ${final.rotationDeg.toInt()} deg")
+        val yah = e.youAreHere
+        // only right after the photo (a plan placed later is not where the walker stands now)
+        if (t != null && yah != null && before.toMap == null && shot != null) {
+            val board = final.toMap(yah.x, yah.y)
+            // the walker may have moved since the photo: the position now = the board + what was walked since
+            val now = synchronized(t) { t.pdr.latLon }
+            val walked = shot?.position?.let { LocalFrame(it).xy(now) }
+            val here = walked?.let { LocalFrame(board).ll(it) } ?: board
+            val lvl = Levels.parse(e.level) ?: t.level
+            t.anchor(here, lvl, "plan", extra = JSONObject().put("plan", e.file), t = e.t.takeIf { it > 0 } ?: SystemClock.elapsedRealtimeNanos(),
+                logAt = board)
+            levelsSeen += e.level
+            publishIndoor(newSegment = true)
+        }
+        _indoor.update { it.copy(plans = plansCopy()) }
+    }
+
+    /** Plans into the session (building.plans, or indoor.plans without a building) and plans/plans.json. */
+    private fun savePlans() {
+        val list = plansCopy()
+        val b = session.building
+        if (b != null) session.building = b.copy(plans = list)
+        else session.indoor = (session.indoor ?: JSONObject()).put("plans", FloorPlanEntry.listJson(list))
+        store.save(session)
+        val sid = session.id
+        val json = FloorPlanEntry.listJson(list).toString(1)
+        io.execute { runCatching { java.io.File(store.dir(sid), "plans/plans.json").also { it.parentFile?.mkdirs() }.writeText(json) } }
+        _indoor.update { it.copy(plans = list) }
+    }
 
     // ---------- session control ----------
 

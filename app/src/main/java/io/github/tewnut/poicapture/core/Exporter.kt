@@ -68,6 +68,8 @@ object Exporter {
             .put("imuFile", if (store.imuFile(sessionId).length() > 0) "imu.csv" else JSONObject.NULL)
             .put("framesFile", if (store.framesFile(sessionId).length() > 0) "frames.csv" else JSONObject.NULL)
             .put("indoorFile", if (store.indoorFile(sessionId).length() > 0) "indoor.jsonl" else JSONObject.NULL)
+            // indoor: the straightened floor plans and their list (docs/indoor.md §7)
+            .put("plansFile", if (File(store.plansDir(sessionId), "plans.json").length() > 0) "plans/plans.json" else JSONObject.NULL)
     }
 
     /**
@@ -131,6 +133,10 @@ object Exporter {
             for ((file, name) in listOf(store.gnssFile(sessionId) to "gnss_raw.csv", store.imuFile(sessionId) to "imu.csv",
                     store.framesFile(sessionId) to "frames.csv", store.indoorFile(sessionId) to "indoor.jsonl")) {
                 if (file.length() > 0) entry(name, Deflater.DEFAULT_COMPRESSION) { o -> file.inputStream().use { it.copyTo(o) } }
+            }
+            for (f in (store.plansDir(sessionId).listFiles() ?: emptyArray()).filter { it.isFile && it.length() > 0 }.sortedBy { it.name }) {
+                entry("plans/${f.name}", if (f.name.endsWith(".jpg")) Deflater.NO_COMPRESSION else Deflater.DEFAULT_COMPRESSION) { o ->
+                    f.inputStream().use { it.copyTo(o) } }
             }
             val items = manifest.getJSONArray("items")
             for (i in 0 until items.length()) {

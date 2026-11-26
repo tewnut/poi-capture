@@ -54,4 +54,18 @@ object SignOcr {
             bmp.recycle()
         }
     }
+
+    /**
+     * The words of a straightened floor plan (no EXIF rotation: the app wrote it upright), line by line, each with its
+     * box in the file's pixels: the unit numbers' positions ([io.github.tewnut.poicapture.core.PlanUnits]). Blocking.
+     */
+    fun planWords(file: File): List<List<io.github.tewnut.poicapture.core.PlanUnits.Word>> {
+        val bmp = BitmapFactory.decodeFile(file.path) ?: return emptyList()
+        try {
+            val text = Tasks.await(recognizer.process(InputImage.fromBitmap(bmp, 0)), 30, TimeUnit.SECONDS)
+            return text.textBlocks.flatMap { b -> b.lines.map { l -> l.elements.map { e ->
+                io.github.tewnut.poicapture.core.PlanUnits.Word(e.text, e.boundingBox?.let { intArrayOf(it.left, it.top, it.right, it.bottom) })
+            } } }
+        } finally { bmp.recycle() }
+    }
 }

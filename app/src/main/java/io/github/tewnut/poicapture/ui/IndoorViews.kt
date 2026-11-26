@@ -71,7 +71,11 @@ fun drawBuilding(m: MapView, b: Building, level: Int? = null) {
         outlinePaint.strokeWidth = 5f
         setOnClickListener { _, _, _ -> false }
     })
-    if (level == null) return
+    if (level != null) drawBuildingFeatures(m, b, level)
+}
+
+/** What is mapped inside the building on [level] (drawn over a floor plan). */
+fun drawBuildingFeatures(m: MapView, b: Building, level: Int) {
     val density = m.context.resources.displayMetrics.density
     for (f in b.features) {
         if (f.level != null && !f.onLevel(level)) continue
@@ -97,44 +101,15 @@ fun drawBuilding(m: MapView, b: Building, level: Int? = null) {
     }
 }
 
-/** Setup, indoor: which building, how many levels, what is mapped; pick another (tap the map) or none. */
-@Composable
-fun BuildingCard(b: Building?, status: Int?, onNone: () -> Unit, onFind: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Hint(stringResource(R.string.setup_building_label))
-        if (b != null) {
-            Text(b.name ?: stringResource(R.string.setup_building_unnamed), fontWeight = FontWeight.Bold, fontSize = 20.sp,
-                color = Palette.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            val facts = listOfNotNull(
-                b.levels?.let { stringResource(R.string.setup_building_levels, it) },
-                b.underground?.let { stringResource(R.string.setup_building_underground, it) },
-                b.features.count { it.kind == "shop" }.takeIf { it > 0 }?.let { stringResource(R.string.setup_building_shops, it) },
-                b.addr["addr:street"]?.let { s -> listOfNotNull(b.addr["addr:housenumber"], s).joinToString(" ") },
-            )
-            if (facts.isNotEmpty()) Hint(facts.joinToString(" · "))
-            Hint(stringResource(R.string.setup_building_tap), color = Palette.Blue)
-            TextButton(onClick = onNone, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-                Text(stringResource(R.string.setup_building_none), color = Palette.Muted)
-            }
-        } else {
-            Text(stringResource(status ?: R.string.setup_building_walk_without), fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
-                color = if (status == R.string.setup_building_offline) Palette.Amber else Palette.Ink)
-            if (status != R.string.setup_building_loading) TextButton(onClick = onFind,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
-                Text(stringResource(R.string.setup_building_find), color = Palette.Blue)
-            }
-        }
-        Hint(stringResource(R.string.setup_indoor_hint))
-    }
-}
-
 /**
  * Capture, indoor: the map of the walk. Long-press = "I am here" ([onLongPress]); [onTap] is used by the ⌖ mode and the
  * direction tap. Follows the estimate unless the walker moved the map a moment ago.
  */
 @Composable
 fun IndoorMap(tileUrl: String, building: Building?, ui: IndoorUi, track: List<List<LatLon>>, pending: LatLon?,
-              onLongPress: (LatLon) -> Unit, onTap: (LatLon) -> Unit, modifier: Modifier) {
+              onLongPress: (LatLon) -> Unit, onTap: (LatLon) -> Unit, modifier: Modifier,
+              planDir: java.io.File? = null, plan: io.github.tewnut.poicapture.core.FloorPlanEntry? = null, placing: PlanPlacing? = null,
+              onUnit: ((io.github.tewnut.poicapture.core.PlanUnit, LatLon) -> Unit)? = null) {
     val ctx = LocalContext.current
     val map = remember {
         MapView(ctx).apply {
@@ -172,10 +147,24 @@ fun IndoorMap(tileUrl: String, building: Building?, ui: IndoorUi, track: List<Li
     val blue = Palette.Blue.toArgb()
     val density = ctx.resources.displayMetrics.density
     val far = ui.sinceAnchorM > Pdr.REPOSITION_M || !ui.anchored
+    // the level's floor plan, under the walk (docs/indoor.md §7)
+    val planOverlay = remember { PlanOverlay(ctx) }
+    val unitTap = rememberUpdatedState(onUnit)
+    planOverlay.onUnit = { u, p -> unitTap.value?.invoke(u, p) }
+    // placing: show the plan where it is being put
+    androidx.compose.runtime.LaunchedEffect(placing) {
+        placing?.let { pl -> pl.toMap.toMap(pl.entry.width / 2.0, pl.entry.height / 2.0).let { map.controller.animateTo(GeoPoint(it.lat, it.lon)) } }
+    }
     AndroidView({ map }, modifier) { m ->
         m.overlays.clear()
         m.overlays.add(events)
-        building?.let { drawBuilding(m, it, ui.level) }
+        building?.let { drawBuilding(m, it, null) }
+        val shown = placing?.entry ?: plan
+        if (planDir != null && shown != null) {
+            planOverlay.set(planDir, shown, shown.toMap, placing)
+            m.overlays.add(planOverlay)
+        }
+        building?.let { drawBuildingFeatures(m, it, ui.level) }
         for (seg in track) if (seg.size >= 2) m.overlays.add(Polyline(m).apply {
             setPoints(pts(seg))
             outlinePaint.color = 0xCC1570EF.toInt()
@@ -266,14 +255,15 @@ fun FloorPrompt(current: Int, suggested: Int, onAnswer: (Boolean) -> Unit, modif
 /** "Tôi ở đây": confirm the point and its level (± on the level), then optionally the walking direction. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun HereSheet(level: Int, levels: IntRange, onConfirm: (Int, Boolean) -> Unit, onCancel: () -> Unit) {
+fun HereSheet(level: Int, levels: IntRange, onConfirm: (Int, Boolean) -> Unit, onCancel: () -> Unit, unit: String? = null) {
     var lvl by remember { mutableStateOf(level) }
     var direction by remember { mutableStateOf(false) }
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onCancel, containerColor = Color.White) {
         Column(Modifier.navigationBarsPadding().padding(start = 20.dp, end = 20.dp, bottom = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(stringResource(R.string.capture_here_title), style = ScreenTitle.copy(fontSize = 24.sp))
-            Text(stringResource(R.string.capture_here_text), color = Palette.Muted, fontSize = 14.sp)
+            Text(if (unit != null) stringResource(R.string.capture_here_unit, unit) else stringResource(R.string.capture_here_text),
+                color = Palette.Muted, fontSize = 14.sp)
             // the building's levels, and one more each way (the map may not know them all)
             Stepper(stringResource(R.string.capture_indoor_level_name, Levels.name(lvl)), onMinus = { lvl-- }, onPlus = { lvl++ },
                 minusEnabled = lvl > minOf(levels.first, level) - 1, plusEnabled = lvl < maxOf(levels.last, level) + 1)

@@ -47,6 +47,8 @@ data class Building(
     val maxLevel: String? = null,
     val features: List<IndoorFeature> = emptyList(),
     val levelsSeen: List<String> = emptyList(),
+    /** floor plans photographed on the walk (docs/indoor.md §7) */
+    val plans: List<FloorPlanEntry> = emptyList(),
 ) {
     val footprint: List<LatLon> get() = outer.maxByOrNull { ringArea(it) } ?: emptyList()
     val indoorMapped: Boolean get() = features.any { it.level != null }
@@ -68,6 +70,7 @@ data class Building(
         .put("levels_seen", JSONArray(levelsSeen))
         .put("indoorMapped", indoorMapped)
         .put("features", JSONArray().apply { features.forEach { put(it.toJson()) } })
+        .put("plans", FloorPlanEntry.listJson(plans))
 
     companion object {
         fun fromJson(o: JSONObject?): Building? {
@@ -82,7 +85,8 @@ data class Building(
                 o.optInt("underground", 0).takeIf { !o.isNull("underground") && it > 0 },
                 outer, rings(o.optJSONArray("holes")), addr, o.optStr("minLevel"), o.optStr("maxLevel"),
                 (0 until (f?.length() ?: 0)).map { IndoorFeature.fromJson(f!!.getJSONObject(it)) },
-                (0 until (seen?.length() ?: 0)).map { seen!!.getString(it) })
+                (0 until (seen?.length() ?: 0)).map { seen!!.getString(it) },
+                FloorPlanEntry.listOf(o.optJSONArray("plans")))
         }
 
         /** [[lat, lon], …] as in the doc */
@@ -107,12 +111,97 @@ object BuildingQuery {
 
     /**
      * Buildings containing the point (is_in: large malls whose walls are far away) or within [NEAR_M] of it. The
-     * area pivot needs Overpass's areas, which not every building has: the `around` part catches the others.
+     * area pivot needs Overpass's areas, which not every building has: the `around` part catches the others. A mall or
+     * market mapped only as an area (`shop=mall` / `amenity=marketplace`, no `building=*`) counts as the building too.
      */
     fun buildingsQuery(p: LatLon, radius: Int = NEAR_M): String {
         val ll = "${f6(p.lat)},${f6(p.lon)}"
-        return "[out:json][timeout:25];is_in($ll)->.a;(way(pivot.a)[building];relation(pivot.a)[building];" +
-            "way(around:$radius,$ll)[building];relation(around:$radius,$ll)[building][type=multipolygon];);out tags geom;"
+        val sb = StringBuilder("[out:json][timeout:25];is_in($ll)->.a;(")
+        for (f in AREA_FILTERS) sb.append("way(pivot.a)$f;relation(pivot.a)$f;")
+        for (f in AREA_FILTERS) sb.append("way(around:$radius,$ll)$f;relation(around:$radius,$ll)$f[type=multipolygon];")
+        return sb.append(");out tags geom;").toString()
+    }
+
+    /** What makes an OSM area "the building" of an indoor walk. */
+    private val AREA_FILTERS = listOf("[building]", "[shop=mall]", "[amenity=marketplace]")
+    fun isBuildingLike(tags: JSONObject) = tags.has("building") || tags.optString("shop") == "mall" ||
+        tags.optString("amenity") == "marketplace"
+
+    /** How far the name search looks around the walker / the map centre. */
+    const val SEARCH_M = 30_000
+
+    /**
+     * "Tìm theo tên": buildings, malls and markets whose name contains [text] (case- and accent-tolerant, see
+     * [nameRegex]) within [radiusM] of [p] (a box: much cheaper than `around` for Overpass). Nodes too (a mall mapped
+     * as a point): picking one looks the building up at that point.
+     */
+    fun nameSearchQuery(text: String, p: LatLon, radiusM: Int = SEARCH_M): String {
+        val re = nameRegex(text)
+        val dLat = radiusM / 111_320.0
+        val dLon = dLat / kotlin.math.cos(Math.toRadians(p.lat)).coerceAtLeast(0.1)
+        val box = "${f6(p.lat - dLat)},${f6(p.lon - dLon)},${f6(p.lat + dLat)},${f6(p.lon + dLon)}"
+        val sb = StringBuilder("[out:json][timeout:25];(")
+        for (f in AREA_FILTERS) sb.append("way$f[name~\"$re\",i]($box);relation$f[name~\"$re\",i]($box);")
+        sb.append("node[shop=mall][name~\"$re\",i]($box);node[amenity=marketplace][name~\"$re\",i]($box);")
+        return sb.append(");out tags geom;").toString()
+    }
+
+    private val VARIANTS: Map<Char, String> = mapOf(
+        'a' to "aàáảãạăằắẳẵặâầấẩẫậ", 'e' to "eèéẻẽẹêềếểễệ", 'i' to "iìíỉĩị", 'o' to "oòóỏõọôồốổỗộơờớởỡợ",
+        'u' to "uùúủũụưừứửữự", 'y' to "yỳýỷỹỵ", 'd' to "dđ")
+
+    /** Lower case, accents removed (đ → d): "Vạn Hạnh" → "van hanh". */
+    fun fold(s: String): String = java.text.Normalizer.normalize(s.lowercase(java.util.Locale.ROOT).replace('đ', 'd'),
+        java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
+
+    /**
+     * An Overpass regex matching [text] with or without Vietnamese accents: every vowel (and d) becomes an alternation
+     * of its accented forms in both cases (`(a|à|á|…|A|À|…)`; alternations, not bracket classes, so it works whatever
+     * the server's regex library does with multi-byte characters), spaces match any run of spaces, punctuation any character.
+     */
+    fun nameRegex(text: String): String {
+        val sb = StringBuilder()
+        var space = false
+        for (c in fold(text.trim())) {
+            if (c.isWhitespace()) { if (!space) sb.append(" +"); space = true; continue }
+            space = false
+            val v = VARIANTS[c]
+            when {
+                v != null -> sb.append('(').append((v.toList() + v.uppercase().toList()).distinct().joinToString("|")).append(')')
+                c.isLetterOrDigit() -> sb.append(c)
+                else -> sb.append('.')   // punctuation: any character ("AEON-Mall" finds "Aeon Mall"), nothing to escape
+            }
+        }
+        return sb.toString()
+    }
+
+    /** One answer of the name search. [building] is null for a node (looked up at [at] when picked). */
+    data class Hit(val osm: String, val name: String, val kind: String, val at: LatLon, val distanceM: Double, val building: Building?)
+
+    /** The name search's answer, nearest first, at most [max]. */
+    fun parseSearch(body: String, from: LatLon, max: Int = 20): List<Hit> {
+        val els = JSONObject(body).optJSONArray("elements") ?: return emptyList()
+        val buildings = parseBuildings(body).associateBy { it.osm }
+        val out = mutableListOf<Hit>()
+        for (i in 0 until els.length()) {
+            val e = els.getJSONObject(i)
+            val tags = e.optJSONObject("tags") ?: continue
+            val name = tags.optString("name").ifBlank { null } ?: continue
+            val id = "${e.optString("type")}/${e.optLong("id")}"
+            val kind = when {
+                tags.optString("shop") == "mall" -> "mall"
+                tags.optString("amenity") == "marketplace" -> "marketplace"
+                else -> "building"
+            }
+            val b = buildings[id]
+            val at = when {
+                b != null -> b.center
+                e.optString("type") == "node" && e.has("lat") -> LatLon(e.getDouble("lat"), e.getDouble("lon"))
+                else -> continue
+            }
+            out += Hit(id, name, kind, at, b?.distanceM(from)?.takeIf { it < Double.MAX_VALUE } ?: Geo.distanceM(from, at), b)
+        }
+        return out.distinctBy { it.osm }.sortedBy { it.distanceM }.take(max)
     }
 
     /** What is mapped inside a building's box: indoor rooms / areas / corridors, shops and amenities. */
@@ -130,7 +219,7 @@ object BuildingQuery {
         for (i in 0 until els.length()) {
             val e = els.getJSONObject(i)
             val tags = e.optJSONObject("tags") ?: continue
-            if (!tags.has("building")) continue
+            if (!isBuildingLike(tags)) continue
             val type = e.optString("type")
             val (outer, holes) = when (type) {
                 "way" -> listOf(geom(e.optJSONArray("geometry"))).filter { it.size >= 3 } to emptyList()
@@ -211,5 +300,29 @@ object BuildingQuery {
             if (ring.size >= 3) rings += ring
         }
         return rings
+    }
+}
+
+/**
+ * The buildings found lately (setup, indoor), kept on disk: the building card shows the one here at once, offline
+ * too, while Overpass is asked again. The last [max] buildings picked, newest first, without their floor plans.
+ */
+class BuildingCache(private val file: java.io.File, private val max: Int = 30) {
+    @Synchronized fun all(): List<Building> = runCatching {
+        val a = JSONArray(file.readText())
+        (0 until a.length()).mapNotNull { Building.fromJson(a.optJSONObject(it)) }
+    }.getOrDefault(emptyList())
+
+    /** The cached building at [p] (containing it, else the nearest within [maxM]). */
+    fun near(p: LatLon, maxM: Double = BuildingQuery.NEAR_M.toDouble()): Building? = BuildingQuery.pick(all(), p, maxM)
+
+    @Synchronized fun put(b: Building) {
+        val list = (listOf(b.copy(plans = emptyList())) + all().filter { it.osm != b.osm }).take(max)
+        runCatching {
+            file.parentFile?.mkdirs()
+            val tmp = java.io.File(file.path + ".tmp")
+            tmp.writeText(JSONArray().apply { list.forEach { put(it.toJson()) } }.toString())
+            if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+        }
     }
 }
