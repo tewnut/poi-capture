@@ -63,6 +63,8 @@ jobs:
           ./gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
 
       - name: Check the signature
+        env:
+          RELEASE_CERT_SHA256: ${{ vars.RELEASE_CERT_SHA256 }}
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
@@ -70,8 +72,14 @@ jobs:
           cp "$APK" "poi-capture-$TAG.apk"
           sha256sum "poi-capture-$TAG.apk" > "poi-capture-$TAG.apk.sha256"
           AAB=app/build/outputs/bundle/release/app-release.aab
-          jarsigner -verify "$AAB" | tail -1
-          jarsigner -verify "$AAB" | grep -q "jar verified" || { echo "::error::the .aab is not signed"; exit 1; }
+          jarsigner -verify "$AAB" > /dev/null || { echo "::error::the .aab signature does not verify"; exit 1; }
+          # the .aab must carry the same certificate as the APK (and as RELEASE_CERT_SHA256, when that variable is set)
+          APK_SHA=$("$BT/apksigner" verify --print-certs "$APK" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)
+          AAB_SHA=$(keytool -printcert -jarfile "$AAB" | sed -n 's/.*SHA256: //p' | head -1 | tr -d ': ' | tr 'A-F' 'a-f')
+          echo "certificate SHA-256: apk $APK_SHA, aab $AAB_SHA"
+          if [ -z "$APK_SHA" ] || [ "$APK_SHA" != "$AAB_SHA" ]; then echo "::error::the .aab and the APK are not signed with the same certificate"; exit 1; fi
+          PIN=$(printf '%s' "$RELEASE_CERT_SHA256" | tr -d ': ' | tr 'A-F' 'a-f')
+          if [ -n "$PIN" ] && [ "$PIN" != "$APK_SHA" ]; then echo "::error::the release certificate is not the pinned one"; exit 1; fi
           cp "$AAB" "quet-pho-$TAG.aab"
           sha256sum "quet-pho-$TAG.aab" > "quet-pho-$TAG.aab.sha256"
           rm -f "$RUNNER_TEMP/release.jks"
