@@ -93,12 +93,13 @@ final class SessionStore: ObservableObject {
         reload()
     }
 
-    /** Session name "{street} [yymmdd]" (shared rule: the street most photos were taken on). */
+    /** Session name "{street} {yyyy-MM-dd HHhmm}" (shared rule SessionNaming.name: the street most photos were taken on). */
     func name(for s: CaptureSession, fallback: String) -> String {
         let f = DateFormatter()
-        f.dateFormat = "yyMMdd"
-        let day = f.string(from: Date(timeIntervalSince1970: Double(s.startedMs ?? s.createdMs) / 1000))
-        return SessionNaming.shared.name(streets: s.photos.compactMap { $0.roadName }, yymmdd: day, fallback: fallback)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd HH'h'mm"
+        let stamp = f.string(from: Date(timeIntervalSince1970: Double(s.startedMs ?? s.createdMs) / 1000))
+        return SessionNaming.shared.name(streets: s.photos.compactMap { $0.roadName }, stamp: stamp, fallback: fallback, nearby: nil)
     }
 
     // ---------- export: manifest (shared Kotlin) + photos, zipped by the system ----------
