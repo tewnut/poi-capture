@@ -75,6 +75,6 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" $FILES --clobber
           else
-            gh release create "$TAG" $FILES --verify-tag --title "POI Capture $TAG" --generate-notes
+            gh release create "$TAG" $FILES --verify-tag --title "Quét Phố $TAG" --generate-notes
           fi
           gh release view "$TAG" --json assets -q '.assets[] | "\(.name) \(.size)"'
