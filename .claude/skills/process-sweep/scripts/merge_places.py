@@ -11,7 +11,7 @@ boundary is seen whole by one of them) and wrote a places.json part with the sam
   overlap takes one id for all its signs):
   a place with the same name (folded, or one name inside the other) whose photo ranges overlap or touch (within
   MAX_GAP photos); an address with the same house number on overlapping photos; a sign with the same code on
-  overlapping photos. The merged entry spans both ranges, keeps every sighting (one per photo), every field (the
+  overlapping photos (and the same text and side), never two entries of one part. The merged entry spans both ranges, keeps every sighting (one per photo), every field (the
   surer reading wins), every best photo, the cover of the surer (else the first) reader, the lower confidence when
   they differ, and both notes. Removals with the same name and photo are kept once.
 Prints every merge and every near miss (same name or number, ranges apart, or similar names on overlapping photos)
@@ -56,7 +56,13 @@ def same(kind, a, b):
         sa, sb = _key(a.get('street')), _key(b.get('street'))
         return not sa or not sb or sa == sb
     if kind == 'signs':
-        return _key(a.get('code')) == _key(b.get('code')) and bool(_key(a.get('code')))
+        if not _key(a.get('code')) or _key(a.get('code')) != _key(b.get('code')):
+            return False
+        for k in ('text', 'side'):   # "60" and "80" on one pole, or the same sign on both sides, are two signs
+            ka, kb = _key(a.get(k)).replace(' ', ''), _key(b.get(k)).replace(' ', '')  # "4,6m" = "4,6 m"
+            if ka and kb and ka != kb:
+                return False
+        return True
     return False
 
 
@@ -144,15 +150,17 @@ def merge(parts):
             pid = alias[pid]
         return pid
     for kind in ('places', 'addresses', 'signs'):
-        merged = []
-        for n, p in enumerate(parts, 1):
+        merged, came = [], []       # came[k]: the parts merged[k] was read in (one reader's entries never merge:
+        for n, p in enumerate(parts, 1):  # three no-parking signs in a row are three signs)
             for x in p.get(kind) or []:
                 if kind == 'signs' and x.get('post') not in (None, '') and len(parts) > 1:
                     x = dict(x, post=f"{n}.{x['post']}")
-                hit = next((k for k, y in enumerate(merged) if same(kind, y, x)), None)
+                hit = next((k for k, y in enumerate(merged) if n not in came[k] and same(kind, y, x)), None)
                 if hit is None:
                     merged.append(dict(x))
+                    came.append({n})
                 else:
+                    came[hit].add(n)
                     report.append(f'{kind}: merged {label(kind, merged[hit])} + {label(kind, x)}')
                     a, b = merged[hit].get('post'), x.get('post')
                     if a and b and root(a) != root(b):

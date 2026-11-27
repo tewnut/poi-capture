@@ -203,6 +203,20 @@ class PostsInMergedParts(unittest.TestCase):
                                  ('P.130', 150, '2.p2')])
         self.assertEqual([s['post'] for s in merge_places.merge([p1])[0]['signs']], ['p2', 'p1', 'p1'])   # as written
 
+    def test_one_readers_signs_never_merge(self):
+        """Trần Não 27 Nov: three no-parking signs in a row, and "80" / "60" side by side on one pole, were joined."""
+        p1 = {'signs': [{'code': 'P.131a', 'photos': [171, 176], 'cover': 175},
+                        {'code': 'P.131a', 'photos': [177, 188], 'cover': 186},
+                        {'code': 'P.127', 'text': '80', 'photos': [306, 314], 'cover': 312, 'post': 'p8', 'order': 1},
+                        {'code': 'P.127', 'text': '60', 'photos': [306, 314], 'cover': 312, 'post': 'p8', 'order': 2}]}
+        p2 = {'signs': [{'code': 'P.117', 'text': '4,6 m', 'photos': [144, 152], 'cover': 150},
+                        {'code': 'P.127', 'text': '60', 'photos': [309, 314], 'cover': 313}]}
+        p0 = {'signs': [{'code': 'P.117', 'text': '4,6m', 'photos': [144, 150], 'cover': 149}]}
+        self.assertEqual(len(merge_places.merge([p1])[0]['signs']), 4)
+        out, report = merge_places.merge([p0, p1, p2])
+        self.assertEqual(len(out['signs']), 5)           # the 4.6 m merged across readers; the "60" joins the "60" only
+        self.assertEqual(sum('merged' in r for r in report), 2)
+
 
 class ShopAddressInGoogleCheck(unittest.TestCase):
     """An address entry that names its shop (placeRef): its sure house number counts in the shop's Google check."""
