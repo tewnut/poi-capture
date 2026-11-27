@@ -2,7 +2,9 @@
 #   git tag v0.8.0 && git push origin v0.8.0
 # GitHub runs the unit tests, builds app-release.apk, signs it with the release key kept in the repository secrets
 # (RELEASE_KEYSTORE_B64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS) and attaches poi-capture-vX.Y.Z.apk to the
-# release vX.Y.Z. Download: https://github.com/<owner>/<repo>/releases/latest
+# release vX.Y.Z, with quet-pho-vX.Y.Z.aab (the same key, for the Play Console: there it is the upload key).
+# Download: https://github.com/<owner>/<repo>/releases/latest
+# An older tag without the .aab: Actions -> release -> Run workflow (from this branch), tag vX.Y.Z.
 name: release
 
 on:
@@ -58,7 +60,7 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleRelease
+          ./gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
 
       - name: Check the signature
         run: |
@@ -67,11 +69,16 @@ jobs:
           "$BT/apksigner" verify --print-certs "$APK"
           cp "$APK" "poi-capture-$TAG.apk"
           sha256sum "poi-capture-$TAG.apk" > "poi-capture-$TAG.apk.sha256"
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          jarsigner -verify "$AAB" | tail -1
+          jarsigner -verify "$AAB" | grep -q "jar verified" || { echo "::error::the .aab is not signed"; exit 1; }
+          cp "$AAB" "quet-pho-$TAG.aab"
+          sha256sum "quet-pho-$TAG.aab" > "quet-pho-$TAG.aab.sha256"
           rm -f "$RUNNER_TEMP/release.jks"
 
       - name: Publish
         run: |
-          FILES="poi-capture-$TAG.apk poi-capture-$TAG.apk.sha256"
+          FILES="poi-capture-$TAG.apk poi-capture-$TAG.apk.sha256 quet-pho-$TAG.aab quet-pho-$TAG.aab.sha256"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" $FILES --clobber
           else
