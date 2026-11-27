@@ -119,6 +119,11 @@ private fun deviceJson(ctx: Context): JSONObject {
  * checks GPS, picks how to record, and presses Start.
  */
 @OptIn(ExperimentalLayoutApi::class)
+
+/** Indoor walks are hidden from the setup for now (2026-11-27: the step count drops while photographing, the mall's
+ * outline is missed from just outside it; docs/indoor.md). Rides already recorded indoors still open and upload. */
+const val INDOOR_ENABLED = false
+
 @Composable
 fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
@@ -278,10 +283,10 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     // only when there is something to do (permission, location off); the map shows the satellites
                     if (loc.status != LocStatus.SEARCHING) LocationHelp(loc)
                     // three quick choices, short labels only: what each means is behind the (i) button
-                    Choice(stringResource(R.string.setup_kind_label), listOf(
+                    Choice(stringResource(R.string.setup_kind_label), listOfNotNull(
                         SessionKind.SWEEP to stringResource(R.string.setup_sweep_short),
                         SessionKind.POI to stringResource(R.string.setup_place_short),
-                        SessionKind.INDOOR to stringResource(R.string.setup_indoor_short)), kind) { kind = it }
+                        if (INDOOR_ENABLED) SessionKind.INDOOR to stringResource(R.string.setup_indoor_short) else null), kind) { kind = it }
                     if (kind == SessionKind.SWEEP) {
                         Choice(stringResource(R.string.setup_target_label), listOf(
                             SweepTarget.SHOPS to "🏪 " + stringResource(R.string.setup_target_shops_short),
@@ -535,8 +540,10 @@ private fun SetupInfo(photoEveryM: Double, maxSpeedKmh: Int, onClose: () -> Unit
             Item("🏪", stringResource(R.string.setup_place_title), stringResource(R.string.setup_poi_hint))
             Text(stringResource(R.string.guide_intro), color = Palette.Muted, fontSize = 14.sp, lineHeight = 20.sp)
             PlaceGuideList()
-            Section(stringResource(R.string.setup_indoor_title))
-            Item("🏬", stringResource(R.string.setup_indoor_title), stringResource(R.string.setup_indoor_info))
+            if (INDOOR_ENABLED) {
+                Section(stringResource(R.string.setup_indoor_title))
+                Item("🏬", stringResource(R.string.setup_indoor_title), stringResource(R.string.setup_indoor_info))
+            }
             Section(stringResource(R.string.setup_info_both))
             Item("🛣️", stringResource(R.string.setup_you_are_on), stringResource(R.string.setup_road_auto_hint))
             Item("🛰️", stringResource(R.string.setup_info_gps_title), stringResource(R.string.setup_info_gps))

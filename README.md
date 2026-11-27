@@ -2,7 +2,10 @@
 
 # Quét Phố (Android)
 
-Formerly POI Capture. Internal names (package `io.github.tewnut.poicapture`, server `poi-capture-cloud`, web `poi-capture-reviewer`, the `POI Capture/<version>` client header) are unchanged so installed phones keep their rides.
+Formerly POI Capture. The store id (Android applicationId, iOS bundle id) is `vn.vmaps.quetpho` from 0.22.1; the
+0.22.0 and older builds were `io.github.tewnut.poicapture`, a different app on the phone (upload its rides before
+switching). Internal names (the code's package `io.github.tewnut.poicapture`, server `poi-capture-cloud`, web
+`poi-capture-reviewer`, the `POI Capture/<version>` client header) are unchanged.
 
 An Android app for field contributors who put shops and other places on a map. Ride along a street with the phone
 mounted (the app photographs the row of buildings by itself), or stop at each place and photograph it. Every photo
