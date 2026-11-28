@@ -63,6 +63,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import io.github.tewnut.poicapture.AppLanguage
 import io.github.tewnut.poicapture.MainActivity
+import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.core.CaptureWarning
 import io.github.tewnut.poicapture.ui.UiText
@@ -113,6 +114,7 @@ import io.github.tewnut.poicapture.core.Side
 import io.github.tewnut.poicapture.core.Fix
 import io.github.tewnut.poicapture.core.BlurCheck
 import io.github.tewnut.poicapture.core.HouseNumbers
+import io.github.tewnut.poicapture.core.RideRestore
 import io.github.tewnut.poicapture.core.toJson
 import io.github.tewnut.poicapture.core.TrackStats
 import io.github.tewnut.poicapture.core.FixProcessor
@@ -390,6 +392,12 @@ class CaptureService : LifecycleService() {
             _state.update { it.copy(mount = "hand") }   // no mount angle: each photo is measured ([HandBearing])
         }
         _state.update { it.copy(roadData = if (s.road.auto && s.road.ways.isEmpty() && s.kind != SessionKind.INDOOR) "loading" else "ok") }
+        // a ride reopened after Android killed the app: its counts go on from what is on disk, not from zero (else
+        // "nothing recorded" would drop it and session.counts would hold only what came after the restart)
+        if (s.startedAt != null) runCatching {
+            val c = RideRestore.counts(store.items(s.id), store.trackCount(s.id), s.counts)
+            _state.update { it.copy(photos = c.photos, videos = c.videos, trackPoints = c.trackPoints, platesSeen = c.plates, signsSeen = c.signs) }
+        }
         pm = getSystemService(POWER_SERVICE) as PowerManager
         wake = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "poicapture:capture")?.apply { acquire(12 * 3600_000L) }
         startSensors()
@@ -619,6 +627,9 @@ class CaptureService : LifecycleService() {
         }
         val line = f.toTrackJson(fp.travelBearing).toString()
         io.execute { runCatching { store.trackFile(session.id).appendText(line + "\n") } }
+        // Camera 360: the first fresh fix starts the ride here, not on the screen (it may be locked in a pocket by
+        // then); a ride reopened after a restart goes on the same way (no pause on this ride)
+        if (cam360 && !_state.value.running && activeSession.value != null) start()
         // Theta ride: a 360 photo every N m ridden, gpsInfo set to this fix first
         if (_state.value.running) theta?.onFix(ShotFix(f.t, f.lat, f.lon, f.accuracyM, f.altitudeM, f.speedMps,
             fp.travelBearing ?: f.bearingDeg))
@@ -1650,10 +1661,28 @@ class CaptureService : LifecycleService() {
         ThetaLink.forRide = true
         ThetaLink.keepTrying(true)
         val s = ThetaShooter({ ThetaLink.client() }, ThetaRide.everyM(c), thetaExec,
-            onShot = { shot -> mainHandler.post { onThetaShot(shot) } }, onStats = { _thetaStats.value = it })
+            onShot = { shot -> mainHandler.post { onThetaShot(shot) } },
+            onStats = { st -> _thetaStats.value = st; mainHandler.post { saveThetaSkipped(st) } })
         val (ok, failed) = ThetaRide.counts(c)
-        s.restore(ok, failed)
+        val (busy, offline) = ThetaRide.skipped(c)
+        s.restore(ok, failed, busy, offline)
         theta = s
+        // reopened after the app was killed (or the setup's connect failed): the link went with the process, ask for
+        // this camera's Wi-Fi again, and keep asking during the ride
+        val link = ThetaLink.state.value.status
+        if (link != ThetaLink.Status.CONNECTED && link != ThetaLink.Status.CONNECTING) {
+            val serial = Prefs.thetaSerial(this)
+            if (serial.isNotBlank()) ThetaLink.connect(this, serial, Prefs.thetaPassword(this), keepTrying = true)
+        }
+    }
+
+    /** Skipped triggers are kept in `session.camera360` (only when they changed), for the counts after a restart. */
+    private fun saveThetaSkipped(st: ThetaShooter.Stats) {
+        if (activeSession.value == null || theta == null) return
+        val c = session.camera360 ?: return
+        if (ThetaRide.skipped(c) == (st.skippedBusy to st.skippedOffline)) return
+        ThetaRide.withSkipped(c, st.skippedBusy, st.skippedOffline)
+        store.save(session)
     }
 
     /** A Theta shot finished (main thread): kept in `session.camera360.shots`, with the camera's info once known. */
@@ -1677,6 +1706,25 @@ class CaptureService : LifecycleService() {
         }
         session.camera360 = Camera360.withSync(session.camera360, Camera360.Sync(fromMs, toMs, why, gpsMinusPhone))
         store.save(session)
+    }
+
+    /**
+     * Leaving a ride with nothing recorded (Back / End before it started): ended, and deleted only when
+     * [RideRestore.deletable] (never started, no photo or video on disk); else kept like any ride. -> true when deleted.
+     */
+    fun finishDroppingIfEmpty(): Boolean {
+        if (activeSession.value == null) return false
+        val id = session.id
+        val media = runCatching {
+            store.items(id).size + listOf("photos", "videos").sumOf { java.io.File(store.dir(id), it).listFiles()?.size ?: 0 }
+        }.getOrDefault(1)   // unreadable: keep it
+        val drop = RideRestore.deletable(session.startedAt, media)
+        finishSession(discard = drop)
+        if (drop) {
+            store.delete(id)
+            Uploads.forget(this, id)
+        }
+        return drop
     }
 
     /**

@@ -195,7 +195,8 @@ class ThetaOscTest {
         assertEquals(listOf("offDelay: invalidParameterValue: offDelay not supported"), r.notes)
         val opts = executes().map { it.getJSONObject("parameters").getJSONObject("options") }
         assertEquals("2026:11:18 18:06:40+07:00", opts.first().getString("dateTimeZone"))
-        assertEquals(listOf("dateTimeZone", "captureMode", "exposureDelay", "sleepDelay", "offDelay"), opts.map { it.keys().next() })
+        // a Theta X also gets its GPS tagging turned on (it ignores gpsInfo without it)
+        assertEquals(listOf("dateTimeZone", "captureMode", "exposureDelay", "sleepDelay", "offDelay", "_gpsTagRecording"), opts.map { it.keys().next() })
         assertEquals("image", opts[1].getString("captureMode"))
     }
 

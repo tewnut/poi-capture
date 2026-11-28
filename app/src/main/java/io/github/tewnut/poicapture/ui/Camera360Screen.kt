@@ -58,6 +58,7 @@ import io.github.tewnut.poicapture.capture.CaptureUi
 import io.github.tewnut.poicapture.capture.Uploads
 import io.github.tewnut.poicapture.core.Camera360
 import io.github.tewnut.poicapture.core.QrModules
+import io.github.tewnut.poicapture.core.SyncGate
 import io.github.tewnut.poicapture.core.ThetaRide
 import io.github.tewnut.poicapture.core.ThetaShooter
 import io.github.tewnut.poicapture.core.TrackStats
@@ -68,9 +69,10 @@ import java.time.Instant
 import java.util.Locale
 
 /**
- * Camera 360 ride (docs/camera360.md §1–2): no camera preview, the phone records GPS only. The sync QR code comes up
- * right after the start, once more when the ride is ended (before the end dialog), and on "Đồng bộ lại"; each showing
- * is kept in `session.camera360.syncs`. The screen is not kept on: the phone may ride in a pocket, screen off.
+ * Camera 360 ride (docs/camera360.md §1–2): no camera preview, the phone records GPS only. The ride starts in the
+ * service on the first fresh fix (screen on or not). The sync QR code comes up once the screen sees the ride started
+ * (unless a sync is already kept), once more when the ride is ended (before the end dialog), and on "Đồng bộ lại";
+ * each showing of at least [SyncGate.MIN_MS] is kept in `session.camera360.syncs`. The screen is not kept on: the phone may ride in a pocket, screen off.
  * With a Ricoh Theta the phone controls (docs/camera360.md §4) the camera's clock is set at connect: no code at the
  * start or the end ("Đồng bộ lại" stays as a fallback); the panel shows the camera, photos taken and skipped.
  */
@@ -103,42 +105,59 @@ fun Camera360Screen(sessionId: String, onDone: (io.github.tewnut.poicapture.core
     var confirmDiscard by remember { mutableStateOf(false) }
     fun showSync(w: Camera360.When) { syncFrom = System.currentTimeMillis(); syncing = w.json }
 
-    // the first fresh fix starts the ride, then the sync code; reopened mid-ride (paused by nothing): just go on
-    LaunchedEffect(active, ui.gpsFresh, ui.running) {
+    // the service starts the ride on the first fresh fix (CaptureService.onLocation); seen started here (maybe only
+    // when the screen comes back on): the start sync code, once, unless a long-enough sync is already kept
+    var startAsked by rememberSaveable(sessionId) { mutableStateOf(false) }
+    LaunchedEffect(active, startedAt, thetaRide) {
         val s = active ?: return@LaunchedEffect
-        if (ui.running || !ui.gpsFresh) return@LaunchedEffect
-        val first = s.session.startedAt == null
-        s.start()
-        if (first && s.state.value.running && !thetaRide) showSync(Camera360.When.START)
+        if (startedAt == null || startAsked || thetaRide) return@LaunchedEffect
+        startAsked = true
+        if (!SyncGate.aligned(Camera360.syncs(s.session.camera360))) showSync(Camera360.When.START)
     }
+    // Back / End / Discard before the bind: done once bound (never a ride left running with no screen)
+    val leave = rememberLeaveWhenBound(svc, onGiveUp = { discarding -> if (discarding) onCancel() else onDone(null) })
 
     fun discard() {
-        val s = svc ?: run { onCancel(); return }
+        val s = svc ?: run { leave.wait(LeaveWhenBound.DISCARD); return }
         val id = runCatching { s.session.id }.getOrNull()
         s.finishSession(discard = true)
         if (id != null) {
             CaptureService.store(ctx).delete(id)
             Uploads.forget(ctx, id)
+            runCatching { CaptureService.tasks(ctx).reopenBy(id) }   // field tasks this ride marked done are open again
         }
         onCancel()
     }
+    /** The summary: a 360 ride has no photos; with a Theta, the shots taken, skipped and failed. */
+    fun rideEnd(s: CaptureService): io.github.tewnut.poicapture.core.RideEnd? = runCatching { s.session.id }.getOrNull()?.let {
+        io.github.tewnut.poicapture.core.RideEnd(it, cam360 = true, photos = 0, videos = 0,
+            thetaShots = if (thetaRide) thetaStats.shots else null, thetaSkipped = if (thetaRide) thetaStats.skipped else null,
+            thetaFailed = if (thetaRide) thetaStats.failed else null)
+    }
     fun end() {
-        val s = svc ?: run { onDone(null); return }
-        val id = runCatching { s.session.id }.getOrNull()
-        // the summary: a 360 ride has no photos; with a Theta, the shots taken and skipped (kept nowhere else)
-        val ended = id?.let { io.github.tewnut.poicapture.core.RideEnd(it, cam360 = true, photos = 0, videos = 0,
-            thetaShots = if (thetaRide) thetaStats.shots else null, thetaSkipped = if (thetaRide) thetaStats.skipped else null) }
+        val s = svc ?: run { leave.wait(LeaveWhenBound.END); return }
+        val ended = rideEnd(s)
         s.finishSession()
         onDone(ended)
     }
+    /** Left before the first fix: the empty ride is dropped (kept if it did start meanwhile). */
+    fun drop() {
+        val s = svc ?: run { leave.wait(LeaveWhenBound.DROP); return }
+        val ended = rideEnd(s)
+        if (s.finishDroppingIfEmpty()) onCancel() else onDone(ended)
+    }
+    leave.bind(LeaveWhenBound.END) { end() }
+    leave.bind(LeaveWhenBound.DROP) { drop() }
+    leave.bind(LeaveWhenBound.DISCARD) { discard() }
     // not started (no GPS yet): leaving drops the empty ride; started: the end sync code, then the end dialog
-    fun askEnd() { if (startedAt == null) discard() else if (thetaRide) confirmEnd = true else showSync(Camera360.When.END) }
+    fun askEnd() { if (startedAt == null) drop() else if (thetaRide) confirmEnd = true else showSync(Camera360.When.END) }
 
     val sync = syncing
     if (sync != null) {
-        SyncQrScreen(sessionId) {
+        SyncQrScreen(sessionId, syncFrom) { counted ->
             val w = Camera360.When.of(sync)
-            svc?.addSync(syncFrom, System.currentTimeMillis(), w)
+            // tapped away before the camera could film it: not a sync (the end dialog says when none is kept)
+            if (counted) svc?.addSync(syncFrom, System.currentTimeMillis(), w)
             syncing = null
             if (w == Camera360.When.END) confirmEnd = true
         }
@@ -218,6 +237,9 @@ fun Camera360Screen(sessionId: String, onDone: (io.github.tewnut.poicapture.core
                     C360Stat(distanceText(distanceM), stringResource(R.string.capture_end_stat_distance), small = true)
                     C360Stat("${(elapsedMs / 60_000).coerceAtLeast(1)}′", stringResource(R.string.capture_end_stat_minutes), small = true)
                 }
+                // GoPro / Insta360: with no sync filmed long enough the video cannot be put on the track
+                val aligned = thetaRide || svc == null || runCatching { SyncGate.aligned(Camera360.syncs(svc.session.camera360)) }.getOrDefault(true)
+                if (!aligned) Text(stringResource(R.string.c360_end_no_sync), color = Palette.Red, fontWeight = FontWeight.Bold)
                 Text(stringResource(R.string.capture_end_body))
             }
         },
@@ -257,9 +279,11 @@ private fun clockText(ms: Long): String {
  * The full-screen sync QR code (docs/camera360.md §2): `QPSYNC1 <sessionId> <epochMs>`, drawn again every
  * [Camera360.REDRAW_MS] with the phone's wall clock; black on white with its quiet zone, error correction M, screen
  * at full brightness and kept on while shown. Nothing else but one line of instruction above it and Done.
+ * Done waits until the code was up [SyncGate.MIN_MS] since [shownSinceMs] (a countdown on it); Back leaves at any
+ * time. [onDone] gets whether the showing was long enough to count as a sync.
  */
 @Composable
-fun SyncQrScreen(sessionId: String, onDone: () -> Unit) {
+fun SyncQrScreen(sessionId: String, shownSinceMs: Long, onDone: (counted: Boolean) -> Unit) {
     val activity = LocalContext.current as Activity
     val view = LocalView.current
     DisposableEffect(Unit) {
@@ -281,7 +305,12 @@ fun SyncQrScreen(sessionId: String, onDone: () -> Unit) {
             delay((Camera360.REDRAW_MS - (System.currentTimeMillis() - t)).coerceIn(1, Camera360.REDRAW_MS))
         }
     }
-    BackHandler(onBack = onDone)
+    var left by remember { mutableStateOf(SyncGate.secondsLeft(shownSinceMs, System.currentTimeMillis())) }
+    LaunchedEffect(shownSinceMs) {
+        while (left > 0) { delay(200); left = SyncGate.secondsLeft(shownSinceMs, System.currentTimeMillis()) }
+    }
+    fun done() = onDone(SyncGate.counts(shownSinceMs, System.currentTimeMillis()))
+    BackHandler { done() }
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.White).safeDrawingPadding()) {
         // the code as large as fits: the full width, less the one line above it and Done
         val side = minOf(maxWidth, maxHeight - 150.dp)
@@ -290,9 +319,9 @@ fun SyncQrScreen(sessionId: String, onDone: () -> Unit) {
                 textAlign = TextAlign.Center, lineHeight = 22.sp, modifier = Modifier.padding(horizontal = 16.dp))
             // the bitmap has one pixel per module (quiet zone included): scaled up with no filtering, sharp edges
             qr?.let { Image(it, null, Modifier.size(side), filterQuality = FilterQuality.None) } ?: Box(Modifier.size(side))
-            Button(onClick = onDone, modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(52.dp),
+            Button(onClick = { done() }, enabled = left == 0, modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Black, contentColor = Color.White)) {
-                Text(stringResource(R.string.c360_sync_done), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.c360_sync_done) + if (left > 0) " ($left)" else "", fontSize = 18.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

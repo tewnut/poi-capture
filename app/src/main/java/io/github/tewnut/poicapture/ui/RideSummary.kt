@@ -50,11 +50,12 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 
 /**
- * After "Kết thúc và lưu": the ride in numbers (photos, distance, time, signs seen; a 360 ride its track and, with a
- * Theta, the shots taken and skipped) and its upload, live, until Xong goes back to the list.
+ * After "Kết thúc và lưu": the ride in numbers (photos, distance, time, signs seen, photos with a house number; a 360
+ * ride its track and, with a Theta, the shots taken, skipped and failed) and its upload, live, until Xong goes back to
+ * the list. No access key yet: [onOpenSettings] goes where it is entered.
  */
 @Composable
-fun RideSummaryScreen(end: RideEnd, onDone: () -> Unit) {
+fun RideSummaryScreen(end: RideEnd, onDone: () -> Unit, onOpenSettings: () -> Unit = {}) {
     val ctx = LocalContext.current
     BackHandler(onBack = onDone)
     // distance and time from the track, once; the ride may already be cut into parts by its upload
@@ -82,8 +83,11 @@ fun RideSummaryScreen(end: RideEnd, onDone: () -> Unit) {
                 stats?.takeIf { it.distanceM > 0 }?.let { add(distanceText(it.distanceM) to stringResource(R.string.capture_end_stat_distance)) }
                 stats?.takeIf { it.durationMs > 0 }?.let { add("${(it.durationMs / 60_000).coerceAtLeast(1)}′" to stringResource(R.string.capture_end_stat_minutes)) }
                 end.signs?.let { add("$it" to stringResource(R.string.capture_end_stat_signs)) }
+                end.plates?.let { add("$it" to stringResource(R.string.capture_end_stat_numbers)) }
                 end.thetaShots?.let { add("$it" to stringResource(R.string.summary_theta_shots)) }
                 end.thetaSkipped?.let { add("$it" to stringResource(R.string.summary_theta_skipped)) }
+                // shots the camera was asked for and did not take (an error on the camera): only when there were some
+                end.thetaFailed?.takeIf { it > 0 }?.let { add("$it" to stringResource(R.string.summary_theta_failed)) }
             }
             // the ride in numbers, lime on black as in the end dialog; three to a row
             if (items.isNotEmpty()) Column(Modifier.fillMaxWidth().background(Palette.Black, RoundedCornerShape(20.dp)).padding(vertical = 18.dp),
@@ -95,7 +99,7 @@ fun RideSummaryScreen(end: RideEnd, onDone: () -> Unit) {
                     }
                 }
             }
-            UploadLine(upload, retry)
+            UploadLine(upload, retry, onOpenSettings)
         }
         Button(onClick = onDone, modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp).fillMaxWidth().height(56.dp)) {
             Text(stringResource(R.string.summary_done), fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -104,9 +108,16 @@ fun RideSummaryScreen(end: RideEnd, onDone: () -> Unit) {
 }
 
 @Composable
-private fun UploadLine(up: RideUpload.State, retry: () -> Unit) {
-    val (text, color, action) = when (up.kind) {
-        RideUpload.Kind.NO_TOKEN -> Triple(stringResource(R.string.summary_upload_no_token), Palette.Amber, null)
+private fun UploadLine(up: RideUpload.State, retry: () -> Unit, openSettings: () -> Unit) {
+    // the contributor has to act: a new access key (Settings) or space on the phone, before any generic state
+    val settingsAction = up.kind == RideUpload.Kind.NO_TOKEN || (up.kind != RideUpload.Kind.SENT && up.problem == UploadRecord.AUTH)
+    val (text, color, action) = when {
+        up.kind == RideUpload.Kind.SENT || up.problem == null -> null
+        up.problem == UploadRecord.AUTH -> Triple(stringResource(R.string.upload_auth_failed), Palette.Red, R.string.summary_open_settings)
+        up.problem == UploadRecord.NO_SPACE -> Triple(stringResource(R.string.upload_no_space), Palette.Red, R.string.upload_retry)
+        else -> null
+    } ?: when (up.kind) {
+        RideUpload.Kind.NO_TOKEN -> Triple(stringResource(R.string.summary_upload_no_token), Palette.Amber, R.string.summary_open_settings)
         RideUpload.Kind.NOT_SENT -> Triple(stringResource(R.string.summary_upload_not_sent), Palette.Muted, R.string.sessions_send_now)
         RideUpload.Kind.WAITING -> Triple(stringResource(R.string.summary_upload_waiting), Palette.Muted, null)
         RideUpload.Kind.WIFI -> Triple(stringResource(R.string.summary_upload_wifi), Palette.Muted, R.string.sessions_send_now)
@@ -119,7 +130,9 @@ private fun UploadLine(up: RideUpload.State, retry: () -> Unit) {
         Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(text, Modifier.weight(1f), color = color, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 2,
                 overflow = TextOverflow.Ellipsis)
-            if (action != null) TextButton(onClick = retry) { Text(stringResource(action), fontWeight = FontWeight.Bold) }
+            if (action != null) TextButton(onClick = if (settingsAction) openSettings else retry) {
+                Text(stringResource(action), fontWeight = FontWeight.Bold)
+            }
         }
         if (up.kind == RideUpload.Kind.SENDING) LinearProgressIndicator(progress = { up.pct / 100f },
             modifier = Modifier.fillMaxWidth().padding(end = 10.dp, bottom = 8.dp))
@@ -159,7 +172,7 @@ private fun rememberRideUpload(sessionId: String): Pair<RideUpload.State, () -> 
             exists = exists[id] ?: true,   // not read yet: still there
             status = rec.status, queued = work != null, running = work?.state == WorkInfo.State.RUNNING,
             wifiWait = work != null && work.state != WorkInfo.State.RUNNING && work.constraints.requiredNetworkType == NetworkType.UNMETERED,
-            error = rec.error,
+            error = rec.error, problem = rec.problem,
             done = work?.progress?.getLong("done", -1L)?.takeIf { it >= 0 } ?: rec.offset,
             total = work?.progress?.getLong("total", 0L)?.takeIf { it > 0 } ?: rec.size)
     }

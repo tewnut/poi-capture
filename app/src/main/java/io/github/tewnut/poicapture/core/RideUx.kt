@@ -1,5 +1,7 @@
 package io.github.tewnut.poicapture.core
 
+import org.json.JSONObject
+
 /** Onboarding "Dữ liệu đường": go on once a pack is on the phone or one is downloading (it finishes in the background). */
 object RoadsGate {
     fun canContinue(installed: Boolean, downloading: Boolean): Boolean = installed || downloading
@@ -34,24 +36,73 @@ object SetupSummary {
 
 /**
  * What a ride ended with Save leaves for the summary screen: counts read off the live ride before it closed
- * (signs and Theta shots are not kept anywhere else). [signs] only on a signs ride, [thetaShots] / [thetaSkipped]
- * only on a Theta ride.
+ * (signs and Theta shots are not kept anywhere else). [signs] only on a signs ride, [plates] (photos with a house
+ * number) only on a house-number ride, [thetaShots] / [thetaSkipped] / [thetaFailed] only on a Theta ride.
  */
 data class RideEnd(val sessionId: String, val cam360: Boolean, val photos: Int, val videos: Int,
-                   val signs: Int? = null, val thetaShots: Int? = null, val thetaSkipped: Int? = null) {
+                   val signs: Int? = null, val thetaShots: Int? = null, val thetaSkipped: Int? = null,
+                   val plates: Int? = null, val thetaFailed: Int? = null) {
     /** One line for rememberSaveable (the summary survives a rotation). */
-    fun encode(): String = listOf(sessionId, if (cam360) "1" else "0", photos, videos, signs ?: -1, thetaShots ?: -1, thetaSkipped ?: -1)
-        .joinToString("|")
+    fun encode(): String = listOf(sessionId, if (cam360) "1" else "0", photos, videos, signs ?: -1, thetaShots ?: -1, thetaSkipped ?: -1,
+        plates ?: -1, thetaFailed ?: -1).joinToString("|")
 
     companion object {
         fun decode(s: String?): RideEnd? {
             val p = s?.split('|') ?: return null
-            if (p.size != 7 || p[0].isEmpty()) return null
+            // 7 fields: saved before plates / thetaFailed were kept
+            if ((p.size != 7 && p.size != 9) || p[0].isEmpty()) return null
             val n = p.drop(2).map { it.toIntOrNull() ?: return null }
             fun opt(v: Int) = v.takeIf { it >= 0 }
-            return RideEnd(p[0], p[1] == "1", n[0], n[1], opt(n[2]), opt(n[3]), opt(n[4]))
+            return RideEnd(p[0], p[1] == "1", n[0], n[1], opt(n[2]), opt(n[3]), opt(n[4]),
+                n.getOrNull(5)?.let { opt(it) }, n.getOrNull(6)?.let { opt(it) })
         }
     }
+}
+
+/**
+ * A ride reopened after Android killed the app: the service starts again on a session that already started, with
+ * fresh counters. The counts go on from what is on disk (items, track, the counts saved last), so the end dialog, the
+ * summary and `session.counts` are the whole ride's, and the "nothing recorded" shortcut never deletes it.
+ */
+object RideRestore {
+    data class Counts(val photos: Int = 0, val videos: Int = 0, val trackPoints: Int = 0, val plates: Int = 0, val signs: Int = 0)
+
+    /** From the session's [items] (patches applied), its track's line count and `session.counts` ([saved]). */
+    fun counts(items: List<JSONObject>, trackLines: Int, saved: JSONObject?): Counts {
+        val videos = items.count { it.optString("kind") == "video" }
+        val photos = items.size - videos
+        // as counted live: a photo the phone read a house number on, a photo with a sign seen
+        val plates = items.count { i -> i.optJSONArray("plates")?.let { a ->
+            (0 until a.length()).any { a.optJSONObject(it)?.optString("kind") == HouseNumbers.Kind.NUMBER.json } } == true }
+        val signs = items.count { i -> i.optJSONArray("signs")?.let { a ->
+            (0 until a.length()).any { (a.optJSONObject(it)?.optDouble("score") ?: 0.0) >= SignBoxes.SEEN } } == true }
+        fun savedOf(k: String) = saved?.optInt(k, 0) ?: 0
+        return Counts(maxOf(photos, savedOf("photos")), maxOf(videos, savedOf("videos")), maxOf(trackLines, savedOf("trackPoints")),
+            plates, signs)
+    }
+
+    /**
+     * Leaving with "nothing recorded" may drop the session without asking only when it never started and holds no
+     * photo or video ([mediaFiles]: items plus files on disk). The track alone of a ride that never started is only
+     * the wait for GPS / light.
+     */
+    fun deletable(startedAt: String?, mediaFiles: Int): Boolean = startedAt == null && mediaFiles == 0
+}
+
+/**
+ * Camera 360 sync QR (docs/camera360.md §2): a showing counts only after [MIN_MS] on the screen, long enough for the
+ * camera to film it; one tapped away at once aligns nothing.
+ */
+object SyncGate {
+    const val MIN_MS = 3_000L
+
+    fun counts(fromMs: Long, toMs: Long): Boolean = toMs - fromMs >= MIN_MS
+
+    /** Whole seconds still to wait (shown on Done), 0 = it counts. */
+    fun secondsLeft(fromMs: Long, nowMs: Long): Int = ((MIN_MS - (nowMs - fromMs)).coerceAtLeast(0) + 999).toInt() / 1000
+
+    /** The video can be put on the track: at least one showing long enough. */
+    fun aligned(syncs: List<Camera360.Sync>): Boolean = syncs.any { counts(it.fromMs, it.toMs) }
 }
 
 /**
@@ -65,9 +116,10 @@ object RideUpload {
     /** One session's upload: [exists] in the store, its record, and its background work if any. */
     data class Part(val exists: Boolean, val status: UploadStatus = UploadStatus.NONE, val queued: Boolean = false,
                     val running: Boolean = false, val wifiWait: Boolean = false, val error: String? = null,
-                    val done: Long = 0, val total: Long = 0)
+                    val done: Long = 0, val total: Long = 0, val problem: String? = null)
 
-    data class State(val kind: Kind, val pct: Int = 0, val error: String? = null)
+    /** [problem]: [UploadRecord.problem] of a part not sent yet, when the contributor has to act (access key, space). */
+    data class State(val kind: Kind, val pct: Int = 0, val error: String? = null, val problem: String? = null)
 
     /** The sessions to follow: the ride itself until its parts appear, then every part ever seen. */
     fun ids(sessionId: String, partsNow: Collection<String>, seenBefore: Collection<String>): List<String> {
@@ -98,6 +150,7 @@ object RideUpload {
         val total = sized.sumOf { it.total }
         val done = sized.sumOf { if (it.status == UploadStatus.DONE) it.total else it.done.coerceIn(0, it.total) }
         val pct = if (total > 0) ((done * 100) / total).toInt().coerceIn(0, 100) else 0
-        return State(kind, pct, error)
+        val problem = parts.firstOrNull { kindOf(it) != Kind.SENT && it.problem != null }?.problem
+        return State(kind, pct, error, problem)
     }
 }

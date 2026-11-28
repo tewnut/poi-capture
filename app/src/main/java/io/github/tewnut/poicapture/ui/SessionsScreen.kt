@@ -41,7 +41,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.collectAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -165,7 +167,8 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                 val send = Intent(Intent.ACTION_SEND).setType("application/zip").putExtra(Intent.EXTRA_STREAM, uri)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 ctx.startActivity(Intent.createChooser(send, ctx.getString(R.string.sessions_send_chooser, f.name)))
-                markExported(s)
+                // not marked sent: the chooser says nothing of whether the file went anywhere (a cancel looks the same),
+                // and the delete dialog trusts "sent". Only a saved file or a server upload counts.
                 msg = ctx.getString(R.string.sessions_packed, mb(f.length()))
             } catch (e: Exception) { msgError = true; msg = ctx.getString(R.string.sessions_pack_failed, errorText(ctx, e)) }
             busy = null
@@ -211,6 +214,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                 onShare = { send(r.s) },
                 onMap = { onOpenMap(r.s.id, r.title) },
                 onSave = { saving = r.s; saveLauncher.launch(Exporter.fileName(r.s)) },
+                onSettings = onOpenSettings,
                 onDelete = { confirmDel = r.s })
         }
     }
@@ -246,7 +250,12 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                 confirmDel = null
                 msgError = false; msg = ctx.getString(R.string.sessions_deleting)
                 scope.launch {
-                    withContext(Dispatchers.IO) { io.github.tewnut.poicapture.capture.Uploads.forget(ctx, s.id); store.delete(s.id) }
+                    withContext(Dispatchers.IO) {
+                        // deleted unsent: the field tasks its Place captures did are to do again (sent: the server has them)
+                        val sent = store.load(s.id)?.exportedAt != null || Uploads.record(ctx, s.id).status == UploadStatus.DONE
+                        Uploads.forget(ctx, s.id); store.delete(s.id)
+                        if (!sent) runCatching { CaptureService.tasks(ctx).reopenBy(s.id) }
+                    }
                     msg = ctx.getString(R.string.sessions_deleted)
                     reload++
                 }
@@ -263,7 +272,8 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
  */
 @Composable
 private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, uploads: Boolean,
-                        onSend: () -> Unit, onShare: () -> Unit, onMap: () -> Unit, onSave: () -> Unit, onDelete: () -> Unit) {
+                        onSend: () -> Unit, onShare: () -> Unit, onMap: () -> Unit, onSave: () -> Unit, onDelete: () -> Unit,
+                        onSettings: () -> Unit) {
     val ctx = LocalContext.current
     val s = r.s
     // a Camera 360 ride never has photos: its track is what it recorded
@@ -309,7 +319,7 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                 if (r.relocated > 0) ctx.plural(R.plurals.sessions_relocated, r.relocated) else null,
             ).joinToString(" · "))
             if (s.endedAt == null && !recording) Hint(ctx.getString(R.string.sessions_interrupted), color = Palette.Amber)
-            if (!empty && !recording) Box(Modifier.padding(top = 8.dp, end = 12.dp)) { SendControl(up, busy, onSend) }
+            if (!empty && !recording) Box(Modifier.padding(top = 8.dp, end = 12.dp)) { SendControl(up, busy, onSend, onSettings) }
         }
     }
 }
@@ -338,14 +348,16 @@ private fun rememberUpload(sessionId: String, uploads: Boolean): UploadState? {
 /**
  * The card's one action. Not sent: "Send to server" (no access key yet: a dialog to set it up, or share the file).
  * Sending: a progress bar with the MB sent; waiting (Wi-Fi, retry): why, and Send now; failed: why, and Try again;
- * on the server: when. Shared by hand (no server): Sent, and Send to server stays.
+ * on the server: when. Access key refused: say so, and open Settings (trying again would only fail again).
+ * Saved as a file (no server): Sent, and Send to server stays.
  */
 @Composable
-private fun SendControl(up: UploadState?, busy: Boolean, onSend: () -> Unit) {
+private fun SendControl(up: UploadState?, busy: Boolean, onSend: () -> Unit, onSettings: () -> Unit) {
     val status: @Composable (String, Color, Int?) -> Unit = { text, color, action ->
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(text, fontSize = 13.sp, color = color, modifier = Modifier.weight(1f), maxLines = 2)
-            if (action != null) TextButton(onClick = onSend, modifier = Modifier.height(36.dp)) { Text(stringResource(action)) }
+            if (action != null) TextButton(onClick = if (action == R.string.sessions_setup_open) onSettings else onSend,
+                modifier = Modifier.height(36.dp)) { Text(stringResource(action)) }
         }
     }
     when {
@@ -363,6 +375,8 @@ private fun SendControl(up: UploadState?, busy: Boolean, onSend: () -> Unit) {
         up.wifiWait -> status(stringResource(R.string.upload_status_wifi), Palette.Muted, R.string.sessions_send_now)
         up.queued -> status(stringResource(R.string.upload_status_waiting), Palette.Muted, null)
         up.sent -> status("✓ " + stringResource(R.string.sessions_on_server, fmt(up.rec.uploadedAt)), Palette.Green, null)
+        up.rec.authFailed -> status(stringResource(R.string.upload_auth_failed), Palette.Red, R.string.sessions_setup_open)
+        up.rec.noSpace -> status(stringResource(R.string.upload_no_space), Palette.Red, R.string.upload_retry)
         else -> status(stringResource(R.string.upload_status_failed, up.rec.error ?: ""), Palette.Red, R.string.upload_retry)
     }
 }
@@ -509,54 +523,231 @@ private fun fmt(isoTime: String?): String = isoTime?.let {
 } ?: "–"
 
 /**
- * A street of shopfronts, a rider passing, and the viewfinder of the app icon around one lime sign: a black line
- * drawing with VMAP lime, drawn in code so it stays sharp and follows the palette.
+ * A street, a rider, and the viewfinder of the app icon: a black line drawing with VMAP lime, drawn in code so it
+ * stays sharp and follows the palette. The street has what the app's rides take: shops with signs, houses with their
+ * number plates and a traffic sign. [animated]: the rider rides in and stays in the middle while the street goes by
+ * (the view follows the rider); the phone on the handlebar takes each sign, plate and traffic sign as it passes (a
+ * flash, then lime), on and on. Still when the phone's animations are off (Accessibility → remove animations).
  */
 @Composable
-fun StreetIllustration(modifier: Modifier) {
-    androidx.compose.foundation.Canvas(modifier) {
-        val u = size.height / 150f
-        val ink = Palette.Black
-        val line = androidx.compose.ui.graphics.drawscope.Stroke(2.5f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round,
-            join = androidx.compose.ui.graphics.StrokeJoin.Round)
-        fun o(x: Float, y: Float) = androidx.compose.ui.geometry.Offset(x, y)
-        fun sz(w: Float, h: Float) = androidx.compose.ui.geometry.Size(w, h)
-        fun cr(r: Float) = androidx.compose.ui.geometry.CornerRadius(r)
-        val cx = size.width / 2
-        val left = cx - 146 * u
-        // the street, with lane marks
-        drawRoundRect(Palette.GreenLight, o(left - 20 * u, 108 * u), sz(332 * u, 34 * u), cr(17 * u))
-        for (i in 0..5) drawLine(Palette.LimeDeep, o(left + i * 56 * u, 125 * u), o(left + i * 56 * u + 26 * u, 125 * u), 3 * u,
-            cap = androidx.compose.ui.graphics.StrokeCap.Round)
-        // three shopfronts of different heights, each with a sign and a door; the middle one is being scanned
-        for ((x, hgt, scanned) in listOf(Triple(0f, 70f, false), Triple(100f, 92f, true), Triple(200f, 62f, false))) {
-            val x0 = left + x * u; val top = 104 * u - hgt * u
-            drawRoundRect(Color.White, o(x0, top), sz(92 * u, hgt * u), cr(6 * u))
-            drawRoundRect(ink, o(x0, top), sz(92 * u, hgt * u), cr(6 * u), style = line)
-            drawRoundRect(if (scanned) Palette.Lime else Palette.House, o(x0 + 10 * u, top + 10 * u), sz(72 * u, 18 * u), cr(4 * u))
-            drawRoundRect(ink, o(x0 + 10 * u, top + 10 * u), sz(72 * u, 18 * u), cr(4 * u), style = line)
-            drawRoundRect(ink, o(x0 + 34 * u, 74 * u), sz(24 * u, 30 * u), cr(3 * u), style = line)
-            if (scanned) {
-                val l = x0 + 2 * u; val t = top + 2 * u; val r = x0 + 90 * u; val b = top + 36 * u; val c = 9 * u
-                val corners = listOf(
-                    listOf(o(l, t + c), o(l, t), o(l + c, t)), listOf(o(r - c, t), o(r, t), o(r, t + c)),
-                    listOf(o(r, b - c), o(r, b), o(r - c, b)), listOf(o(l + c, b), o(l, b), o(l, b - c)))
-                for (k in corners) {
-                    drawLine(ink, k[0], k[1], 3.5f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                    drawLine(ink, k[1], k[2], 3.5f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                }
-            }
-        }
-        // the rider: a scooter, the helmet in lime
-        val bx = cx + 40 * u; val by = 128 * u
-        drawCircle(ink, 7 * u, o(bx - 18 * u, by), style = line)
-        drawCircle(ink, 7 * u, o(bx + 18 * u, by), style = line)
-        drawLine(ink, o(bx - 18 * u, by), o(bx + 6 * u, by - 10 * u), 2.5f * u)
-        drawLine(ink, o(bx + 6 * u, by - 10 * u), o(bx + 18 * u, by), 2.5f * u)
-        drawLine(ink, o(bx + 10 * u, by - 22 * u), o(bx + 18 * u, by), 2.5f * u)
-        drawCircle(Palette.Lime, 5 * u, o(bx + 10 * u, by - 24 * u))
-        drawCircle(ink, 5 * u, o(bx + 10 * u, by - 24 * u), style = line)
+fun StreetIllustration(modifier: Modifier, animated: Boolean = false) {
+    val ctx = LocalContext.current
+    val motion = remember {
+        animated && runCatching {
+            android.provider.Settings.Global.getFloat(ctx.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        }.getOrDefault(1f) > 0f
     }
+    val soft = Modifier.graphicsLayer(compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen)
+    // soft edges: the street fades out at both sides instead of being cut
+    fun androidx.compose.ui.graphics.drawscope.DrawScope.edges() = drawRect(androidx.compose.ui.graphics.Brush.horizontalGradient(
+        0f to Color.Transparent, 0.1f to Color.Black, 0.9f to Color.Black, 1f to Color.Transparent),
+        blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+    if (!motion) {
+        androidx.compose.foundation.Canvas(modifier.then(soft)) { drawRide(null, 1f); edges() }
+        return
+    }
+    // the opening, once: the rider rides in to the middle
+    val enter = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(Unit) {
+        enter.animateTo(1f, androidx.compose.animation.core.tween(1400, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+    }
+    // then the street goes by, one period per loop: the loop's end is its start, no seam
+    val loop = androidx.compose.animation.core.rememberInfiniteTransition(label = "street")
+    val offset by loop.animateFloat(0f, StreetScroll.PERIOD, androidx.compose.animation.core.infiniteRepeatable(
+        androidx.compose.animation.core.tween(StreetScroll.LOOP_MS, easing = androidx.compose.animation.core.LinearEasing)), label = "ride")
+    androidx.compose.foundation.Canvas(modifier.then(soft)) { drawRide(offset, enter.value); edges() }
+}
+
+/**
+ * The moving street (pure: StreetSceneTest), in drawing units (the picture is 150 high, the ground at 104). One
+ * [PERIOD] of the street repeats: [ITEMS] at their x in it. Each item has one thing the phone takes (a shop's sign, a
+ * house's number plate, a traffic sign: [Item.target]); it is taken once its centre has passed the phone.
+ */
+internal object StreetScroll {
+    const val LOOP_MS = 6400
+    /** Eight lane-mark gaps: the marks are back in place after one period too. */
+    const val GAP = 56f
+    const val PERIOD = 8 * GAP
+    /** Where the phone is, from the scooter's centre (units): it is the phone that passes the targets. */
+    const val CAMERA = 19f
+
+    enum class Kind { SHOP, HOUSE, TUBE, POLE }
+
+    /** An item of the street: its left edge in the period, width, height above the ground. */
+    data class Item(val kind: Kind, val x: Float, val w: Float, val h: Float) {
+        /** What the phone takes, relative to the item's left edge and the ground (x, y up from it, w, h). */
+        val target: FloatArray get() = when (kind) {
+            Kind.SHOP -> floatArrayOf(10f, h - 28f, w - 20f, 18f)          // the sign across the front
+            Kind.HOUSE -> floatArrayOf(w - 22f, 26f, 13f, 9f)              // the number plate by the door
+            Kind.TUBE -> floatArrayOf(w - 20f, 26f, 13f, 9f)
+            Kind.POLE -> floatArrayOf(-1f, 46f, 20f, 20f)                  // the round sign on its pole
+        }
+        val targetCentre: Float get() = x + target[0] + target[2] / 2
+    }
+
+    val ITEMS = listOf(
+        Item(Kind.SHOP, 0f, 92f, 70f),
+        Item(Kind.HOUSE, 112f, 72f, 66f),
+        Item(Kind.POLE, 204f, 18f, 66f),
+        Item(Kind.SHOP, 242f, 92f, 88f),
+        Item(Kind.TUBE, 354f, 62f, 92f),
+    )
+
+    /** An item in view: its period [n], its left edge in the picture (units), and the item. */
+    data class Placed(val n: Int, val left: Float, val item: Item) {
+        val targetCentre: Float get() = left + item.target[0] + item.target[2] / 2
+    }
+
+    /** The items in view of a picture [width] units wide, at [offset]. */
+    fun visible(width: Float, offset: Float): List<Placed> {
+        val first = kotlin.math.floor((offset - 120f) / PERIOD).toInt()
+        val last = kotlin.math.ceil((offset + width) / PERIOD).toInt()
+        return (first..last).flatMap { n -> ITEMS.map { Placed(n, n * PERIOD + it.x - offset, it) } }
+            .filter { it.left + it.item.w > -20f && it.left < width + 20f }
+    }
+
+    /** How far the phone ([camX]) is past an item's target (units; < 0 = still ahead). */
+    fun passed(camX: Float, p: Placed): Float = camX - p.targetCentre
+
+    /** The flash right after a target is taken: 1 at the moment of passing, 0 after 14 units. */
+    fun flash(p: Float): Float = if (p in 0f..14f) 1f - p / 14f else 0f
+
+    /** The viewfinder stays on the target just taken for 50 units. */
+    fun framed(p: Float): Boolean = p in 0f..50f
+
+    /** The still picture: the street placed so the tall shop's sign was just taken ([width] = the picture's). */
+    fun stillOffset(width: Float): Float = ITEMS[3].targetCentre + 18f - (width / 2)
+
+    /** The body's bob over the road (units): small bumps, a whole number per period. */
+    fun bob(offset: Float): Float = 0.7f * kotlin.math.abs(kotlin.math.sin(offset / PERIOD * 10 * Math.PI.toFloat()))
+
+    /** The lane marks move with the street (units, 0 until [GAP]). */
+    fun laneShift(offset: Float): Float = ((offset % GAP) + GAP) % GAP
+}
+
+/**
+ * One item of the street at [x] (its left edge, px), kept plain: a white block with a door and the one thing the
+ * phone takes (a grey sign, a blue number plate) that turns lime when [taken]; a traffic sign is a disc on a pole with
+ * a lime ring once taken. [flash]: the photo just taken, [framed]: the viewfinder on it.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawItem(it: StreetScroll.Item, x: Float, taken: Float,
+                                                                      flash: Float, framed: Boolean, u: Float) {
+    val ink = Palette.Black
+    val line = androidx.compose.ui.graphics.drawscope.Stroke(2.5f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        join = androidx.compose.ui.graphics.StrokeJoin.Round)
+    val round = androidx.compose.ui.graphics.StrokeCap.Round
+    val ground = 104 * u
+    fun o(dx: Float, up: Float) = androidx.compose.ui.geometry.Offset(x + dx * u, ground - up * u)
+    fun sz(w: Float, h: Float) = androidx.compose.ui.geometry.Size(w * u, h * u)
+    fun cr(r: Float) = androidx.compose.ui.geometry.CornerRadius(r * u)
+    val t = it.target
+    val tl = o(t[0], t[1] + t[3])   // the target's top-left
+    if (flash > 0f) drawRoundRect(Palette.Lime.copy(alpha = 0.6f * flash), o(t[0] - 6, t[1] + t[3] + 6), sz(t[2] + 12, t[3] + 12), cr(6f))
+    if (it.kind == StreetScroll.Kind.POLE) {
+        val c = o(t[0] + t[2] / 2, t[1] + t[3] / 2)
+        drawLine(ink, o(t[0] + t[2] / 2, 0f), o(t[0] + t[2] / 2, t[1]), 2.5f * u, cap = round)
+        if (taken > 0f) drawCircle(Palette.Lime.copy(alpha = taken), 13 * u, c)
+        drawCircle(Palette.Red, 9 * u, c)
+        drawCircle(Color.White, 5.5f * u, c)
+        drawCircle(ink, 9 * u, c, style = line)
+    } else {
+        drawRoundRect(Color.White, o(0f, it.h), sz(it.w, it.h), cr(6f))
+        drawRoundRect(ink, o(0f, it.h), sz(it.w, it.h), cr(6f), style = line)
+        val door = if (it.kind == StreetScroll.Kind.SHOP) it.w / 2 - 12 else 12f
+        drawRoundRect(ink, o(door, 30f), sz(24f, 30f), cr(3f), style = line)
+        val plain = if (it.kind == StreetScroll.Kind.SHOP) Palette.House else Palette.Blue
+        drawRoundRect(androidx.compose.ui.graphics.lerp(plain, Palette.Lime, taken), tl, sz(t[2], t[3]), cr(3f))
+        drawRoundRect(ink, tl, sz(t[2], t[3]), cr(3f), style = line)
+    }
+    if (framed) {
+        val l = tl.x - 5 * u
+        val tp = tl.y - 5 * u
+        val r = tl.x + (t[2] + 5) * u
+        val b = tl.y + (t[3] + 5) * u
+        val c = 7 * u
+        fun q(px: Float, py: Float) = androidx.compose.ui.geometry.Offset(px, py)
+        for (k in listOf(listOf(q(l, tp + c), q(l, tp), q(l + c, tp)), listOf(q(r - c, tp), q(r, tp), q(r, tp + c)),
+                         listOf(q(r, b - c), q(r, b), q(r - c, b)), listOf(q(l + c, b), q(l, b), q(l, b - c)))) {
+            drawLine(ink, k[0], k[1], 3.2f * u, cap = round)
+            drawLine(ink, k[1], k[2], 3.2f * u, cap = round)
+        }
+    }
+}
+
+/**
+ * The rider, kept plain: two wheels, the scooter's deck and front, the rider as one dark stroke under a lime helmet,
+ * and the phone on the handlebar with its scan beam up to the street (brighter while a photo is taken: [beam]).
+ * [bx] = the scooter's centre; [bob] lifts the body (units) as on a real road.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawRider(bx: Float, u: Float, alpha: Float = 1f,
+                                                                       bob: Float = 0f, beam: Float = 0f) {
+    val ink = Palette.Black.copy(alpha = alpha)
+    val white = Color.White.copy(alpha = alpha)
+    val line = androidx.compose.ui.graphics.drawscope.Stroke(2.5f * u, cap = androidx.compose.ui.graphics.StrokeCap.Round,
+        join = androidx.compose.ui.graphics.StrokeJoin.Round)
+    val round = androidx.compose.ui.graphics.StrokeCap.Round
+    val by = 128 * u
+    fun o(dx: Float, dy: Float) = androidx.compose.ui.geometry.Offset(bx + dx * u, by + dy * u)
+    fun b(dx: Float, dy: Float) = o(dx, dy - bob)
+    // the scan beam: from the phone up to the street
+    if (alpha > 0f) {
+        val beamA = (0.14f + 0.4f * beam) * alpha
+        val tip = b(19f, -36f)
+        val beamPath = androidx.compose.ui.graphics.Path().apply {
+            moveTo(tip.x, tip.y); val l = b(-12f, -82f); lineTo(l.x, l.y); val r = b(50f, -82f); lineTo(r.x, r.y); close()
+        }
+        drawPath(beamPath, androidx.compose.ui.graphics.Brush.verticalGradient(
+            listOf(Palette.Lime.copy(alpha = beamA * 0.25f), Palette.Lime.copy(alpha = beamA)),
+            startY = by - (82 + bob) * u, endY = by - (36 + bob) * u))
+    }
+    for (wx in listOf(-17f, 19f)) {
+        drawCircle(white, 7 * u, o(wx, 0f))
+        drawCircle(ink, 7 * u, o(wx, 0f), style = line)
+    }
+    // the deck and the front: one rounded body, the steering stem, the handlebar
+    drawRoundRect(white, b(-27f, -15f), androidx.compose.ui.geometry.Size(42 * u, 9 * u), androidx.compose.ui.geometry.CornerRadius(4.5f * u))
+    drawRoundRect(ink, b(-27f, -15f), androidx.compose.ui.geometry.Size(42 * u, 9 * u), androidx.compose.ui.geometry.CornerRadius(4.5f * u), style = line)
+    drawLine(ink, b(14f, -10f), b(17f, -29f), 2.5f * u, cap = round)
+    drawLine(ink, b(12f, -29f), b(19f, -29f), 2.5f * u, cap = round)
+    // the rider: one dark stroke from the seat to the shoulders, an arm to the bar, a lime helmet
+    drawLine(ink, b(-13f, -17f), b(-8f, -35f), 7 * u, cap = round)
+    drawLine(ink, b(-8f, -32f), b(13f, -29f), 3 * u, cap = round)
+    drawCircle(Palette.Lime.copy(alpha = alpha), 5.5f * u, b(-6f, -42f))
+    drawCircle(ink, 5.5f * u, b(-6f, -42f), style = line)
+    // the phone on the handlebar
+    drawRoundRect(white, b(16f, -40f), androidx.compose.ui.geometry.Size(6 * u, 8 * u), androidx.compose.ui.geometry.CornerRadius(1.5f * u))
+    drawRoundRect(ink, b(16f, -40f), androidx.compose.ui.geometry.Size(6 * u, 8 * u), androidx.compose.ui.geometry.CornerRadius(1.5f * u), style = line)
+}
+
+/**
+ * The street at [offset] (units; null: the still picture, a sign just taken), the rider riding in during the opening
+ * ([enter] 0 → 1), then in the middle.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawRide(offset: Float?, enter: Float) {
+    val u = size.height / 150f
+    val width = size.width / u
+    val off = offset ?: StreetScroll.stillOffset(width)
+    val riderX = -50f + (width / 2 + 50f - StreetScroll.CAMERA) * enter
+    val camX = riderX + StreetScroll.CAMERA   // the phone takes what it passes
+    drawRect(Palette.GreenLight, androidx.compose.ui.geometry.Offset(0f, 108 * u), androidx.compose.ui.geometry.Size(size.width, 34 * u))
+    val shift = StreetScroll.laneShift(off)
+    var i = -1
+    while (true) {
+        val x0 = (i * StreetScroll.GAP - shift) * u
+        if (x0 > size.width) break
+        drawLine(Palette.LimeDeep, androidx.compose.ui.geometry.Offset(x0, 125 * u), androidx.compose.ui.geometry.Offset(x0 + 26 * u, 125 * u),
+            3 * u, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        i++
+    }
+    var beam = 0f
+    for (p in StreetScroll.visible(width, off)) {
+        val past = StreetScroll.passed(camX, p)
+        val flash = if (offset == null) 0f else StreetScroll.flash(past)
+        beam = maxOf(beam, flash)
+        drawItem(p.item, p.left * u, if (past >= 0f) 1f else 0f, flash, StreetScroll.framed(past), u)
+    }
+    drawRider(riderX * u, u, alpha = enter.coerceIn(0f, 1f), bob = if (offset == null) 0f else StreetScroll.bob(off),
+        beam = beam * enter)
 }
 
 /** No session yet: what a session is, and one big way to start the first. */
@@ -564,7 +755,7 @@ fun StreetIllustration(modifier: Modifier) {
 private fun EmptySessions(onNew: () -> Unit, modifier: Modifier) {
     Column(modifier.fillMaxWidth().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center) {
-        StreetIllustration(Modifier.fillMaxWidth().height(150.dp))
+        StreetIllustration(Modifier.fillMaxWidth().height(150.dp), animated = true)
         Box(Modifier.height(24.dp))
         Text(stringResource(R.string.sessions_empty), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Palette.Ink,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)

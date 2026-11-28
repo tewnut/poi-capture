@@ -47,19 +47,20 @@ fun ThetaSetupCard(everyM: Double, onEveryM: (Double) -> Unit) {
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Hint(stringResource(R.string.theta_hint))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(serial, { serial = it.trim() }, Modifier.weight(1.4f), singleLine = true,
+            OutlinedTextField(serial, { serial = it.trim(); Prefs.saveThetaWifi(ctx, serial, password) }, Modifier.weight(1.4f), singleLine = true,
                 label = { Text(stringResource(R.string.theta_serial), fontSize = 12.sp) },
                 placeholder = { Text("THETAYR12345678.OSC", fontSize = 12.sp) })
-            OutlinedTextField(password, { password = it.trim() }, Modifier.weight(1f), singleLine = true,
+            OutlinedTextField(password, { password = it.trim(); Prefs.saveThetaWifi(ctx, serial, password) }, Modifier.weight(1f), singleLine = true,
                 label = { Text(stringResource(R.string.theta_password), fontSize = 12.sp) },
                 visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                 placeholder = { Text(ThetaOsc.passwordFrom(serial).ifEmpty { "…" }, fontSize = 12.sp) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii))
         }
+        // serial and password are saved as typed or scanned (closing the page without Connect keeps them)
         // the serial off the sticker under the camera, read by the phone's camera
         var scan by remember { mutableStateOf(false) }
         OutlinedButton(onClick = { scan = true }) { Text("📷 " + stringResource(R.string.serial_scan_open)) }
-        if (scan) SerialScanner(onFound = { serial = it; scan = false }, onClose = { scan = false })
+        if (scan) SerialScanner(onFound = { serial = it; Prefs.saveThetaWifi(ctx, serial, password); scan = false }, onClose = { scan = false })
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(enabled = serial.isNotBlank() && link.status != ThetaLink.Status.CONNECTING, onClick = {
                 Prefs.saveThetaWifi(ctx, serial, password)
@@ -87,7 +88,8 @@ fun ThetaStatus(link: ThetaLink.Ui, modifier: Modifier = Modifier, dark: Boolean
             (link.batteryPct?.let { " · " + stringResource(R.string.theta_battery, it) } ?: "")) to Color(0xFF47CD89)
         ThetaLink.Status.CONNECTING -> stringResource(R.string.theta_connecting) to Color(0xFFFEC84B)
         ThetaLink.Status.LOST -> stringResource(R.string.theta_lost) to Palette.Red
-        ThetaLink.Status.FAILED -> stringResource(R.string.theta_failed, link.error ?: "?") to Palette.Red
+        ThetaLink.Status.FAILED -> (if (link.error == ThetaLink.ERR_WIFI) stringResource(R.string.theta_failed_wifi)
+            else stringResource(R.string.theta_failed, link.error ?: "?")) to Palette.Red
         ThetaLink.Status.OFF -> stringResource(R.string.theta_not_connected) to (if (dark) Color.White.copy(alpha = 0.7f) else Palette.Muted)
     }
     Text("● $text", modifier = modifier, color = if (!dark && link.status == ThetaLink.Status.CONNECTED) Palette.Ink else color,

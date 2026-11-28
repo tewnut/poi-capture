@@ -75,6 +75,7 @@
     <!-- ==== Onboarding, new session ==== -->
     <!-- Onboarding (first run) -->
     <string name="onboarding_back">← Back</string>
+    <string name="onboarding_close">✕ Close</string>
     <string name="onboarding_continue">Continue</string>
     <string name="onboarding_welcome_lead">Put shops, house numbers and road signs on the map.</string>
     <string name="onboarding_welcome_button">Set up</string>
@@ -396,22 +397,6 @@
     <string name="packs_waiting_wifi">Waiting for Wi-Fi…</string>
     <string name="packs_download_failed">Download failed: %1$s</string>
 
-    <!-- Photo kinds of Place capture (PhotoRolesCard) -->
-    <string name="roles_intro">The buttons for picking the photo kind at a place, in shooting order. ★ = cover photo. After a photo of a kind marked ↻, the app moves on to the next kind that has no photo yet.</string>
-    <string name="roles_move_up">Move up</string>
-    <string name="roles_move_down">Move down</string>
-    <string name="roles_make_cover">Make cover photo ★</string>
-    <string name="roles_advance_off">Don\'t move on after this photo</string>
-    <string name="roles_advance_on">Move on after 1 photo ↻</string>
-    <string name="roles_remove">Remove this kind</string>
-    <string name="roles_add">+ Add photo kind</string>
-    <string name="roles_reset">Restore defaults</string>
-    <string name="roles_add_title">Add photo kind</string>
-    <string name="roles_add_name">Button name, e.g. Parking</string>
-    <string name="roles_add_hint">Hint while shooting (optional)</string>
-    <string name="roles_add_code">Photos of this kind are exported with the code “%1$s”.</string>
-    <string name="roles_add_confirm">Add</string>
-    <string name="roles_cancel">Cancel</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -421,16 +406,6 @@
     <string name="settings_email_bad">That doesn\'t look like an email, e.g. name@gmail.com</string>
     <string name="settings_display_name">Display name (optional)</string>
     <string name="settings_road_data">Offline road data</string>
-    <string name="settings_advanced_hide">▾ Hide advanced settings</string>
-    <string name="settings_advanced_show">▸ Advanced settings (mount angle, photo kinds)</string>
-    <string name="settings_mount_title">Mount angle (manual)</string>
-    <string name="settings_mount_hint">For a phone on a mount only. The app measures where the camera points by itself when you speed up or brake a few times; set it here only if the app says it couldn\'t: how many degrees the camera is turned toward the front or the back.</string>
-    <string name="settings_mount_forward">turned toward the front</string>
-    <string name="settings_mount_backward">turned toward the back</string>
-    <string name="settings_mount_square">square to the road</string>
-    <string name="settings_roles_title">Photo kinds in Place capture</string>
-    <string name="settings_roles_ask">Ask the kind of each photo (front, sign…)</string>
-    <string name="settings_roles_hint">Not needed: the system tells fronts, signs and insides apart by itself. Only turn on if your team asks.</string>
     <string name="settings_replay_onboarding">Show the intro again</string>
 
     <!-- access gate: GPS is a must -->
@@ -492,6 +467,10 @@
     <string name="setup_plan_auto_short">≤ %1$s m apart · ≤ %2$d km/h</string>
     <string name="setup_plan_short">≤ %1$d km/h</string>
     <string name="setup_need_gps">Waiting for GPS…</string>
+    <string name="setup_360_choose">Choose the 360 camera first</string>
+    <string name="setup_360_pair">Pair the Ricoh Theta first</string>
+    <string name="setup_360_connect">Connect the Ricoh Theta</string>
+    <string name="setup_360_connecting">Connecting the Ricoh Theta…</string>
     <string name="setup_need_email">Add your email to start</string>
     <string name="setup_info_title">How it works</string>
     <string name="setup_info_gps_title">GPS</string>
@@ -536,8 +515,6 @@
     <string name="onboarding_hand_text">A passenger holds it sideways, aimed at the buildings.</string>
     <string name="setup_hand_info">A passenger holds the phone sideways and aims at the shopfronts, on either side of the street. Each photo gets its own direction from the gyroscope and compass, so turning is fine; auto photos wait while the phone swings fast or points at the road.</string>
     <string name="setup_info_both">Both</string>
-    <string name="settings_advanced">Advanced</string>
-    <string name="settings_advanced_sub">Mount angle, photo kinds</string>
     <string name="settings_replay_sub">Language, permissions, road data and the two ways to sweep</string>
     <string name="capture_gps_lost_banner">GPS lost: photos keep the last position. Step outside to refresh it.</string>
     <string name="capture_gps_wait_title">Waiting for GPS</string>
@@ -635,6 +612,8 @@
     <string name="upload_status_done">Uploaded %s</string>
     <string name="upload_status_failed">Upload failed: %s</string>
     <string name="upload_status_retrying">Upload interrupted, will try again: %s</string>
+    <string name="upload_auth_failed">Access key expired or revoked</string>
+    <string name="upload_no_space">Not enough space on the phone to prepare the upload. Free some space, then try again.</string>
     <string name="upload_action">Upload</string>
     <string name="upload_now">Upload now</string>
     <string name="upload_retry">Retry</string>
@@ -779,6 +758,7 @@
     <string name="theta_not_connected">Not connected</string>
     <string name="theta_lost">Camera Wi-Fi lost</string>
     <string name="theta_failed">Cannot connect: %1$s</string>
+    <string name="theta_failed_wifi">Couldn\'t join the camera\'s Wi-Fi: is it on, nearby, and is the password right?</string>
     <string name="theta_every">Photo every</string>
     <string name="theta_shots">Photos</string>
     <string name="theta_skipped">Skipped</string>
@@ -845,6 +825,9 @@
     <string name="summary_done">Done</string>
     <string name="summary_theta_shots">360 photos</string>
     <string name="summary_theta_skipped">skipped</string>
+    <string name="summary_theta_failed">failed</string>
+    <string name="summary_open_settings">Open Settings</string>
+    <string name="c360_end_no_sync">No sync code was filmed for 3 s: the video cannot be placed on the track. Tap Sync again first.</string>
     <!-- Camera 360 settings page, New ride line, serial reader, onboarding step -->
     <string name="c360_title">Camera 360</string>
     <string name="c360_your_camera">Your camera</string>
@@ -885,4 +868,49 @@
     <string name="onboarding_cam360_no_sub">Phone camera only</string>
     <string name="onboarding_cam360_yes">Yes</string>
     <string name="onboarding_cam360_yes_sub">GoPro MAX, Insta360, Ricoh Theta…</string>
+    <!-- Camera 360: camera check (Ricoh Theta steps, manual tick list for the others) -->
+    <string name="check_title">Camera check</string>
+    <string name="check_sub">Takes 1 test photo, then deletes it</string>
+    <string name="check_run">Run check</string>
+    <string name="check_again">Check again</string>
+    <string name="check_cancel">Cancel</string>
+    <string name="check_ride_on">A ride is using the camera</string>
+    <string name="check_today">Checked today ✓</string>
+    <string name="check_line_today">checked today ✓</string>
+    <string name="check_line_not">not checked</string>
+    <string name="check_step_wifi">Connect to the camera\'s Wi-Fi</string>
+    <string name="check_step_camera">The right Ricoh camera</string>
+    <string name="check_step_clock">Camera clock set from the phone</string>
+    <string name="check_step_gps">GPS position sent to the camera</string>
+    <string name="check_step_shot">Take 1 test photo</string>
+    <string name="check_step_thumb">Download the photo to the phone</string>
+    <string name="check_step_exif">Photo has GPS coordinates</string>
+    <string name="check_step_delete">Delete the test photo from the camera</string>
+    <string name="check_power_info">Camera on/off: with its power button (not possible over Wi-Fi)</string>
+    <string name="check_serial">serial %1$s</string>
+    <string name="check_accuracy">±%1$d m</string>
+    <string name="check_shot_speed">%1$s s/photo → keeps up with every %2$d m up to ~%3$d km/h</string>
+    <string name="check_exif_off">%1$d m off</string>
+    <string name="check_fix_serial">Enter the serial above</string>
+    <string name="check_fix_not_ricoh">Not a Ricoh camera: check the Wi-Fi name</string>
+    <string name="check_fix_wrong_serial">Serial does not match: check the number under the camera</string>
+    <string name="check_fix_no_answer">The camera does not answer: turn it off and on again</string>
+    <string name="check_fix_clock">Theta X: in the camera\'s menu, set Date/time to Auto</string>
+    <string name="check_fix_no_gps">Needs GPS: go out in the open</string>
+    <string name="check_fix_gps_refused">The camera refused the position. The PC still places photos from the phone\'s track</string>
+    <string name="check_fix_shot">No photo: check the memory card, battery and photo mode</string>
+    <string name="check_fix_download">Could not download the photo: try again</string>
+    <string name="check_fix_exif_no_gps">No coordinates in the photo. Fine: the PC places photos from the phone\'s track</string>
+    <string name="check_fix_exif_far">Coordinates in the photo are far off. Fine: the PC places photos from the phone\'s track</string>
+    <string name="check_fix_delete">Delete the test photo by hand</string>
+    <string name="check_fix_error">Error</string>
+    <string name="check_manual_title">Before you ride</string>
+    <string name="check_manual_sub">Tick each day</string>
+    <string name="check_item_labs">GoPro Labs installed</string>
+    <string name="check_item_setup_qr">Camera scanned the setup QR (beep + confirmation on screen)</string>
+    <string name="check_item_gps">Camera GPS on</string>
+    <string name="check_item_clock">Camera clock right / will scan the sync QR at the start</string>
+    <string name="check_item_gps_any">GPS (if any) on</string>
+    <string name="check_item_card">Memory card has free space</string>
+    <string name="check_item_battery">Battery full</string>
 </resources>

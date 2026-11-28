@@ -71,6 +71,7 @@
     <!-- ==== Onboarding, new session ==== -->
     <!-- Onboarding (first run) -->
     <string name="onboarding_back">← Quay lại</string>
+    <string name="onboarding_close">✕ Đóng</string>
     <string name="onboarding_continue">Tiếp tục</string>
     <string name="onboarding_welcome_lead">Đưa cửa hàng, số nhà và biển báo lên bản đồ.</string>
     <string name="onboarding_welcome_button">Bắt đầu thiết lập</string>
@@ -381,22 +382,6 @@
     <string name="packs_waiting_wifi">Đang chờ Wi-Fi…</string>
     <string name="packs_download_failed">Tải lỗi: %1$s</string>
 
-    <!-- Photo kinds of Place capture (PhotoRolesCard) -->
-    <string name="roles_intro">Các nút chọn loại ảnh khi chụp một địa điểm, theo thứ tự chụp. ★ = ảnh bìa. Sau ảnh của loại có dấu ↻, app tự chuyển sang loại tiếp theo chưa có ảnh.</string>
-    <string name="roles_move_up">Lên trên</string>
-    <string name="roles_move_down">Xuống dưới</string>
-    <string name="roles_make_cover">Đặt làm ảnh bìa ★</string>
-    <string name="roles_advance_off">Không tự chuyển sau ảnh này</string>
-    <string name="roles_advance_on">Tự chuyển sau 1 ảnh ↻</string>
-    <string name="roles_remove">Bỏ loại này</string>
-    <string name="roles_add">+ Thêm loại ảnh</string>
-    <string name="roles_reset">Khôi phục mặc định</string>
-    <string name="roles_add_title">Thêm loại ảnh</string>
-    <string name="roles_add_name">Tên nút, ví dụ: Bãi đỗ xe</string>
-    <string name="roles_add_hint">Gợi ý khi chụp (không bắt buộc)</string>
-    <string name="roles_add_code">Ảnh loại này được xuất với mã “%1$s”.</string>
-    <string name="roles_add_confirm">Thêm</string>
-    <string name="roles_cancel">Huỷ</string>
 
     <!-- Settings -->
     <string name="settings_title">Cài đặt</string>
@@ -406,16 +391,6 @@
     <string name="settings_email_bad">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
     <string name="settings_display_name">Tên hiển thị (không bắt buộc)</string>
     <string name="settings_road_data">Dữ liệu đường offline</string>
-    <string name="settings_advanced_hide">▾ Ẩn cài đặt nâng cao</string>
-    <string name="settings_advanced_show">▸ Cài đặt nâng cao (góc giá đỡ, loại ảnh)</string>
-    <string name="settings_mount_title">Góc chếch giá đỡ (chỉnh tay)</string>
-    <string name="settings_mount_hint">Chỉ dùng khi gắn máy trên xe. App tự đo hướng camera khi bạn tăng tốc / phanh vài lần; chỉ chỉnh ở đây nếu app báo chưa đo được: camera chếch về phía trước hay phía sau bao nhiêu độ.</string>
-    <string name="settings_mount_forward">chếch về phía trước</string>
-    <string name="settings_mount_backward">chếch về phía sau</string>
-    <string name="settings_mount_square">vuông góc với đường</string>
-    <string name="settings_roles_title">Chọn loại ảnh khi chụp địa điểm</string>
-    <string name="settings_roles_ask">Hỏi loại của từng ảnh (mặt tiền, biển hiệu…)</string>
-    <string name="settings_roles_hint">Không cần: hệ thống tự nhận ra ảnh nào là mặt tiền, biển hiệu, bên trong. Chỉ bật khi nhóm yêu cầu.</string>
     <string name="settings_replay_onboarding">Xem lại phần giới thiệu</string>
 
     <!-- access gate: GPS is a must -->
@@ -476,6 +451,10 @@
     <string name="setup_plan_auto_short">≤ %1$s m/ảnh · ≤ %2$d km/h</string>
     <string name="setup_plan_short">≤ %1$d km/h</string>
     <string name="setup_need_gps">Đang chờ GPS…</string>
+    <string name="setup_360_choose">Chọn camera 360 trước</string>
+    <string name="setup_360_pair">Ghép Ricoh Theta trước</string>
+    <string name="setup_360_connect">Kết nối Ricoh Theta</string>
+    <string name="setup_360_connecting">Đang kết nối Ricoh Theta…</string>
     <string name="setup_need_email">Nhập email để bắt đầu</string>
     <string name="setup_info_title">Cách dùng</string>
     <string name="setup_info_gps_title">GPS</string>
@@ -519,8 +498,6 @@
     <string name="onboarding_hand_text">Người ngồi sau cầm ngang, hướng vào dãy nhà.</string>
     <string name="setup_hand_info">Người ngồi sau cầm ngang điện thoại, hướng vào dãy cửa hàng, bên nào của phố cũng được. Mỗi ảnh có hướng riêng từ con quay và la bàn nên xoay máy không sao; ảnh tự động sẽ chờ khi máy lia nhanh hoặc chĩa xuống đường.</string>
     <string name="setup_info_both">Chung</string>
-    <string name="settings_advanced">Nâng cao</string>
-    <string name="settings_advanced_sub">Góc giá đỡ, loại ảnh</string>
     <string name="settings_replay_sub">Ngôn ngữ, quyền, dữ liệu đường và hai cách quét đường</string>
     <string name="capture_gps_lost_banner">Mất GPS: ảnh dùng vị trí cuối cùng. Ra chỗ thoáng để cập nhật lại.</string>
     <string name="capture_gps_wait_title">Đang chờ GPS</string>
@@ -615,6 +592,8 @@
     <string name="upload_status_done">Đã tải lên %s</string>
     <string name="upload_status_failed">Tải lên thất bại: %s</string>
     <string name="upload_status_retrying">Tải lên bị gián đoạn, sẽ thử lại: %s</string>
+    <string name="upload_auth_failed">Mã truy cập đã hết hạn hoặc bị thu hồi</string>
+    <string name="upload_no_space">Máy không đủ chỗ trống để chuẩn bị gửi. Hãy dọn bớt rồi thử lại.</string>
     <string name="upload_action">Tải lên</string>
     <string name="upload_now">Tải lên ngay</string>
     <string name="upload_retry">Thử lại</string>
@@ -756,6 +735,7 @@
     <string name="theta_not_connected">Chưa kết nối</string>
     <string name="theta_lost">Mất Wi-Fi camera</string>
     <string name="theta_failed">Không kết nối được: %1$s</string>
+    <string name="theta_failed_wifi">Không vào được Wi-Fi của camera: camera đã bật chưa, ở gần chưa, mật khẩu đúng chưa?</string>
     <string name="theta_every">Chụp mỗi</string>
     <string name="theta_shots">Ảnh</string>
     <string name="theta_skipped">Bỏ qua</string>
@@ -822,6 +802,9 @@
     <string name="summary_done">Xong</string>
     <string name="summary_theta_shots">ảnh 360</string>
     <string name="summary_theta_skipped">bỏ lỡ</string>
+    <string name="summary_theta_failed">lỗi</string>
+    <string name="summary_open_settings">Mở Cài đặt</string>
+    <string name="c360_end_no_sync">Chưa quay mã đồng bộ đủ 3 giây: video không khớp được với đường đi. Hãy bấm Đồng bộ lại trước.</string>
     <!-- Camera 360 settings page, New ride line, serial reader, onboarding step -->
     <string name="c360_title">Camera 360</string>
     <string name="c360_your_camera">Camera của bạn</string>
@@ -862,4 +845,49 @@
     <string name="onboarding_cam360_no_sub">Chỉ dùng camera điện thoại</string>
     <string name="onboarding_cam360_yes">Có</string>
     <string name="onboarding_cam360_yes_sub">GoPro MAX, Insta360, Ricoh Theta…</string>
+    <!-- Camera 360: kiểm tra camera -->
+    <string name="check_title">Kiểm tra camera</string>
+    <string name="check_sub">Chụp 1 ảnh thử rồi xoá</string>
+    <string name="check_run">Kiểm tra camera</string>
+    <string name="check_again">Kiểm tra lại</string>
+    <string name="check_cancel">Huỷ</string>
+    <string name="check_ride_on">Đang có chuyến đi dùng camera</string>
+    <string name="check_today">Đã kiểm tra hôm nay ✓</string>
+    <string name="check_line_today">đã kiểm tra hôm nay ✓</string>
+    <string name="check_line_not">chưa kiểm tra</string>
+    <string name="check_step_wifi">Kết nối Wi-Fi camera</string>
+    <string name="check_step_camera">Đúng camera Ricoh</string>
+    <string name="check_step_clock">Chỉnh giờ camera theo điện thoại</string>
+    <string name="check_step_gps">Ghi vị trí GPS</string>
+    <string name="check_step_shot">Chụp thử 1 ảnh</string>
+    <string name="check_step_thumb">Tải ảnh về điện thoại</string>
+    <string name="check_step_exif">Ảnh có toạ độ GPS</string>
+    <string name="check_step_delete">Xoá ảnh thử khỏi camera</string>
+    <string name="check_power_info">Bật/tắt camera: bằng nút nguồn (không điều khiển qua Wi-Fi được)</string>
+    <string name="check_serial">serial %1$s</string>
+    <string name="check_accuracy">±%1$d m</string>
+    <string name="check_shot_speed">%1$s s/ảnh → chụp kịp mỗi %2$d m đến ~%3$d km/h</string>
+    <string name="check_exif_off">lệch %1$d m</string>
+    <string name="check_fix_serial">Nhập số serial ở trên</string>
+    <string name="check_fix_not_ricoh">Không phải camera Ricoh: xem lại tên Wi-Fi</string>
+    <string name="check_fix_wrong_serial">Sai số serial: xem số ở đáy camera</string>
+    <string name="check_fix_no_answer">Camera không trả lời: tắt rồi bật lại camera</string>
+    <string name="check_fix_clock">Theta X: trong menu camera, đặt Ngày giờ = Tự động</string>
+    <string name="check_fix_no_gps">Cần GPS: ra chỗ thoáng</string>
+    <string name="check_fix_gps_refused">Camera không nhận vị trí. Máy tính vẫn đặt ảnh theo đường đi của điện thoại</string>
+    <string name="check_fix_shot">Không chụp được: xem thẻ nhớ, pin, chế độ chụp ảnh</string>
+    <string name="check_fix_download">Không tải được ảnh: thử lại</string>
+    <string name="check_fix_exif_no_gps">Ảnh không có toạ độ. Không sao: máy tính đặt ảnh theo đường đi của điện thoại</string>
+    <string name="check_fix_exif_far">Toạ độ trong ảnh lệch xa. Không sao: máy tính đặt ảnh theo đường đi của điện thoại</string>
+    <string name="check_fix_delete">Xoá ảnh thử bằng tay</string>
+    <string name="check_fix_error">Lỗi</string>
+    <string name="check_manual_title">Kiểm tra trước khi đi</string>
+    <string name="check_manual_sub">Đánh dấu mỗi ngày</string>
+    <string name="check_item_labs">Đã cài GoPro Labs</string>
+    <string name="check_item_setup_qr">Camera đã quét mã QR cài đặt (bíp + xác nhận trên màn hình)</string>
+    <string name="check_item_gps">GPS camera đã bật</string>
+    <string name="check_item_clock">Đồng hồ camera đúng / sẽ quét mã QR đồng bộ lúc bắt đầu</string>
+    <string name="check_item_gps_any">GPS (nếu có) bật</string>
+    <string name="check_item_card">Thẻ nhớ còn trống</string>
+    <string name="check_item_battery">Pin đầy</string>
 </resources>

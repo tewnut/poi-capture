@@ -70,6 +70,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -182,7 +183,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     LaunchedEffect(tasksTick) { tasks = withContext(Dispatchers.IO) { CaptureService.tasks(ctx).all() } }
     var tasksOpen by remember { mutableStateOf(false) }
     var taskFocus by remember { mutableStateOf<String?>(null) }
-    var kind by remember { mutableStateOf(SessionKind.SWEEP) }
+    // the kind of the last ride (Quét đường / Chụp điểm), like the other choices; indoor only while it is enabled
+    var kind by remember { mutableStateOf(Prefs.rideKind(ctx).takeIf { it != SessionKind.INDOOR || INDOOR_ENABLED } ?: SessionKind.SWEEP) }
     // a street ride with a 360 camera: an option of Quét đường (the ride's kind is camera360, docs/camera360.md)
     var use360 by remember { mutableStateOf(Prefs.use360(ctx)) }
     val rideKind = if (kind == SessionKind.SWEEP && use360) SessionKind.CAMERA360 else kind
@@ -193,6 +195,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     val thetaOn = cam360Model == io.github.tewnut.poicapture.core.Camera360Model.THETA
     var thetaEveryM by remember { mutableStateOf(Prefs.thetaEveryM(ctx)) }
     var cam360Page by remember { mutableStateOf(false) }
+    val thetaLink by io.github.tewnut.poicapture.capture.ThetaLink.state.collectAsState()
     // leaving the setup without starting a Theta ride lets the camera's Wi-Fi go
     DisposableEffect(Unit) { onDispose { if (!io.github.tewnut.poicapture.capture.ThetaLink.forRide) io.github.tewnut.poicapture.capture.ThetaLink.release() } }
     var nearWays by remember { mutableStateOf<List<Way>?>(null) }
@@ -432,7 +435,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     if (expanded) Choice(stringResource(R.string.setup_kind_label), listOfNotNull(
                         SessionKind.SWEEP to stringResource(R.string.setup_sweep_short),
                         SessionKind.POI to stringResource(R.string.setup_place_short),
-                        if (INDOOR_ENABLED) SessionKind.INDOOR to stringResource(R.string.setup_indoor_short) else null), kind) { kind = it }
+                        if (INDOOR_ENABLED) SessionKind.INDOOR to stringResource(R.string.setup_indoor_short) else null), kind) { kind = it; Prefs.saveRideKind(ctx, it) }
                     if (expanded && kind == SessionKind.SWEEP) {
                         Choice(stringResource(R.string.setup_target_label), listOf(
                             SweepTarget.SHOPS to "🏪 " + stringResource(R.string.setup_target_shops_short),
@@ -495,8 +498,10 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                                     Manifest.permission.ACCESS_COARSE_LOCATION).toTypedArray())
                                 return@start
                             }
-                            if (CaptureService.activeSession.value != null) {
+                            // a ride is still recording: back to it (not a second one, and not a dead end)
+                            CaptureService.activeSession.value?.let { running ->
                                 Toast.makeText(ctx, ctx.getString(R.string.setup_session_running), Toast.LENGTH_LONG).show()
+                                onStart(running)
                                 return@start
                             }
                             // indoor: steps from the step detector need this permission (asked once; refused = accelerometer)
@@ -511,11 +516,12 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                                 // indoor: on foot, auto photos like a sweep
                                 vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI || cam360) Mode.PHOTO_MANUAL else Mode.PHOTO_AUTO,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
-                                settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M,
+                                // mountOffsetDeg: the manual mount angle is gone from Settings (the app measures it); an old value is not kept
+                                settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M, mountOffsetDeg = 0.0,
                                     // house numbers are small print: the largest photo the camera gives
                                     photoLongEdge = if (kind == SessionKind.SWEEP && target == SweepTarget.ADDRESSES)
                                         maxOf(settings.photoLongEdge, SweepTarget.ADDRESSES_LONG_EDGE) else settings.photoLongEdge), device = deviceJson(ctx), kind = rideKind, email = "",
-                                photoRoles = if (kind == SessionKind.POI && Prefs.askPhotoRole(ctx)) Prefs.photoRoles(ctx) else null,
+                                photoRoles = null,   // the photo kind is not asked: the system tells fronts, signs and insides apart
                                 holding = when (kind) { SessionKind.SWEEP -> holding; SessionKind.INDOOR -> io.github.tewnut.poicapture.core.Holding.HAND
                                     else -> io.github.tewnut.poicapture.core.Holding.MOUNT },
                                 target = if (kind == SessionKind.SWEEP) target else SweepTarget.SHOPS,
@@ -536,9 +542,30 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             onStart(s.id)
                         }
                     startRef[0] = onStartClick
-                    Button(enabled = ready, modifier = Modifier.fillMaxWidth().height(56.dp), onClick = onStartClick) {
+                    // Camera 360: a Theta takes photos only when the phone tells it, so the ride waits for it (Start360)
+                    val gate = if (rideKind != SessionKind.CAMERA360) io.github.tewnut.poicapture.core.Start360.READY
+                        else io.github.tewnut.poicapture.core.Start360.of(cam360Model, Prefs.thetaSerial(ctx),
+                            connected = thetaLink.status == io.github.tewnut.poicapture.capture.ThetaLink.Status.CONNECTED,
+                            connecting = thetaLink.status == io.github.tewnut.poicapture.capture.ThetaLink.Status.CONNECTING)
+                    val onGateClick: () -> Unit = {
+                        when (gate) {
+                            io.github.tewnut.poicapture.core.Start360.CONNECT_THETA ->
+                                io.github.tewnut.poicapture.capture.ThetaLink.connect(ctx, Prefs.thetaSerial(ctx), Prefs.thetaPassword(ctx))
+                            else -> { expanded = true; cam360Page = true }   // choose the camera / pair the Theta (the page opens from the choices)
+                        }
+                    }
+                    val gateOk = gate == io.github.tewnut.poicapture.core.Start360.READY
+                    Button(enabled = ready && gate != io.github.tewnut.poicapture.core.Start360.CONNECTING,
+                        modifier = Modifier.fillMaxWidth().height(56.dp), onClick = if (gateOk) onStartClick else onGateClick) {
                         // waiting: said on the button itself (a line above it shrank the page and hid the street)
-                        Text(stringResource(if (ready) R.string.setup_start else R.string.setup_need_gps), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text(stringResource(when {
+                            !ready -> R.string.setup_need_gps
+                            gate == io.github.tewnut.poicapture.core.Start360.CHOOSE_CAMERA -> R.string.setup_360_choose
+                            gate == io.github.tewnut.poicapture.core.Start360.PAIR_THETA -> R.string.setup_360_pair
+                            gate == io.github.tewnut.poicapture.core.Start360.CONNECT_THETA -> R.string.setup_360_connect
+                            gate == io.github.tewnut.poicapture.core.Start360.CONNECTING -> R.string.setup_360_connecting
+                            else -> R.string.setup_start
+                        }), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
                 }
                 }   // the sheet's column

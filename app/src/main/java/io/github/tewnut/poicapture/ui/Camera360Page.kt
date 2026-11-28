@@ -51,7 +51,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -119,21 +122,29 @@ fun Camera360Page(onBack: () -> Unit, releaseOnLeave: Boolean = true) {
             }
             when (model) {
                 Camera360Model.NONE -> Hint(stringResource(R.string.c360_none_hint), Modifier.padding(horizontal = 4.dp))
-                Camera360Model.THETA -> WhiteBox {
-                    CardHead("🔗", stringResource(R.string.c360_theta_title))
-                    ThetaSetupCard(everyM) { everyM = it; Prefs.saveThetaEveryM(ctx, it) }
-                }
-                Camera360Model.GOPRO -> WhiteBox {
-                    CardHead("🔳", stringResource(R.string.c360_gopro_qr_title), stringResource(R.string.c360_gopro_qr_sub))
-                    Button(onClick = { goproQr = true }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
-                        Text(stringResource(R.string.c360_gopro_qr_show), fontWeight = FontWeight.Bold)
+                Camera360Model.THETA -> {
+                    WhiteBox {
+                        CardHead("🔗", stringResource(R.string.c360_theta_title))
+                        ThetaSetupCard(everyM) { everyM = it; Prefs.saveThetaEveryM(ctx, it) }
                     }
-                    TextButton(onClick = {
-                        runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GoProLabs.LABS_URL))) }
-                    }) { Text(stringResource(R.string.c360_gopro_labs_link)) }
+                    ThetaCheckCard(everyM)
                 }
-                Camera360Model.INSTA360, Camera360Model.OTHER ->
+                Camera360Model.GOPRO -> {
+                    WhiteBox {
+                        CardHead("🔳", stringResource(R.string.c360_gopro_qr_title), stringResource(R.string.c360_gopro_qr_sub))
+                        Button(onClick = { goproQr = true }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+                            Text(stringResource(R.string.c360_gopro_qr_show), fontWeight = FontWeight.Bold)
+                        }
+                        TextButton(onClick = {
+                            runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GoProLabs.LABS_URL))) }
+                        }) { Text(stringResource(R.string.c360_gopro_labs_link)) }
+                    }
+                    ManualCheckCard(model)
+                }
+                Camera360Model.INSTA360, Camera360Model.OTHER -> {
                     Hint(stringResource(R.string.c360_sync_note), Modifier.padding(horizontal = 4.dp))
+                    ManualCheckCard(model)
+                }
             }
             if (model != Camera360Model.NONE) OutlinedButton(onClick = { guide = true }, modifier = Modifier.fillMaxWidth()) {
                 Text("📖 " + stringResource(R.string.guide360_open), fontWeight = FontWeight.Bold)
@@ -253,7 +264,14 @@ fun Camera360SetupLine(model: Camera360Model, everyM: Double, onOpen: () -> Unit
     }
     Row(Modifier.fillMaxWidth().background(if (ok) Palette.GreenLight.copy(alpha = 0.45f) else Palette.Canvas, RoundedCornerShape(14.dp))
         .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text("📷 " + camera360Line(model, link, everyM, withSpacing = true), Modifier.weight(1f), fontWeight = FontWeight.Bold,
+        val line = camera360Line(model, link, everyM, withSpacing = true)
+        val checked = camera360CheckSuffix(model)
+        val text = buildAnnotatedString {
+            append("📷 $line")
+            // checked today or not (Kiểm tra camera / the tick list): shown, never blocks Start
+            if (checked != null) withStyle(SpanStyle(color = checked.second)) { append(" · " + checked.first) }
+        }
+        Text(text, Modifier.weight(1f), fontWeight = FontWeight.Bold,
             fontSize = 15.sp, color = if (model == Camera360Model.NONE) Palette.Amber else Palette.Ink, maxLines = 2,
             overflow = TextOverflow.Ellipsis)
         val serial = Prefs.thetaSerial(ctx)

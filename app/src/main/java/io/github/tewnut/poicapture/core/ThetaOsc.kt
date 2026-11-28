@@ -114,6 +114,52 @@ class HttpOscTransport(private val base: String = ThetaOsc.BASE_URL,
     }
 }
 
+/**
+ * A file on the camera, by the fileUrl it gave (RICOH THETA API v2.1: a GET on the file URL; `?type=thumb` = its
+ * thumbnail). At most [maxBytes] are read, then the connection is dropped; [range]: also ask for only those bytes
+ * (`Range: bytes=0-…`; a camera that ignores it just sends the file, and the reading stops anyway).
+ */
+fun interface OscFiles {
+    @Throws(IOException::class)
+    fun get(url: String, maxBytes: Int, range: Boolean, timeoutMs: Int): ByteArray
+}
+
+/** [OscFiles] over HTTP through [open] (the camera's network on the phone). Only URLs on the camera's address. */
+class HttpOscFiles(private val base: String = ThetaOsc.BASE_URL,
+                   private val open: (URL) -> URLConnection = { it.openConnection() }) : OscFiles {
+    override fun get(url: String, maxBytes: Int, range: Boolean, timeoutMs: Int): ByteArray {
+        val u = URL(url)
+        if (u.host != URL(base).host) throw IOException("not the camera's address: ${u.host}")
+        val c = open(u) as HttpURLConnection
+        try {
+            c.connectTimeout = timeoutMs
+            c.readTimeout = timeoutMs
+            c.requestMethod = "GET"
+            c.useCaches = false
+            if (range) c.setRequestProperty("Range", "bytes=0-${maxBytes - 1}")
+            val code = c.responseCode
+            if (code !in 200..299) throw IOException("HTTP $code")
+            return c.inputStream.use { readUpTo(it, maxBytes) }
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    companion object {
+        /** The first [max] bytes of [s] (fewer if it ends before). */
+        fun readUpTo(s: java.io.InputStream, max: Int): ByteArray {
+            val out = java.io.ByteArrayOutputStream(minOf(max, 64 * 1024))
+            val buf = ByteArray(16 * 1024)
+            while (out.size() < max) {
+                val n = s.read(buf, 0, minOf(buf.size, max - out.size()))
+                if (n < 0) break
+                out.write(buf, 0, n)
+            }
+            return out.toByteArray()
+        }
+    }
+}
+
 /** [code]: an OSC error code (`disabledCommand`, `invalidParameterValue`, …) or `timeout` / `io` / `http` / `bad-response`. */
 class OscException(val code: String, message: String) : Exception(message) {
     /** Short, for the screen and the shot record. */
@@ -152,6 +198,14 @@ class OscClient(private val transport: OscTransport, private val timeoutMs: Int 
     /** `camera.takePicture`: usually `inProgress` with an id (poll [status]); `done` right away is accepted too. */
     fun takePicture(): OscCommand = command("camera.takePicture", null)
 
+    /**
+     * `camera.delete` `{"fileUrls": [...]}` (RICOH THETA API v2.1; up to 128 URLs; one URL that does not exist or
+     * cannot be deleted fails the whole command). Used by the camera check to remove its test photo.
+     */
+    fun delete(fileUrls: List<String>) {
+        command("camera.delete", JSONObject().put("fileUrls", JSONArray(fileUrls)))
+    }
+
     fun status(id: String): OscCommand = parseCommand(call("POST", "/osc/commands/status", JSONObject().put("id", id).toString()))
 
     /**
@@ -188,6 +242,10 @@ class OscClient(private val transport: OscTransport, private val timeoutMs: Int 
         catch (e: OscException) { clockSet = false; notes += "dateTimeZone: ${e.short()}" }
         for ((k, v) in RIDE_OPTIONS) {
             try { setOptions(JSONObject().put(k, v)) } catch (e: OscException) { notes += "$k: ${e.short()}" }
+        }
+        // a Theta X writes the phone's gpsInfo into its photos only with its own GPS tagging on (API v2.1, gpsInfo *2)
+        if (Camera360Check.isThetaX(info.model)) {
+            try { setOptions(JSONObject().put("_gpsTagRecording", "on")) } catch (e: OscException) { notes += "_gpsTagRecording: ${e.short()}" }
         }
         val st = runCatching { state() }.getOrNull()
         return ConnectResult(info, st?.batteryLevel, clockSet, notes)
@@ -288,8 +346,9 @@ class ThetaShooter(
 
     private fun update(f: (Stats) -> Stats) { synchronized(this) { stats = f(stats) }; onStats(stats) }
 
-    /** Restore counts after a restart of the ride (the shots already in the session). */
-    fun restore(shots: Int, failed: Int) = update { it.copy(shots = shots, failed = failed) }
+    /** Restore counts after a restart of the ride (the shots already in the session, the skips saved with it). */
+    fun restore(shots: Int, failed: Int, skippedBusy: Int = 0, skippedOffline: Int = 0) =
+        update { it.copy(shots = shots, failed = failed, skippedBusy = skippedBusy, skippedOffline = skippedOffline) }
 
     /**
      * A new fix while the ride is running. Distance counts only moving segments (speed ≥ [ThetaOsc.STANDING_MPS],
@@ -366,6 +425,12 @@ object ThetaRide {
         a.put(shot.toJson())
         return c
     }
+
+    /** Skipped triggers are no shot: kept as counts (busy, offline) so a restarted ride goes on from them. */
+    fun withSkipped(c: JSONObject, busy: Int, offline: Int): JSONObject = c.put("skippedBusy", busy).put("skippedOffline", offline)
+
+    /** (busy, offline) skipped triggers saved so far. */
+    fun skipped(c: JSONObject?): Pair<Int, Int> = (c?.optInt("skippedBusy", 0) ?: 0) to (c?.optInt("skippedOffline", 0) ?: 0)
 
     /** (ok, failed) shots so far. */
     fun counts(c: JSONObject?): Pair<Int, Int> {

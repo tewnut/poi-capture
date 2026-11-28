@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -18,7 +17,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
@@ -50,25 +48,24 @@ private object Page {
     const val TASKS = "tasks"
     const val UPLOAD = "upload"
     const val CAMERA360 = "camera360"
-    const val ADVANCED = "advanced"
     const val ABOUT = "about"
 }
 
 /**
  * Settings (first filled in by the onboarding): a short list of rows, each with its current value, each opening its own
- * page (contributor ID, language, offline maps, tasks, upload server, advanced, about). Every change is saved as it is
+ * page (contributor ID, language, offline maps, tasks, upload server, Camera 360, about). Every change is saved as it is
  * made; back (the arrow or the system back) goes from a page to the list, from the list out of Settings.
  */
 @Composable
 fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
     val ctx = LocalContext.current
     var id by remember { mutableStateOf(Prefs.contributorId(ctx)) }
-    var settings by remember { mutableStateOf(Prefs.settings(ctx)) }
     var page by rememberSaveable { mutableStateOf(Page.HOME) }
 
     fun save() {
+        // the contributor ID only: each page saves its own settings straight to Prefs (a copy of all the settings
+        // kept here would write back old values over what a page just saved, e.g. the offline maps catalogue address)
         Prefs.saveContributorId(ctx, id)
-        Prefs.saveSettings(ctx, settings)
     }
 
     // every change is saved as it is made; leaving saves once more
@@ -102,31 +99,6 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
                 WhiteBox {
                     CardHead("☁️", stringResource(R.string.upload_title), stringResource(R.string.upload_sub))
                     UploadServerCard()
-                }
-            }
-        }
-        Page.ADVANCED -> SettingsPage(stringResource(R.string.settings_advanced), ::home) {
-            item {
-                WhiteBox {
-                    CardHead("🛵", stringResource(R.string.settings_mount_title), stringResource(R.string.settings_mount_hint))
-                    val deg = settings.mountOffsetDeg.toInt()
-                    Stepper(if (deg == 0) "0°" else "${kotlin.math.abs(deg)}°",
-                        onMinus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg - 5).coerceAtLeast(-45.0)); save() },
-                        onPlus = { settings = settings.copy(mountOffsetDeg = (settings.mountOffsetDeg + 5).coerceAtMost(45.0)); save() },
-                        caption = stringResource(when { deg > 0 -> R.string.settings_mount_forward; deg < 0 -> R.string.settings_mount_backward
-                            else -> R.string.settings_mount_square }),
-                        minus = "−5°", plus = "+5°")
-                }
-            }
-            item {
-                WhiteBox {
-                    CardHead("🏷️", stringResource(R.string.settings_roles_title), stringResource(R.string.settings_roles_hint))
-                    var ask by remember { mutableStateOf(Prefs.askPhotoRole(ctx)) }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(stringResource(R.string.settings_roles_ask), modifier = Modifier.weight(1f), color = Palette.Ink)
-                        Switch(ask, { ask = it; Prefs.setAskPhotoRole(ctx, it) })
-                    }
-                    if (ask) PhotoRolesCard()
                 }
             }
         }
@@ -169,7 +141,6 @@ private fun SettingsHome(contributorId: String, onOpen: (String) -> Unit, onBack
         NavItem("📷", stringResource(R.string.c360_title), camera360Value(ctx)) { onOpen(Page.CAMERA360) },
     )
     val items3 = listOf(
-        NavItem("⚙️", stringResource(R.string.settings_advanced), stringResource(R.string.settings_advanced_sub)) { onOpen(Page.ADVANCED) },
         NavItem("ℹ️", stringResource(R.string.settings_about),
             version?.let { stringResource(R.string.settings_about_version, it) } ?: "") { onOpen(Page.ABOUT) },
     )

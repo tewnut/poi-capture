@@ -185,20 +185,28 @@ fun CaptureScreen(sessionId: String, onDone: (io.github.tewnut.poicapture.core.R
         }
     }
 
+    // Back / End / Discard before the bind: done once bound (never a ride left running with no screen)
+    val leave = rememberLeaveWhenBound(svc, onGiveUp = { discarding -> if (discarding) onCancel() else onDone(null) })
+
     /** Throw the ride away (the end dialog's Discard, confirmed): ended without sending, then deleted from the phone. */
     fun discard() {
-        val s = svc ?: run { onCancel(); return }
+        val s = svc ?: run { leave.wait(LeaveWhenBound.DISCARD); return }
         val id = runCatching { s.session.id }.getOrNull()
         s.finishSession(discard = true)
         if (id != null) {
             CaptureService.store(ctx).delete(id)
             io.github.tewnut.poicapture.capture.Uploads.forget(ctx, id)
+            runCatching { CaptureService.tasks(ctx).reopenBy(id) }   // field tasks this ride marked done are open again
         }
         onCancel()
     }
 
+    /**
+     * Save and close the ride. [discardIfEmpty]: left before it started (Back, End, the no-GPS / too-dark cards): the
+     * session is dropped when nothing is in it ([CaptureService.finishDroppingIfEmpty]), else kept like any ride.
+     */
     fun end(discardIfEmpty: Boolean) {
-        val s = svc ?: run { onDone(null); return }
+        val s = svc ?: run { leave.wait(if (discardIfEmpty) LeaveWhenBound.DROP else LeaveWhenBound.END); return }
         // the last place's position is doubtful and its pin was not checked: the pin check comes first, then the end
         if (poiMode && ui.poiId != null && ui.poiUnsure && !draft.moved && !discardIfEmpty) {
             endAfterCheck = true; reviewing = true; return
@@ -207,16 +215,23 @@ fun CaptureScreen(sessionId: String, onDone: (io.github.tewnut.poicapture.core.R
         if (poiMode && ui.poiId != null) s.finishPoi(draft.pin, draft.moved, draft.fields(), draft.status)   // keep it with what was typed
         // what the summary shows, read off the live ride before it closes (signs seen are kept nowhere else)
         val signsRide = session?.kind == SessionKind.SWEEP && session.target == io.github.tewnut.poicapture.core.SweepTarget.SIGNS
+        val platesRide = session?.kind == SessionKind.SWEEP && session.target == io.github.tewnut.poicapture.core.SweepTarget.ADDRESSES
         val ended = id?.let { io.github.tewnut.poicapture.core.RideEnd(it, cam360 = false, photos = ui.photos,
-            videos = ui.videos + if (ui.recording) 1 else 0, signs = if (signsRide) ui.signsSeen else null) }
-        s.finishSession()
-        if (discardIfEmpty && captured == 0 && id != null) {
-            CaptureService.store(ctx).delete(id)
-            onCancel()
-        } else onDone(ended)
+            videos = ui.videos + if (ui.recording) 1 else 0, signs = if (signsRide) ui.signsSeen else null,
+            plates = if (platesRide) ui.platesSeen else null) }
+        if (discardIfEmpty) {
+            if (s.finishDroppingIfEmpty()) onCancel() else onDone(ended)
+        } else {
+            s.finishSession()
+            onDone(ended)
+        }
     }
-    // nothing recorded yet: leaving just drops the empty session (no "save?" question)
-    BackHandler { if (captured == 0) end(discardIfEmpty = true) else confirmEnd = true }
+    leave.bind(LeaveWhenBound.END) { end(discardIfEmpty = false) }
+    leave.bind(LeaveWhenBound.DROP) { end(discardIfEmpty = true) }
+    leave.bind(LeaveWhenBound.DISCARD) { discard() }
+    // not started yet: leaving just drops the empty session (no "save?" question); once started, always the end
+    // dialog (its Discard is there), even with no photo yet
+    BackHandler { if (notStarted) end(discardIfEmpty = true) else confirmEnd = true }
 
     if (reviewing && session != null) {
         val start = remember(ui.poiId) { svc?.poiStartPosition() }
@@ -281,7 +296,7 @@ fun CaptureScreen(sessionId: String, onDone: (io.github.tewnut.poicapture.core.R
                             .padding(horizontal = 12.dp, vertical = 8.dp))
                 }
             }
-            DarkButton(stringResource(R.string.capture_end)) { if (captured == 0) end(discardIfEmpty = true) else confirmEnd = true }
+            DarkButton(stringResource(R.string.capture_end)) { if (notStarted) end(discardIfEmpty = true) else confirmEnd = true }
         }
 
         // ---------- the main actions, under the thumb: right rail in landscape, bottom bar in portrait ----------
@@ -760,4 +775,47 @@ private fun RoundButton(label: String, color: Color, size: androidx.compose.ui.u
 private fun DarkButton(label: String, onClick: () -> Unit) {
     OutlinedButton(onClick = onClick, modifier = Modifier.height(44.dp),
         colors = ButtonDefaults.outlinedButtonColors(containerColor = Color(0x99000000))) { Text(label, color = Color.White) }
+}
+
+/**
+ * Back / End / Discard pressed while the screen is not bound to the capture service yet (just opened, or reopened
+ * after a restart): the action is kept and run once the bind arrives, so a ride is never left running in the
+ * background with no screen. No bind after [WAIT_MS]: the service is stopped, which ends and saves the ride (its
+ * onDestroy), and [onGiveUp] leaves (true = it was a discard / drop).
+ */
+internal class LeaveWhenBound(private val pending: androidx.compose.runtime.MutableState<String?>) {
+    private val actions = HashMap<String, () -> Unit>()
+
+    /** Ask for [what] (END, DROP, DISCARD) as soon as the service is bound. */
+    fun wait(what: String) { pending.value = what }
+
+    /** What [what] does once bound (set on each composition: the latest lambdas, with the bound service). */
+    fun bind(what: String, action: () -> Unit) { actions[what] = action }
+
+    internal fun run(what: String) = actions[what]?.invoke()
+
+    companion object {
+        const val END = "end"
+        const val DROP = "drop"
+        const val DISCARD = "discard"
+        const val WAIT_MS = 5_000L
+    }
+}
+
+@Composable
+internal fun rememberLeaveWhenBound(svc: CaptureService?, onGiveUp: (discarding: Boolean) -> Unit): LeaveWhenBound {
+    val ctx = LocalContext.current
+    val pending = remember { mutableStateOf<String?>(null) }
+    val leave = remember { LeaveWhenBound(pending) }
+    val giveUp = androidx.compose.runtime.rememberUpdatedState(onGiveUp)
+    val what = pending.value
+    LaunchedEffect(svc, what) {
+        if (what == null) return@LaunchedEffect
+        if (svc != null) { pending.value = null; leave.run(what); return@LaunchedEffect }
+        kotlinx.coroutines.delay(LeaveWhenBound.WAIT_MS)
+        pending.value = null
+        runCatching { ctx.stopService(Intent(ctx, CaptureService::class.java)) }
+        giveUp.value(what != LeaveWhenBound.END)
+    }
+    return leave
 }

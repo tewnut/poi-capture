@@ -85,17 +85,20 @@ private enum class Step { LANGUAGE, WELCOME, PERMISSIONS, ROADS, READY, CAM360, 
  * Settings.
  */
 @Composable
-fun OnboardingScreen(onDone: () -> Unit) {
+fun OnboardingScreen(replay: Boolean = false, onDone: () -> Unit) {
     val ctx = LocalContext.current
     // saveable: picking a language recreates the activity, the onboarding stays on its step
     var step by rememberSaveable { mutableStateOf(Step.LANGUAGE) }
-    BackHandler(enabled = step.ordinal > 0) { step = Step.entries[step.ordinal - 1] }
+    // replayed from Settings → About: the app is set up already, so it can be left at any step (back on the first
+    // step, or ✕), and nothing is a must (no road pack gate, no download started by itself)
+    BackHandler(enabled = step.ordinal > 0 || replay) { if (step.ordinal > 0) step = Step.entries[step.ordinal - 1] else onDone() }
 
     Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
         // top bar: back + progress
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (step.ordinal > 0) TextButton(onClick = { step = Step.entries[step.ordinal - 1] }) { Text(stringResource(R.string.onboarding_back)) }
             Spacer(Modifier.weight(1f))
+            if (replay) TextButton(onClick = onDone) { Text(stringResource(R.string.onboarding_close)) }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(end = 12.dp)) {
                 for (s in Step.entries) {
                     Box(Modifier.size(width = if (s == step) 22.dp else 8.dp, height = 8.dp)
@@ -107,7 +110,7 @@ fun OnboardingScreen(onDone: () -> Unit) {
             Step.LANGUAGE -> LanguageStep { step = Step.WELCOME }
             Step.WELCOME -> WelcomeStep { step = Step.PERMISSIONS }
             Step.PERMISSIONS -> PermissionsStep(ctx) { step = Step.ROADS }
-            Step.ROADS -> RoadsStep(ctx) { step = Step.READY }
+            Step.ROADS -> RoadsStep(ctx, replay) { step = Step.READY }
             Step.READY -> ReadyStep(ctx) { step = Step.CAM360 }
             // optional: a 360 camera, set up on Settings → Camera 360's page; Không skips it
             Step.CAM360 -> Cam360Step { step = Step.KEY }
@@ -316,7 +319,7 @@ private fun PermissionsStep(ctx: Context, onNext: () -> Unit) {
 // ---------------------------------------------------------------- 4. road data
 
 @Composable
-private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
+private fun RoadsStep(ctx: Context, replay: Boolean, onNext: () -> Unit) {
     val url = remember { Prefs.settings(ctx).roadPackIndexUrl }
     var catalogue by remember { mutableStateOf(RoadSource.cachedCatalogue(ctx)) }
     var loading by remember { mutableStateOf(true) }
@@ -341,7 +344,7 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     var autoStarted by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(suggestion?.id, installed) {
         val s = suggestion ?: return@LaunchedEffect
-        if (!autoStarted && installed[s.id] != s.version) {
+        if (!replay && !autoStarted && installed[s.id] != s.version) {
             RoadPackDownloads.enqueue(ctx, s, anyNetwork = true)
             autoStarted = true
         }
@@ -351,7 +354,7 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     // a must: no way on until at least one province / city pack is on the phone, or on its way (the download goes
     // on in the background); cancelled with nothing installed: blocked again
     val downloading by remember { RoadPackDownloads.anyActive(ctx) }.collectAsState(initial = false)
-    val canGo = io.github.tewnut.poicapture.core.RoadsGate.canContinue(installed.isNotEmpty(), downloading)
+    val canGo = replay || io.github.tewnut.poicapture.core.RoadsGate.canContinue(installed.isNotEmpty(), downloading)
     StepFrame(stringResource(R.string.onboarding_roads_title), stringResource(R.string.onboarding_roads_lead),
         stringResource(if (canGo) R.string.onboarding_continue else R.string.onboarding_roads_need),
         enabled = canGo, onNext = onNext) {
@@ -454,11 +457,18 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
 
 @Composable
 private fun Cam360Step(onNext: () -> Unit) {
+    val ctx = LocalContext.current
     var page by remember { mutableStateOf(false) }
+    // Không: no 360 camera (also when one was set before, e.g. on a replay); New ride starts with the phone's camera
+    val no = {
+        Prefs.saveCamera360Model(ctx, io.github.tewnut.poicapture.core.Camera360Model.NONE)
+        Prefs.saveUse360(ctx, false)
+        onNext()
+    }
     StepFrame(stringResource(R.string.onboarding_cam360_lead), null, stringResource(R.string.onboarding_continue), onNext = onNext) {
         WhiteCard {
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                .clickable(role = Role.Button, onClick = onNext).padding(vertical = 6.dp, horizontal = 4.dp)) {
+                .clickable(role = Role.Button, onClick = no).padding(vertical = 6.dp, horizontal = 4.dp)) {
                 IconRow("📱", stringResource(R.string.onboarding_cam360_no), stringResource(R.string.onboarding_cam360_no_sub))
             }
             HorizontalDivider(color = Palette.Line)
@@ -468,8 +478,11 @@ private fun Cam360Step(onNext: () -> Unit) {
             }
         }
     }
-    // the same page as Settings → Camera 360; closing it goes on
-    if (page) Camera360PageDialog(onClose = { page = false; onNext() })
+    // the same page as Settings → Camera 360; closing it goes on once a camera was chosen, else back to the question
+    if (page) Camera360PageDialog(onClose = {
+        page = false
+        if (Prefs.camera360Model(ctx) != io.github.tewnut.poicapture.core.Camera360Model.NONE) onNext()
+    })
 }
 
 @Composable

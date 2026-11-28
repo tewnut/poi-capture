@@ -61,6 +61,15 @@ object FieldTasks {
         return new.map { n -> byId[n.id]?.takeIf { !it.open }?.let { n.copy(state = it.state, doneAt = it.doneAt, doneBy = it.doneBy) } ?: n }
     }
 
+    /**
+     * The ride [sessionId] is gone (discarded, or deleted unsent): the tasks a Place capture of it did ("poi_… in
+     * s_…") are open again; done by hand ("contributor") or skipped stay as they are.
+     */
+    fun reopenBy(tasks: List<FieldTask>, sessionId: String): List<FieldTask> = tasks.map {
+        if (it.state == FieldTask.DONE && it.doneBy?.endsWith(" in $sessionId") == true)
+            it.copy(state = FieldTask.OPEN, doneAt = null, doneBy = null) else it
+    }
+
     /** The open task closest to [at], within [NEAR_M]. */
     fun nearestOpen(tasks: List<FieldTask>, at: LatLon, withinM: Double = NEAR_M): FieldTask? =
         tasks.filter { it.open }.map { it to Geo.distanceM(it.at, at) }.filter { it.second <= withinM }.minByOrNull { it.second }?.first
@@ -92,6 +101,15 @@ class FieldTaskStore(private val file: File) {
 
     @Synchronized fun set(id: String, state: String, nowIso: String, by: String?) =
         save(all().map { if (it.id == id) it.copy(state = state, doneAt = if (state == FieldTask.OPEN) null else nowIso, doneBy = by) else it })
+
+    /** See [FieldTasks.reopenBy]; the file is only rewritten when a task changed. Returns how many were reopened. */
+    @Synchronized fun reopenBy(sessionId: String): Int {
+        val old = all()
+        val new = FieldTasks.reopenBy(old, sessionId)
+        val n = old.indices.count { old[it] != new[it] }
+        if (n > 0) save(new)
+        return n
+    }
 
     @Synchronized fun clear() { file.delete() }
 }

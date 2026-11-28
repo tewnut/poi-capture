@@ -93,3 +93,23 @@ object GoProLabs {
             GPS_ON + MAX_360_5K6_30
     }
 }
+
+/**
+ * Can a Camera 360 ride start (New ride's Start button)? A Ricoh Theta only takes photos when the phone tells it to,
+ * so a ride without the camera connected would record the GPS track and no photo: it starts once connected. A drop
+ * during the ride is another matter (the ride goes on, the link asks again). The other cameras record by themselves
+ * (the sync QR lines them up), only "none" must be changed first.
+ */
+enum class Start360 {
+    READY, CHOOSE_CAMERA, PAIR_THETA, CONNECT_THETA, CONNECTING;
+
+    companion object {
+        fun of(model: Camera360Model, thetaSerial: String, connected: Boolean, connecting: Boolean): Start360 = when {
+            model == Camera360Model.NONE -> CHOOSE_CAMERA
+            model != Camera360Model.THETA || connected -> READY
+            thetaSerial.isBlank() -> PAIR_THETA
+            connecting -> CONNECTING
+            else -> CONNECT_THETA
+        }
+    }
+}

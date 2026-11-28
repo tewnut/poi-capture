@@ -22,6 +22,7 @@ import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.core.Tus
 import io.github.tewnut.poicapture.core.DirectUpload
 import io.github.tewnut.poicapture.core.UploadRecord
+import io.github.tewnut.poicapture.core.UploadRules
 import io.github.tewnut.poicapture.core.UploadStatus
 import io.github.tewnut.poicapture.core.iso
 import io.github.tewnut.poicapture.core.sessionUploadMetadata
@@ -130,6 +131,8 @@ object Uploads {
     val removed = MutableStateFlow<List<Pair<String, Long>>>(emptyList())
 
     fun zipFile(ctx: Context, sessionId: String) = File(ctx.filesDir, "uploads/$sessionId.zip")
+    /** The zip while it is written; renamed to [zipFile] once whole. */
+    fun partFile(ctx: Context, sessionId: String) = File(ctx.filesDir, "uploads/$sessionId.zip.part")
 
     fun record(ctx: Context, sessionId: String): UploadRecord =
         sp(ctx).getString(sessionId, null)?.let { runCatching { UploadRecord.fromJson(JSONObject(it)) }.getOrNull() }
@@ -148,21 +151,75 @@ object Uploads {
         if (!UploadServer.configured(ctx)) return
         val r = record(ctx, sessionId)
         if (r.status == UploadStatus.DONE) return
-        save(ctx, r.copy(status = UploadStatus.QUEUED, error = null))
-        val anyNetwork = manual || !UploadServer.wifiOnly(ctx)
+        // a tap starts the count of failures over; an automatic call joins the work already queued (KEEP)
+        save(ctx, r.copy(status = UploadStatus.QUEUED, error = null, problem = null, failures = if (manual) 0 else r.failures))
+        // REPLACE: a tap on Retry / Upload now overrides a queued Wi-Fi-only request
+        submit(ctx, sessionId, manual, anyNetwork = manual || !UploadServer.wifiOnly(ctx),
+            if (manual) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP)
+    }
+
+    private fun submit(ctx: Context, sessionId: String, manual: Boolean, anyNetwork: Boolean, policy: ExistingWorkPolicy) {
         val req = OneTimeWorkRequestBuilder<UploadWorker>()
             .setInputData(workDataOf("sessionId" to sessionId, "manual" to manual))
             .setConstraints(Constraints.Builder()
                 .setRequiredNetworkType(if (anyNetwork) NetworkType.CONNECTED else NetworkType.UNMETERED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
-        // REPLACE: a tap on Retry / Upload now overrides a queued Wi-Fi-only request
-        WorkManager.getInstance(ctx).enqueueUniqueWork(name(sessionId),
-            if (manual) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, req)
+        WorkManager.getInstance(ctx).enqueueUniqueWork(name(sessionId), policy, req)
+    }
+
+    /**
+     * Uploads put off while a ride was recording sit in WorkManager's backoff, which doubles each time (up to 5 h):
+     * queue them afresh so they start as soon as the ride is over, with the network they asked for. Off the main thread.
+     */
+    fun resumeWaiting(ctx: Context) = background {
+        val wm = WorkManager.getInstance(ctx)
+        for (sid in sp(ctx).all.keys) {
+            if (record(ctx, sid).status != UploadStatus.QUEUED) continue
+            val w = runCatching { wm.getWorkInfosForUniqueWork(name(sid)).get() }.getOrNull()
+                ?.firstOrNull { it.state == WorkInfo.State.ENQUEUED && it.runAttemptCount > 0 } ?: continue
+            val anyNetwork = w.constraints.requiredNetworkType != NetworkType.UNMETERED
+            submit(ctx, sid, manual = anyNetwork, anyNetwork = anyNetwork, ExistingWorkPolicy.REPLACE)
+        }
+    }
+
+    /**
+     * App start: rides cut short (the app or the phone died while recording, so never ended) are uploaded the way a
+     * normal end would ([onSessionEnded]: automatic uploads on, Wi-Fi only if so set), never the ride being recorded.
+     * One that failed or was sent is left alone. Also restarts the uploads waiting on a ride ([resumeWaiting]).
+     * Returns at once (the work is done on a background thread); safe on every start (queued work is kept, not doubled).
+     */
+    fun resumeInterrupted(ctx: Context) {
+        val app = ctx.applicationContext
+        resumeWaiting(app)
+        if (!UploadServer.configured(app) || !UploadServer.auto(app)) return
+        background {
+            val store = CaptureService.store(app)
+            for (s in store.list()) {
+                if (s.endedAt != null || s.id == CaptureService.activeSession.value) continue
+                val st = record(app, s.id).status
+                if (st == UploadStatus.DONE || st == UploadStatus.FAILED) continue
+                if (!io.github.tewnut.poicapture.core.Camera360.worthKeeping(s.kind, store.items(s.id).size, store.trackCount(s.id))) continue
+                if (s.id == CaptureService.activeSession.value) continue   // again: a ride may have started meanwhile
+                enqueue(app, s.id, manual = false)
+            }
+        }
+    }
+
+    /** The access key was changed and works again: the uploads it stopped go again (automatic ones keep to Wi-Fi). */
+    fun retryAuthFailed(ctx: Context) = background {
+        for (sid in sp(ctx).all.keys) if (record(ctx, sid).authFailed) enqueue(ctx, sid, manual = false)
+    }
+
+    private fun background(block: () -> Unit) {
+        kotlin.concurrent.thread(name = "uploads", isDaemon = true) {
+            runCatching(block).onFailure { android.util.Log.w("Uploads", "background step failed", it) }
+        }
     }
 
     /** The session ended: upload it if the contributor asked for automatic uploads. */
     fun onSessionEnded(ctx: Context, sessionId: String) {
+        resumeWaiting(ctx)   // the uploads this ride put off go now
         if (!UploadServer.configured(ctx) || !UploadServer.auto(ctx)) return
         // nothing recorded (a Camera 360 ride has no photos: its track is what it recorded)
         val store = CaptureService.store(ctx)
@@ -175,6 +232,7 @@ object Uploads {
     fun forget(ctx: Context, sessionId: String) {
         WorkManager.getInstance(ctx).cancelUniqueWork(name(sessionId))
         zipFile(ctx, sessionId).delete()
+        partFile(ctx, sessionId).delete()   // a zip being built when the work was cancelled (the worker stops writing)
         sp(ctx).edit().remove(sessionId).apply()
         changed.value++
     }
@@ -185,6 +243,7 @@ object Uploads {
      */
     fun dropRecord(ctx: Context, sessionId: String) {
         zipFile(ctx, sessionId).delete()
+        partFile(ctx, sessionId).delete()
         sp(ctx).edit().remove(sessionId).apply()
         changed.value++
     }
@@ -195,6 +254,9 @@ object Uploads {
 
 /** A capture session started: stop uploading (its camera, GPS and disk come first) and try again later. */
 private class CaptureStarted : Exception()
+
+/** The phone has too little free space to build the zip. */
+private class NoSpace(need: Long, free: Long) : IOException("not enough space: need ${need shr 20} MB, ${free shr 20} MB free")
 
 /**
  * Uploads one session's zip (the same zip as Save / Send, Exporter) straight to R2 (server/README.md, "Direct uploads",
@@ -225,8 +287,11 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
             }
         }
         val lock = Any()
-        // parts upload concurrently: every change to the record goes through here
-        fun update(f: (UploadRecord) -> UploadRecord) = synchronized(lock) { rec = f(rec); Uploads.save(ctx, rec) }
+        // parts upload concurrently: every change to the record goes through here. Once the work is stopped (the ride
+        // was deleted: Uploads.forget) nothing is written, or the record would come back after forget removed it
+        fun update(f: (UploadRecord) -> UploadRecord) = synchronized(lock) { rec = f(rec); if (!isStopped) Uploads.save(ctx, rec) }
+        // after each blocking step (zip, server calls), which a cancel does not interrupt
+        fun stillWanted() { if (isStopped) throw CancellationException("upload of $sid stopped") }
         try {
             val client = UploadServer.client(ctx)
             val zip = Uploads.zipFile(ctx, sid)
@@ -237,9 +302,22 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
             var urls: Map<Int, String> = emptyMap()
             if (d == null) {
                 rec.url?.let { u -> runCatching { client.delete(u) } }   // an unfinished tus upload of an older version
-                val part = File(zip.parentFile!!.apply { mkdirs() }, "$sid.zip.part")
-                part.outputStream().use { Exporter.writeZip(store, sid, it) }
-                if (!part.renameTo(zip)) { zip.delete(); if (!part.renameTo(zip)) throw IOException("could not keep the zip") }
+                zip.parentFile!!.mkdirs()
+                val part = Uploads.partFile(ctx, sid).apply { delete() }   // a leftover of a killed attempt
+                zip.delete()
+                // the zip is about the ride's size: without room it would fill the phone and fail on every attempt
+                val need = UploadRules.roomNeeded(store.dir(sid).walkTopDown().filter { it.isFile }.sumOf { it.length() })
+                val free = zip.parentFile!!.usableSpace
+                if (free < need) throw NoSpace(need, free)
+                var kept = false
+                try {
+                    part.outputStream().use { Exporter.writeZip(store, sid, it) }
+                    stillWanted()
+                    if (!part.renameTo(zip)) { zip.delete(); if (!part.renameTo(zip)) throw IOException("could not keep the zip") }
+                    kept = true
+                } finally {
+                    if (!kept) part.delete()   // a half-written zip (disk full, ride deleted) only takes room
+                }
                 size = zip.length()
                 // the server shows this name: a session saved with an older naming ("Street [yymmdd]", or none) is
                 // named the current way first ("Street 2026-11-19 14h32", SessionNaming.STAMP)
@@ -252,6 +330,7 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                 val metadata = sessionUploadMetadata(session, Exporter.fileName(session),
                     items.count { it.optString("kind") == "photo" }, store.trackFile(sid), items)
                 val (opened, first) = client.directCreate(size, metadata)
+                stillWanted()
                 d = opened
                 urls = first
                 update { it.copy(url = null, size = size, offset = 0, direct = opened) }
@@ -273,7 +352,9 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
                 } }.awaitAll()
             }
             client.directComplete(rec.direct!!)
-            update { it.copy(status = UploadStatus.DONE, url = d0.location, offset = size, error = null, uploadedAt = iso(System.currentTimeMillis())) }
+            stillWanted()
+            update { it.copy(status = UploadStatus.DONE, url = d0.location, offset = size, error = null, problem = null, failures = 0,
+                uploadedAt = iso(System.currentTimeMillis())) }
             zip.delete()
             // uploaded = sent: the sessions list stops counting it as not sent
             store.load(sid)?.let { it.exportedAt = iso(System.currentTimeMillis()); store.save(it) }
@@ -293,15 +374,26 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         } catch (e: CaptureStarted) {
             Result.retry()
         } catch (e: Exception) {
+            // stopped (the ride deleted): what failed after that is not this upload's problem, and nothing is written
+            if (isStopped) return@withContext Result.failure()
             // the server (or R2) no longer knows the upload, or could not join it: a new one next time
             if (e is TusClient.HttpError && (e.code == 404 || e.code == 409)) update { it.copy(direct = null, offset = 0) }
-            val permanent = (e as? TusClient.HttpError)?.let { it.permanent && it.code != 409 } == true || e is IllegalArgumentException
             val msg = e.message ?: e.javaClass.simpleName
-            if (permanent || runAttemptCount >= 6) {
-                update { it.copy(status = UploadStatus.FAILED, error = msg) }
+            // what the contributor has to fix (a new access key in Settings, room on the phone): trying again won't do
+            val problem = when {
+                e is TusClient.HttpError && UploadRules.isAuth(e.code, e.message) -> UploadRecord.AUTH
+                e is NoSpace || UploadRules.isNoSpace(msg) || UploadRules.isNoSpace(e.cause?.message) -> UploadRecord.NO_SPACE
+                else -> null
+            }
+            val permanent = problem != null || (e as? TusClient.HttpError)?.let { it.permanent && it.code != 409 } == true ||
+                e is IllegalArgumentException
+            // counted here, not runAttemptCount: attempts put off by a recording ride are not failures
+            val failures = rec.failures + 1
+            if (UploadRules.giveUp(permanent, failures)) {
+                update { it.copy(status = UploadStatus.FAILED, error = msg, problem = problem, failures = failures) }
                 Result.failure()
             } else {
-                update { it.copy(status = UploadStatus.QUEUED, error = msg) }
+                update { it.copy(status = UploadStatus.QUEUED, error = msg, problem = null, failures = failures) }
                 Result.retry()
             }
         }

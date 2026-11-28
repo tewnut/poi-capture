@@ -59,17 +59,32 @@ data class UploadRecord(
     val uploadedAt: String? = null,
     /** A direct upload to R2 (server "Direct uploads"), once the server opened one. */
     val direct: DirectUpload? = null,
+    /**
+     * Failed attempts since the last manual send or success. Kept here, not WorkManager's runAttemptCount: an attempt
+     * put off because a ride is recording is not a failure and must not use up the tries.
+     */
+    val failures: Int = 0,
+    /** Why it failed when the contributor has to act ([AUTH], [NO_SPACE]), so every screen can say so; null otherwise. */
+    val problem: String? = null,
 ) {
+    /** The server refused the access key (401 / 403): expired or revoked, a new one is needed in Settings. */
+    val authFailed get() = problem == AUTH
+    val noSpace get() = problem == NO_SPACE
+
     val percent: Int get() = if (size <= 0) 0 else ((offset * 100) / size).toInt().coerceIn(0, 100)
 
     fun toJson(): JSONObject = JSONObject().put("sessionId", sessionId).put("status", status.json).put("url", url.orNull())
         .put("size", size).put("offset", offset).put("error", error.orNull()).put("uploadedAt", uploadedAt.orNull())
         .apply { direct?.let { put("direct", it.toJson()) } }
+        .put("failures", failures).put("problem", problem.orNull())
 
     companion object {
+        const val AUTH = "auth"
+        const val NO_SPACE = "no_space"
+
         fun fromJson(o: JSONObject) = UploadRecord(o.getString("sessionId"), UploadStatus.of(o.optStr("status")),
             o.optStr("url"), o.optLong("size"), o.optLong("offset"), o.optStr("error"), o.optStr("uploadedAt"),
-            o.optJSONObject("direct")?.let { DirectUpload.fromJson(it) })
+            o.optJSONObject("direct")?.let { DirectUpload.fromJson(it) }, o.optInt("failures"), o.optStr("problem"))
     }
 }
 

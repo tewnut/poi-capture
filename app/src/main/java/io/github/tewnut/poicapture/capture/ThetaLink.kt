@@ -9,7 +9,9 @@ import android.net.wifi.WifiNetworkSpecifier
 import android.os.Handler
 import android.os.Looper
 import android.os.PatternMatcher
+import io.github.tewnut.poicapture.core.HttpOscFiles
 import io.github.tewnut.poicapture.core.HttpOscTransport
+import io.github.tewnut.poicapture.core.OscFiles
 import io.github.tewnut.poicapture.core.OscClient
 import io.github.tewnut.poicapture.core.OscException
 import io.github.tewnut.poicapture.core.OscInfo
@@ -36,6 +38,8 @@ object ThetaLink {
     data class Ui(val status: Status = Status.OFF, val model: String? = null, val batteryPct: Int? = null,
                   val clockSet: Boolean = false, val error: String? = null, val notes: List<String> = emptyList())
 
+    /** [Ui.error] when the phone could not join the camera's Wi-Fi (camera off, out of range, wrong password). */
+    const val ERR_WIFI = "wifi"
     private const val RETRY_MS = 15_000L
     private const val REQUEST_TIMEOUT_MS = 60_000
     private const val BATTERY_EVERY_MS = 60_000L
@@ -74,6 +78,12 @@ object ThetaLink {
     fun client(): OscClient? {
         val n = network ?: return null
         return if (_state.value.status == Status.CONNECTED) clientOn(n) else null
+    }
+
+    /** The camera's files (fileUrl GETs) over its network while connected, null otherwise (the camera check). */
+    fun files(): OscFiles? {
+        val n = network ?: return null
+        return if (_state.value.status == Status.CONNECTED) HttpOscFiles(ThetaOsc.BASE_URL) { url -> n.openConnection(url) } else null
     }
 
     /**
@@ -133,7 +143,7 @@ object ThetaLink {
 
             override fun onUnavailable() {
                 network = null
-                _state.update { it.copy(status = Status.FAILED, error = "Wi-Fi") }
+                _state.update { it.copy(status = Status.FAILED, error = ERR_WIFI) }
                 if (autoRetry) main.postDelayed(retry, RETRY_MS)
             }
         }
@@ -153,8 +163,11 @@ object ThetaLink {
             val who = clientOn(n).info()
             val serialOk = asked.isEmpty() || who.serial?.filter { it.isDigit() }?.let { it == asked || it.endsWith(asked) || asked.endsWith(it) } == true
             if (who.manufacturer?.contains("RICOH", ignoreCase = true) != true || !serialOk) {
-                if (network == n) _state.update { it.copy(status = Status.FAILED, error = "not this camera (${who.manufacturer ?: "?"} ${who.serial ?: "?"})") }
-                unregister(); network = null
+                // only when this answer is from the current request: a newer Connect must not be cut by an old one
+                if (network == n) {
+                    _state.update { it.copy(status = Status.FAILED, error = "not this camera (${who.manufacturer ?: "?"} ${who.serial ?: "?"})") }
+                    unregister()
+                }
                 return
             }
             val r = clientOn(n).connect(System.currentTimeMillis(), ZoneId.systemDefault())
@@ -164,7 +177,14 @@ object ThetaLink {
             main.removeCallbacks(battery)
             main.postDelayed(battery, BATTERY_EVERY_MS)
         } catch (e: OscException) {
-            if (network == n) _state.update { it.copy(status = Status.FAILED, error = e.short()) }
+            if (network != n) return
+            _state.update { it.copy(status = Status.FAILED, error = e.short()) }
+            // during a ride the network stays up but useless: let it go and ask again, or every later shot is skipped
+            if (autoRetry) {
+                unregister()
+                main.removeCallbacks(retry)
+                main.postDelayed(retry, RETRY_MS)
+            }
         }
     }
 

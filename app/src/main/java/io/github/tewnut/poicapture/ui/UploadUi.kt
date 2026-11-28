@@ -75,6 +75,7 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
     var result by remember { mutableStateOf<Pair<String, Boolean>?>(null) }   // text, ok
     var noUpload by remember { mutableStateOf(false) }   // the tested token lacks the upload scope
     var scanned by remember { mutableStateOf<Pair<String, Boolean>?>(null) }  // what the last scan did, ok
+    var testRun by remember { mutableStateOf(0) }   // the test whose answer is awaited (stale ones are dropped)
     val valid = Tus.endpoint(url) != null
     // keyFirst (the onboarding's access key step): the project's server is one line with Change, the scan comes first
     var editUrl by remember { mutableStateOf(false) }
@@ -83,14 +84,17 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
 
     fun test() {
         testing = true; result = null; noUpload = false
+        // each run is numbered: an answer for an address or token edited since (a newer run, or none) is dropped
+        val run = ++testRun
         scope.launch {
-            result = try {
+            var canUpload = false
+            val r = try {
                 val client = TusClient(url, token)
                 // who the token is from and what it may do; no /me: not the project's kind of server
                 val me = withContext(Dispatchers.IO) { client.me() }
                 if (me == null) ctx.getString(R.string.upload_test_not_server) to false
                 else {
-                    noUpload = !me.canUpload
+                    canUpload = me.canUpload
                     ctx.getString(R.string.upload_test_me, me.name, scopesLabel(ctx, me)) to true
                 }
             } catch (e: TusClient.HttpError) {
@@ -98,9 +102,15 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
             } catch (e: Exception) {
                 ctx.getString(R.string.upload_test_failed, errorText(ctx, e)) to false
             }
+            if (run != testRun) return@launch
+            result = r; noUpload = r.second && !canUpload
             testing = false
+            // the key works again: the uploads it stopped (refused key) go again
+            if (canUpload) Uploads.retryAuthFailed(ctx)
         }
     }
+    /** An edit of the address or token: a test still running answers for the old one. */
+    fun edited() { testRun++; testing = false; result = null; noUpload = false }
 
     val scanClick = {
         scanned = null
@@ -132,7 +142,7 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
     if (keyFirst && projectServer && !editUrl && host != null) Row(verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(R.string.upload_server_at, host), modifier = Modifier.weight(1f), color = Palette.Muted, fontSize = 13.sp)
         TextButton(onClick = { editUrl = true }) { Text(stringResource(R.string.upload_server_change)) }
-    } else OutlinedTextField(url, { url = it.take(300); UploadServer.setUrl(ctx, url); result = null; scanned = null; onChange() },
+    } else OutlinedTextField(url, { url = it.take(300); UploadServer.setUrl(ctx, url); edited(); scanned = null; onChange() },
         label = { Text(stringResource(R.string.upload_url_label)) },
         placeholder = { Text("https://example.org/files/") }, singleLine = true,
         isError = url.isNotBlank() && !valid,
@@ -140,7 +150,7 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
         shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
     if (valid && url.trim().startsWith("http://", ignoreCase = true)) Hint(stringResource(R.string.upload_http_warning), color = Palette.Amber)
-    OutlinedTextField(token, { token = it.take(500); UploadServer.setToken(ctx, token); result = null; scanned = null; onChange() },
+    OutlinedTextField(token, { token = it.take(500); UploadServer.setToken(ctx, token); edited(); scanned = null; onChange() },
         label = { Text(stringResource(if (projectServer) R.string.upload_token_label_required else R.string.upload_token_label)) }, singleLine = true,
         supportingText = if (keyFirst) null else { { Text(stringResource(R.string.upload_token_help)) } },   // first run: no details
         visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
