@@ -30,9 +30,34 @@ python <skill>/scripts/prepare.py <session.zip | folder> <work>
 Prints the session, the photo count and the roads, and how far the photo positions moved: the app stamps each photo
 with the latest GPS fix (up to ~1 s old, ~6 m at 25 km/h), so prepare.py places it by time between the fixes in
 `track.jsonl` (the phone's elapsed-time clock, which both carry; `positionFrom` and `fixLat`/`fixLon` in photos.json). `kind` must be `sweep`, or
-`indoor` (a walk through a mall: see "Indoor walks" below, it changes positions, sheets and places.json); for `poi` (Place capture) the places are
+`indoor` (a walk through a mall: see "Indoor walks" below, it changes positions, sheets and places.json); for `camera360` run camera360.py first ("Camera 360 rides" below); for `poi` (Place capture) the places are
 already grouped: say so and stop unless the user wants the enrichment only. On a house-number ride it also makes
 the plate crop sheets `<work>/crops/plates_NN.jpg` (see "Reading by target"; `--no-crops` skips them).
+
+### Camera 360 rides (`kind: "camera360"`)
+
+A ride whose photos come from an external 360 camera (docs/camera360.md): the phone recorded only the track and
+showed a sync QR code to the camera at the start and the end. Turn it into a sweep first, then go on as usual:
+
+```
+python <skill>/scripts/camera360.py <ride zip | folder> <camera files or folder ...> <work> [--views front,left,right] [--every-m 5] [--offset-s X] [--front-deg D] [--size 1600x1200]
+python <skill>/scripts/prepare.py <work>/sweep <work>
+```
+
+- Camera files: equirectangular (2:1) 360 JPGs or MP4 / MOV videos exported from the camera's app. A raw `.insv` /
+  `.insp` / `.360` is refused: ask the user to export it as an equirectangular 360 video / photo. Needs OpenCV and,
+  for videos, ffmpeg / ffprobe.
+- It prints the **clock**: the sync codes found (start / end, offset track − camera, drift). "NO SYNC CODE FOUND"
+  means the camera's own clock was used as is: say so in the report (positions off by the clock error × speed), or
+  find the code's frame by hand and run again with `--offset-s` (track time − camera time, seconds).
+- It prints the **front** (the 360 image's yaw that looks along the travel, from the motion). Look at a few front
+  views on the sheets: if they do not look along the road, run again with `--front-deg`.
+- Photos come in **blocks per view**, each in riding order (`camera360.json` `views`: front #0–N, then left, then
+  right). A sign or shop appears on consecutive photos within one block; `x` sightings work as on phone photos
+  (`hFovDeg` 90, `cameraBearing` = travel + the view's angle, `cameraBearingSource` "camera360": no compass
+  correction). Read shops on the left / right blocks; on a signs ride read the front block.
+- `<work>/camera360.json` keeps the clock, the front estimates, the frames kept and the warnings: copy its warnings
+  into the report.
 
 ## 2. Read the contact sheets
 

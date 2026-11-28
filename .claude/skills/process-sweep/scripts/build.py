@@ -718,10 +718,15 @@ def agent_pin(pl, lat, lon, photos, d):
 
 def forward_photos(photos):
     """The photos as a forward camera saw them: bearing = travel bearing (the camera looks along the road), for
-    locating signs. A photo without a travel bearing keeps its own camera bearing."""
+    locating signs. A photo without a travel bearing keeps its own camera bearing, and so does a view cut from a
+    360° frame (bearingSource "camera360": its bearing is already the travel bearing + the view's angle, so the
+    left and right views of a camera360 ride stay sideways)."""
     out = []
     for p in photos:
         q = dict(p)
+        if 'camera360' in (p.get('bearingSource'), p.get('cameraBearingSource')):
+            out.append(q)
+            continue
         if p.get('travelBearing') is not None:
             q['cameraBearing'] = p['travelBearing']
         if q.get('cameraBearing') is not None:
