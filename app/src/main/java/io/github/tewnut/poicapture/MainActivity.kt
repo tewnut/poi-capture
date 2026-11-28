@@ -142,6 +142,9 @@ object Prefs {
     fun saveSatellite(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("satellite", v).apply()
     /** Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4), its serial / Wi-Fi name, password, spacing. */
     fun thetaOn(ctx: Context): Boolean = sp(ctx).getBoolean("thetaOn", false)
+    /** Quét đường with a 360 camera (Camera: 360°) instead of the phone's camera. */
+    fun use360(ctx: Context): Boolean = sp(ctx).getBoolean("use360", false)
+    fun saveUse360(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("use360", v).apply()
     fun saveThetaOn(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("thetaOn", v).apply()
     fun thetaSerial(ctx: Context): String = sp(ctx).getString("thetaSerial", "") ?: ""
     /** Only a changed password is kept, encrypted like the upload token; empty = the serial's digits (Theta default). */

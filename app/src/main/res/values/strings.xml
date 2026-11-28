@@ -754,7 +754,7 @@
     <string name="plan_done">Done</string>
     <string name="onboarding_signs_text">The camera looks straight ahead.</string>
     <!-- Camera 360 ride (docs/camera360.md) -->
-    <string name="setup_camera360_choice">Camera 360</string>
+    <string name="setup_camera360_choice">360°</string>
     <string name="setup_camera360_short">Camera 360</string>
     <string name="setup_camera360_hint">The phone records GPS only, no photos.</string>
     <string name="setup_camera360_info">A 360° camera films, the phone records GPS. After Start, hold the QR code up to the camera for 2–3 s.</string>
@@ -786,4 +786,51 @@
     <string name="theta_skipped">Skipped</string>
     <string name="theta_failed_count">Failed</string>
     <string name="theta_last_error">Error: %1$s</string>
+    <string name="guide360_title">Recording with a 360 camera</string>
+    <string name="guide360_gopro">GoPro MAX</string>
+    <string name="guide360_theta">Ricoh Theta</string>
+    <string name="guide360_open">How to record</string>
+    <string-array name="guide360_gopro_lines">
+        <item># Before (once)</item>
+        <item>Connect the GoPro Quik app once to set the camera clock.</item>
+        <item>Turn GPS on: Preferences → Regional → GPS: On.</item>
+        <item>A fast memory card (V30), 128 GB or more.</item>
+        <item>Mode: 360 Video, 5.6K 30 fps.</item>
+        <item># Mounting</item>
+        <item>On a pole, 30–50 cm above the helmet.</item>
+        <item>Upright: one lens forward, one backward.</item>
+        <item>Firmly, no wobble.</item>
+        <item># Each ride</item>
+        <item>Turn the camera on; wait until the GPS icon stops blinking.</item>
+        <item>On the phone: Camera 360 → Start.</item>
+        <item>Start recording on the GoPro.</item>
+        <item>Hold the phone QR code to the camera for 2–3 seconds.</item>
+        <item>Ride at 20–30 km/h; slow down near signs.</item>
+        <item>End: show the QR code again, then stop recording.</item>
+        <item># Back at the office</item>
+        <item>Copy the .360 files from the card.</item>
+        <item>Export them as 360 video in GoPro Player.</item>
+        <item>Send the exported files with the ride for processing.</item>
+        <item># Tips</item>
+        <item>Wipe the lenses before each ride.</item>
+        <item>Take a break every 20–30 minutes so the camera does not overheat.</item>
+        <item>Ride both directions when you can: better positions.</item>
+    </string-array>
+    <string-array name="guide360_theta_lines">
+        <item># Each ride</item>
+        <item>Turn on the camera and its Wi-Fi.</item>
+        <item>Camera 360 → Camera control: Ricoh Theta.</item>
+        <item>Enter the serial (under the camera).</item>
+        <item>Tap Connect, pick the THETA network.</item>
+        <item>Start: the phone takes the photos and writes its GPS into each.</item>
+        <item>End → Save.</item>
+        <item># Back at the office</item>
+        <item>Copy DCIM/100RICOH over USB.</item>
+        <item>Send the photos with the ride for processing.</item>
+        <item># Notes</item>
+        <item>A Theta needs a few seconds per photo: ride slower or pick 12–20 m.</item>
+        <item>Theta X: turn its Wi-Fi on in the camera menu.</item>
+    </string-array>
+    <string name="setup_camera_label">Camera</string>
+    <string name="setup_camera_phone">Phone</string>
 </resources>

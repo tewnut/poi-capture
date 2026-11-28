@@ -731,7 +731,7 @@
     <string name="plan_done">Xong</string>
     <string name="onboarding_signs_text">Camera nhìn thẳng về phía trước.</string>
     <!-- Camera 360 (docs/camera360.md) -->
-    <string name="setup_camera360_choice">Camera 360</string>
+    <string name="setup_camera360_choice">360°</string>
     <string name="setup_camera360_short">Camera 360</string>
     <string name="setup_camera360_hint">Điện thoại chỉ ghi GPS, không chụp ảnh.</string>
     <string name="setup_camera360_info">Camera 360 quay đường, điện thoại ghi GPS. Sau Bắt đầu, đưa mã QR trước camera 2–3 giây.</string>
@@ -763,4 +763,51 @@
     <string name="theta_skipped">Bỏ qua</string>
     <string name="theta_failed_count">Lỗi</string>
     <string name="theta_last_error">Lỗi: %1$s</string>
+    <string name="guide360_title">Hướng dẫn quay 360</string>
+    <string name="guide360_gopro">GoPro MAX</string>
+    <string name="guide360_theta">Ricoh Theta</string>
+    <string name="guide360_open">Hướng dẫn quay</string>
+    <string-array name="guide360_gopro_lines">
+        <item># Chuẩn bị (một lần)</item>
+        <item>Kết nối app GoPro Quik một lần để chỉnh giờ cho camera.</item>
+        <item>Bật GPS: Tùy chọn → Khu vực → GPS: Bật.</item>
+        <item>Thẻ nhớ 128 GB trở lên, loại nhanh (V30).</item>
+        <item>Chế độ: Video 360, 5.6K 30 fps.</item>
+        <item># Gắn camera</item>
+        <item>Trên gậy, cao hơn mũ bảo hiểm 30–50 cm.</item>
+        <item>Thẳng đứng: một ống kính nhìn trước, một nhìn sau.</item>
+        <item>Gắn chắc, không rung lắc.</item>
+        <item># Mỗi chuyến</item>
+        <item>Bật camera, chờ biểu tượng GPS ngừng nhấp nháy.</item>
+        <item>Trên điện thoại: Camera 360 → Bắt đầu.</item>
+        <item>Bấm quay trên GoPro.</item>
+        <item>Đưa mã QR trên điện thoại trước camera 2–3 giây.</item>
+        <item>Chạy 20–30 km/h, chậm lại gần biển báo.</item>
+        <item>Kết thúc: đưa mã QR lần nữa, rồi dừng quay.</item>
+        <item># Về văn phòng</item>
+        <item>Chép file .360 từ thẻ nhớ.</item>
+        <item>Xuất video 360 bằng GoPro Player.</item>
+        <item>Gửi file đã xuất cùng chuyến đi để xử lý.</item>
+        <item># Mẹo</item>
+        <item>Lau ống kính trước mỗi chuyến.</item>
+        <item>Nghỉ 20–30 phút một lần để máy không quá nóng.</item>
+        <item>Đi cả hai chiều nếu được: vị trí chính xác hơn.</item>
+    </string-array>
+    <string-array name="guide360_theta_lines">
+        <item># Mỗi chuyến</item>
+        <item>Bật camera và Wi-Fi của camera.</item>
+        <item>Camera 360 → Điều khiển camera: Ricoh Theta.</item>
+        <item>Nhập số serial (dưới đáy camera).</item>
+        <item>Bấm Kết nối, chọn mạng THETA.</item>
+        <item>Bắt đầu: điện thoại tự chụp và gắn GPS vào mỗi ảnh.</item>
+        <item>Kết thúc → Lưu.</item>
+        <item># Về văn phòng</item>
+        <item>Chép thư mục DCIM/100RICOH qua cáp USB.</item>
+        <item>Gửi ảnh cùng chuyến đi để xử lý.</item>
+        <item># Lưu ý</item>
+        <item>Theta cần vài giây cho mỗi ảnh: chạy chậm hoặc chọn 12–20 m.</item>
+        <item>Theta X: bật Wi-Fi trong menu của camera.</item>
+    </string-array>
+    <string name="setup_camera_label">Camera</string>
+    <string name="setup_camera_phone">Điện thoại</string>
 </resources>

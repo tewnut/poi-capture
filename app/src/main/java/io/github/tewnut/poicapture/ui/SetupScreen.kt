@@ -156,6 +156,9 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     var tasksOpen by remember { mutableStateOf(false) }
     var taskFocus by remember { mutableStateOf<String?>(null) }
     var kind by remember { mutableStateOf(SessionKind.SWEEP) }
+    // a street ride with a 360 camera: an option of Quét đường (the ride's kind is camera360, docs/camera360.md)
+    var use360 by remember { mutableStateOf(Prefs.use360(ctx)) }
+    val rideKind = if (kind == SessionKind.SWEEP && use360) SessionKind.CAMERA360 else kind
     var holding by remember { mutableStateOf(Prefs.holding(ctx)) }
     var target by remember { mutableStateOf(Prefs.target(ctx)) }
     // Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4)
@@ -292,22 +295,29 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     Choice(stringResource(R.string.setup_kind_label), listOfNotNull(
                         SessionKind.SWEEP to stringResource(R.string.setup_sweep_short),
                         SessionKind.POI to stringResource(R.string.setup_place_short),
-                        SessionKind.CAMERA360 to stringResource(R.string.setup_camera360_choice),
                         if (INDOOR_ENABLED) SessionKind.INDOOR to stringResource(R.string.setup_indoor_short) else null), kind) { kind = it }
                     if (kind == SessionKind.SWEEP) {
                         Choice(stringResource(R.string.setup_target_label), listOf(
                             SweepTarget.SHOPS to "🏪 " + stringResource(R.string.setup_target_shops_short),
                             SweepTarget.ADDRESSES to "🔢 " + stringResource(R.string.setup_target_addresses_short),
                             SweepTarget.SIGNS to "🚸 " + stringResource(R.string.setup_target_signs_short)), target) { target = it; Prefs.saveTarget(ctx, it) }
-                        Choice(stringResource(R.string.setup_holding_title), listOf(
+                        Choice(stringResource(R.string.setup_camera_label), listOf(false to stringResource(R.string.setup_camera_phone),
+                            true to stringResource(R.string.setup_camera360_choice)), use360) { use360 = it; Prefs.saveUse360(ctx, it) }
+                        if (!use360) Choice(stringResource(R.string.setup_holding_title), listOf(
                             io.github.tewnut.poicapture.core.Holding.MOUNT to stringResource(R.string.setup_holding_mount_short),
                             io.github.tewnut.poicapture.core.Holding.HAND to stringResource(R.string.setup_holding_hand)), holding) { holding = it; Prefs.saveHolding(ctx, it) }
                     }
                     // indoor: shops only, in the hand: no target or holding to pick; the building instead of the road
                     if (indoor) BuildingCard(lookup, onSearch = { searching = true })
                     // Camera 360: the phone only records where it went (docs/camera360.md §1)
-                    if (kind == SessionKind.CAMERA360) {
+                    if (rideKind == SessionKind.CAMERA360) {
                         Hint(stringResource(R.string.setup_camera360_hint))
+                        // how to record, per camera (GoPro MAX / Ricoh Theta): the tab of the chosen control first
+                        var guide by remember { mutableStateOf(false) }
+                        androidx.compose.material3.TextButton(onClick = { guide = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                            Text("📖 " + stringResource(R.string.guide360_open), fontWeight = FontWeight.Bold)
+                        }
+                        if (guide) Camera360Guide(initial = if (thetaOn) 1 else 0) { guide = false }
                         Choice(stringResource(R.string.theta_control_label), listOf(false to stringResource(R.string.theta_none),
                             true to stringResource(R.string.theta_name)), thetaOn) {
                             thetaOn = it; Prefs.saveThetaOn(ctx, it)
@@ -332,7 +342,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     val onStartClick: () -> Unit = start@{
                             // Camera 360: the phone's camera is never opened, location is enough
-                            val cam360 = kind == SessionKind.CAMERA360
+                            val cam360 = rideKind == SessionKind.CAMERA360
                             if ((!cam360 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) ||
                                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
                                 permLauncher.launch(listOfNotNull(Manifest.permission.CAMERA.takeIf { !cam360 }, Manifest.permission.ACCESS_FINE_LOCATION,
@@ -358,7 +368,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                                 settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M,
                                     // house numbers are small print: the largest photo the camera gives
                                     photoLongEdge = if (kind == SessionKind.SWEEP && target == SweepTarget.ADDRESSES)
-                                        maxOf(settings.photoLongEdge, SweepTarget.ADDRESSES_LONG_EDGE) else settings.photoLongEdge), device = deviceJson(ctx), kind = kind, email = "",
+                                        maxOf(settings.photoLongEdge, SweepTarget.ADDRESSES_LONG_EDGE) else settings.photoLongEdge), device = deviceJson(ctx), kind = rideKind, email = "",
                                 photoRoles = if (kind == SessionKind.POI && Prefs.askPhotoRole(ctx)) Prefs.photoRoles(ctx) else null,
                                 holding = when (kind) { SessionKind.SWEEP -> holding; SessionKind.INDOOR -> io.github.tewnut.poicapture.core.Holding.HAND
                                     else -> io.github.tewnut.poicapture.core.Holding.MOUNT },
