@@ -335,3 +335,25 @@ fun ScreenHeader(title: String, onBack: (() -> Unit)? = null, subtitle: String? 
         actions()
     }
 }
+
+/**
+ * True once [waiting] (no usable GPS fix) has lasted [io.github.tewnut.poicapture.core.GpsWait.HINT_AFTER_MS]; back to
+ * false as soon as a fix comes.
+ */
+@Composable
+fun rememberGpsWaitHint(waiting: Boolean): Boolean {
+    var since by remember { mutableStateOf<Long?>(null) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(waiting) {
+        since = if (waiting) System.currentTimeMillis() else null
+        while (waiting) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) }
+    }
+    return io.github.tewnut.poicapture.core.GpsWait.showHint(since, now)
+}
+
+/** "Ra chỗ thoáng, xa nhà cao để bắt GPS": amber, one line. */
+@Composable
+fun GpsSkyHint(modifier: Modifier = Modifier, color: Color = Palette.Amber) {
+    Text(stringResource(R.string.gps_wait_sky), modifier = modifier, color = color, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+}

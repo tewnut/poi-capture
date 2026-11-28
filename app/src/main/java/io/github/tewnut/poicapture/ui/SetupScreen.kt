@@ -76,6 +76,7 @@ import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.core.CapturePlan
 import io.github.tewnut.poicapture.core.SweepTarget
+import io.github.tewnut.poicapture.core.SetupSummary
 import io.github.tewnut.poicapture.core.Coverage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -229,6 +230,10 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
 
     // the same rule as the capture: Start only    // the same rule as the capture: Start only with a GPS fix from the last 5 s; indoors a position or a building
     val ready = if (indoor) anyFix != null || building != null else live != null
+    // the choices: open the first time, one line with Đổi once a ride was started (not kept: folded again next time)
+    var expanded by remember { mutableStateOf(!Prefs.startedRide(ctx)) }
+    // searching for 20 s (not blocked by a permission or the location switch: LocationHelp says what to do then)
+    val gpsHint = rememberGpsWaitHint(!indoor && live == null && loc.status == LocStatus.SEARCHING)
 
     androidx.activity.compose.BackHandler(onBack = onBack)
     Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
@@ -263,25 +268,6 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
                     colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(containerColor = Color.White, selectedContainerColor = Palette.GreenLight))
             }
-            Column(Modifier.align(Alignment.TopStart).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                when (loc.status) {
-                    LocStatus.NO_PERMISSION -> Pill(stringResource(R.string.setup_loc_no_permission), dot = Palette.Red)
-                    LocStatus.APPROXIMATE_ONLY -> Pill(stringResource(R.string.setup_loc_approximate), dot = Palette.Red)
-                    LocStatus.DISABLED -> Pill(stringResource(R.string.setup_loc_disabled), dot = Palette.Red)
-                    LocStatus.SEARCHING -> Pill(when {
-                            loc.satsSeen > 0 -> stringResource(R.string.setup_loc_searching_sats, loc.satsUsed, loc.satsSeen)
-                            loc.approx != null -> stringResource(R.string.setup_loc_network, loc.approx!!.accuracyM.roundToInt())
-                            else -> stringResource(R.string.setup_loc_searching)
-                        }, dot = Color(0xFFFEC84B))
-                    LocStatus.OK -> live!!.let { l ->
-                        if (l.accuracyM <= settings.maxAccuracyM) Pill(stringResource(R.string.setup_gps_good, l.accuracyM.roundToInt()), dot = Color(0xFF47CD89))
-                        else Pill(stringResource(R.string.setup_gps_weak, l.accuracyM.roundToInt()), dot = Color(0xFFFEC84B))
-                    }
-                }
-                if (live?.simulated == true) {
-                    Pill(stringResource(R.string.setup_simulated), bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp)
-                }
-            }
         }
 
         // ---------- what will happen + Start ----------
@@ -291,12 +277,15 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // only when there is something to do (permission, location off); the map shows the satellites
                     if (loc.status != LocStatus.SEARCHING) LocationHelp(loc)
+                    // after the first ride the choices fold into one line ("Quét đường · Biển báo · Kẹp cố định") with Đổi;
+                    // the first time they are all open. Folding is only a view: the ride is set up the same way.
+                    if (!expanded) ChoiceSummary(io.github.tewnut.poicapture.core.SetupSummary.parts(kind, target, use360, thetaOn, holding)) { expanded = true }
                     // three quick choices, short labels only: what each means is behind the (i) button
-                    Choice(stringResource(R.string.setup_kind_label), listOfNotNull(
+                    if (expanded) Choice(stringResource(R.string.setup_kind_label), listOfNotNull(
                         SessionKind.SWEEP to stringResource(R.string.setup_sweep_short),
                         SessionKind.POI to stringResource(R.string.setup_place_short),
                         if (INDOOR_ENABLED) SessionKind.INDOOR to stringResource(R.string.setup_indoor_short) else null), kind) { kind = it }
-                    if (kind == SessionKind.SWEEP) {
+                    if (expanded && kind == SessionKind.SWEEP) {
                         Choice(stringResource(R.string.setup_target_label), listOf(
                             SweepTarget.SHOPS to "🏪 " + stringResource(R.string.setup_target_shops_short),
                             SweepTarget.ADDRESSES to "🔢 " + stringResource(R.string.setup_target_addresses_short),
@@ -310,7 +299,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     // indoor: shops only, in the hand: no target or holding to pick; the building instead of the road
                     if (indoor) BuildingCard(lookup, onSearch = { searching = true })
                     // Camera 360: the phone only records where it went (docs/camera360.md §1)
-                    if (rideKind == SessionKind.CAMERA360) {
+                    if (expanded && rideKind == SessionKind.CAMERA360) {
                         Hint(stringResource(R.string.setup_camera360_hint))
                         // how to record, per camera (GoPro MAX / Ricoh Theta): the tab of the chosen control first
                         var guide by remember { mutableStateOf(false) }
@@ -325,21 +314,26 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                         }
                         if (thetaOn) ThetaSetupCard(thetaEveryM) { thetaEveryM = it; Prefs.saveThetaEveryM(ctx, it) }
                     }
-                    if (!indoor) Column {
-                        Hint(stringResource(R.string.setup_you_are_on))
-                        Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
-                            fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink, maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                        // outside every installed pack, but the catalogue has one here: suggest it (computed off the UI thread)
-                        val suggest = packSuggestion
-                        if (suggest != null) {
-                            Hint(stringResource(R.string.setup_pack_suggest), color = Palette.Blue)
-                            PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null; roadReload++ })
-                        }
+                    // outside every installed pack, but the catalogue has one here: suggest it (computed off the UI thread)
+                    val suggest = packSuggestion
+                    if (!indoor && suggest != null) Column {
+                        Hint(stringResource(R.string.setup_pack_suggest), color = Palette.Blue)
+                        PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null; roadReload++ })
                     }
                     Spacer(Modifier.height(8.dp))   // the last line scrolls clear of the bottom bar
                 }
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    // where the ride starts and the GPS, always in view right above Start
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Hint(if (indoor) "" else stringResource(R.string.setup_you_are_on), Modifier.padding(end = 8.dp))
+                        GpsState(loc, live, settings.maxAccuracyM, Modifier.weight(1f, fill = false))
+                    }
+                    if (!indoor) Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
+                        fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    // no usable fix for 20 s: where to stand
+                    if (gpsHint) GpsSkyHint()
+                    Spacer(Modifier.height(6.dp))
                     val onStartClick: () -> Unit = start@{
                             // Camera 360: the phone's camera is never opened, location is enough
                             val cam360 = rideKind == SessionKind.CAMERA360
@@ -384,6 +378,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             // screen connects
                             io.github.tewnut.poicapture.capture.ThetaLink.forRide = cam360 && thetaOn
                             CaptureService.store(ctx).create(s)
+                            Prefs.setStartedRide(ctx)   // next time the choices come folded into one line
                             // how the building was found (or not): the walk's first indoor.jsonl lines (docs/indoor.md §5)
                             lookup.flushTo(CaptureService.store(ctx).indoorFile(s.id))
                             onStart(s.id)
@@ -396,6 +391,59 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                 }
             }
         }
+    }
+}
+
+/** The choices folded: "Quét đường · Biển báo · Kẹp cố định" and Đổi, which opens them. */
+@Composable
+private fun ChoiceSummary(parts: List<SetupSummary.Part>, onChange: () -> Unit) {
+    val label = parts.map { p ->
+        stringResource(when (p) {
+            SetupSummary.Part.SWEEP -> R.string.setup_sweep_short
+            SetupSummary.Part.PLACE -> R.string.setup_place_short
+            SetupSummary.Part.INDOOR -> R.string.setup_indoor_short
+            SetupSummary.Part.SHOPS -> R.string.setup_target_shops_short
+            SetupSummary.Part.ADDRESSES -> R.string.setup_target_addresses_short
+            SetupSummary.Part.SIGNS -> R.string.setup_target_signs_short
+            SetupSummary.Part.MOUNT -> R.string.setup_holding_mount_short
+            SetupSummary.Part.HAND -> R.string.setup_holding_hand
+            SetupSummary.Part.CAM360 -> R.string.setup_camera360_choice
+            SetupSummary.Part.THETA -> R.string.theta_name
+        })
+    }.joinToString(" · ")
+    Row(Modifier.fillMaxWidth().background(Palette.GreenLight.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+        .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink, maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        TextButton(onClick = onChange) { Text(stringResource(R.string.setup_change), fontWeight = FontWeight.Bold) }
+    }
+}
+
+/** GPS on one short line with a coloured dot (was a pill on the map): above Start, next to the street. */
+@Composable
+private fun GpsState(loc: LocationState, live: LiveLocation?, maxAccuracyM: Double, modifier: Modifier = Modifier) {
+    val amber = Color(0xFFFEC84B)
+    val green = Color(0xFF47CD89)
+    val (text, dot) = when (loc.status) {
+        LocStatus.NO_PERMISSION -> stringResource(R.string.setup_loc_no_permission) to Palette.Red
+        LocStatus.APPROXIMATE_ONLY -> stringResource(R.string.setup_loc_approximate) to Palette.Red
+        LocStatus.DISABLED -> stringResource(R.string.setup_loc_disabled) to Palette.Red
+        LocStatus.SEARCHING -> when {
+            loc.satsSeen > 0 -> stringResource(R.string.setup_loc_searching_sats, loc.satsUsed, loc.satsSeen)
+            loc.approx != null -> stringResource(R.string.setup_loc_network, loc.approx!!.accuracyM.roundToInt())
+            else -> stringResource(R.string.setup_loc_searching)
+        } to amber
+        LocStatus.OK -> {
+            val acc = live?.accuracyM ?: 0f
+            if (acc <= maxAccuracyM) stringResource(R.string.setup_gps_good, acc.roundToInt()) to green
+            else stringResource(R.string.setup_gps_weak, acc.roundToInt()) to amber
+        }
+    }
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(9.dp).background(dot, androidx.compose.foundation.shape.CircleShape))
+        Text(text + (if (live?.simulated == true) " · " + stringResource(R.string.setup_simulated) else ""),
+            fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 

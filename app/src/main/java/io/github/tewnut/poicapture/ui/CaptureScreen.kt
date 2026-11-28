@@ -84,7 +84,7 @@ import io.github.tewnut.poicapture.core.Side
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = onDone) {
+fun CaptureScreen(sessionId: String, onDone: (io.github.tewnut.poicapture.core.RideEnd?) -> Unit, onCancel: () -> Unit = { onDone(null) }) {
     val ctx = LocalContext.current
     // Camera 360 ride: its own screen, no camera at all (docs/camera360.md)
     val kind = remember(sessionId) { CaptureService.store(ctx).load(sessionId)?.kind }
@@ -198,18 +198,22 @@ fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = 
     }
 
     fun end(discardIfEmpty: Boolean) {
-        val s = svc ?: run { onDone(); return }
+        val s = svc ?: run { onDone(null); return }
         // the last place's position is doubtful and its pin was not checked: the pin check comes first, then the end
         if (poiMode && ui.poiId != null && ui.poiUnsure && !draft.moved && !discardIfEmpty) {
             endAfterCheck = true; reviewing = true; return
         }
         val id = runCatching { s.session.id }.getOrNull()
         if (poiMode && ui.poiId != null) s.finishPoi(draft.pin, draft.moved, draft.fields(), draft.status)   // keep it with what was typed
+        // what the summary shows, read off the live ride before it closes (signs seen are kept nowhere else)
+        val signsRide = session?.kind == SessionKind.SWEEP && session.target == io.github.tewnut.poicapture.core.SweepTarget.SIGNS
+        val ended = id?.let { io.github.tewnut.poicapture.core.RideEnd(it, cam360 = false, photos = ui.photos,
+            videos = ui.videos + if (ui.recording) 1 else 0, signs = if (signsRide) ui.signsSeen else null) }
         s.finishSession()
         if (discardIfEmpty && captured == 0 && id != null) {
             CaptureService.store(ctx).delete(id)
             onCancel()
-        } else onDone()
+        } else onDone(ended)
     }
     // nothing recorded yet: leaving just drops the empty session (no "save?" question)
     BackHandler { if (captured == 0) end(discardIfEmpty = true) else confirmEnd = true }

@@ -44,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -344,11 +345,13 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     }
     var showAll by rememberSaveable { mutableStateOf(false) }
 
-    // a must: no way on until at least one province / city pack is on the phone
-    val haveRoads = installed.isNotEmpty()
+    // a must: no way on until at least one province / city pack is on the phone, or on its way (the download goes
+    // on in the background); cancelled with nothing installed: blocked again
+    val downloading by remember { RoadPackDownloads.anyActive(ctx) }.collectAsState(initial = false)
+    val canGo = io.github.tewnut.poicapture.core.RoadsGate.canContinue(installed.isNotEmpty(), downloading)
     StepFrame(stringResource(R.string.onboarding_roads_title), stringResource(R.string.onboarding_roads_lead),
-        stringResource(if (haveRoads) R.string.onboarding_continue else R.string.onboarding_roads_need),
-        enabled = haveRoads, onNext = onNext) {
+        stringResource(if (canGo) R.string.onboarding_continue else R.string.onboarding_roads_need),
+        enabled = canGo, onNext = onNext) {
         when {
             loading && catalogue.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)

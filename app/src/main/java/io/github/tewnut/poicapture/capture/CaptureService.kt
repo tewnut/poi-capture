@@ -667,9 +667,12 @@ class CaptureService : LifecycleService() {
         _state.update { it.copy(maxSpeedKmh = plan.maxSpeedKmh, photoEveryM = plan.photoEveryM) }
     }
 
-    /** Street sweep held upright: half of each photo is road and sky, and the camera cannot keep up as well. */
+    /**
+     * Street sweep held upright: half of each photo is road and sky, and the camera cannot keep up as well. Not on a
+     * signs ride: the camera looks ahead along the road, where upright is fine.
+     */
     private fun portraitWarning(): List<UiText> =
-        if (session.kind == SessionKind.SWEEP && portrait) listOf(UiText(R.string.service_turn_landscape)) else emptyList()
+        if (session.kind == SessionKind.SWEEP && portrait && !signs) listOf(UiText(R.string.service_turn_landscape)) else emptyList()
 
     private fun mountWarning(): List<UiText> = if (signs) when (_state.value.mount) {
         // a signs ride needs the camera looking ahead: sideways or backwards is the mistake here

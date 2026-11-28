@@ -75,7 +75,7 @@ import java.util.Locale
  * start or the end ("Đồng bộ lại" stays as a fallback); the panel shows the camera, photos taken and skipped.
  */
 @Composable
-fun Camera360Screen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit) {
+fun Camera360Screen(sessionId: String, onDone: (io.github.tewnut.poicapture.core.RideEnd?) -> Unit, onCancel: () -> Unit) {
     val ctx = LocalContext.current
     var service by remember { mutableStateOf<CaptureService?>(null) }
     DisposableEffect(sessionId) {
@@ -123,9 +123,13 @@ fun Camera360Screen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit)
         onCancel()
     }
     fun end() {
-        val s = svc ?: run { onDone(); return }
+        val s = svc ?: run { onDone(null); return }
+        val id = runCatching { s.session.id }.getOrNull()
+        // the summary: a 360 ride has no photos; with a Theta, the shots taken and skipped (kept nowhere else)
+        val ended = id?.let { io.github.tewnut.poicapture.core.RideEnd(it, cam360 = true, photos = 0, videos = 0,
+            thetaShots = if (thetaRide) thetaStats.shots else null, thetaSkipped = if (thetaRide) thetaStats.skipped else null) }
         s.finishSession()
-        onDone()
+        onDone(ended)
     }
     // not started (no GPS yet): leaving drops the empty ride; started: the end sync code, then the end dialog
     fun askEnd() { if (startedAt == null) discard() else if (thetaRide) confirmEnd = true else showSync(Camera360.When.END) }
@@ -157,6 +161,7 @@ fun Camera360Screen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit)
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis(); delay(1_000) } }
     val elapsedMs = startedAt?.let { runCatching { now - Instant.parse(it).toEpochMilli() }.getOrNull() }?.coerceAtLeast(0) ?: 0L
 
+    val gpsHint = rememberGpsWaitHint(startedAt == null && !ui.gpsFresh)
     Box(Modifier.fillMaxSize().background(Palette.Black)) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -179,7 +184,11 @@ fun Camera360Screen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit)
                 modifier = Modifier.background(if (ui.error != null) Palette.Red else Palette.Amber, RoundedCornerShape(10.dp))
                     .padding(horizontal = 12.dp, vertical = 8.dp))
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                if (startedAt == null) Text(stringResource(R.string.c360_gps_wait), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                if (startedAt == null) Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(stringResource(R.string.c360_gps_wait), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    // still no fix after 20 s: where to stand
+                    if (gpsHint) GpsSkyHint(color = Color(0xFFFEC84B))
+                }
                 else Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     C360Stat(ui.speedKmh?.toString() ?: "–", stringResource(R.string.c360_speed), big = true)
                     Row(horizontalArrangement = Arrangement.spacedBy(36.dp)) {
@@ -247,7 +256,7 @@ private fun clockText(ms: Long): String {
 /**
  * The full-screen sync QR code (docs/camera360.md §2): `QPSYNC1 <sessionId> <epochMs>`, drawn again every
  * [Camera360.REDRAW_MS] with the phone's wall clock; black on white with its quiet zone, error correction M, screen
- * at full brightness and kept on while shown. Nothing else but a short instruction and Done.
+ * at full brightness and kept on while shown. Nothing else but one line of instruction above it and Done.
  */
 @Composable
 fun SyncQrScreen(sessionId: String, onDone: () -> Unit) {
@@ -274,12 +283,13 @@ fun SyncQrScreen(sessionId: String, onDone: () -> Unit) {
     }
     BackHandler(onBack = onDone)
     BoxWithConstraints(Modifier.fillMaxSize().background(Color.White).safeDrawingPadding()) {
-        val side = minOf(maxWidth, maxHeight - 140.dp)
+        // the code as large as fits: the full width, less the one line above it and Done
+        val side = minOf(maxWidth, maxHeight - 150.dp)
         Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceEvenly) {
+            Text(stringResource(R.string.c360_sync_hint), color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center, lineHeight = 22.sp, modifier = Modifier.padding(horizontal = 16.dp))
             // the bitmap has one pixel per module (quiet zone included): scaled up with no filtering, sharp edges
             qr?.let { Image(it, null, Modifier.size(side), filterQuality = FilterQuality.None) } ?: Box(Modifier.size(side))
-            Text(stringResource(R.string.c360_sync_hint), color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 16.dp))
             Button(onClick = onDone, modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color.Black, contentColor = Color.White)) {
                 Text(stringResource(R.string.c360_sync_done), fontSize = 18.sp, fontWeight = FontWeight.Bold)

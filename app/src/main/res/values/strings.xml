@@ -258,7 +258,7 @@
     <string name="service_gps_permission">GPS: precise location not allowed</string>
     <string name="service_hot">Phone is overheating: shade it or take a break</string>
     <string name="service_missed_shot">Camera can\'t keep up: slow down so no shopfront is missed</string>
-    <string name="service_turn_landscape">Turn the phone sideways: in portrait half of each photo is road and sky</string>
+    <string name="service_turn_landscape">↻ Turn the phone sideways</string>
     <string name="service_mount_front">Camera is facing FORWARD: turn it to the buildings you\'re recording</string>
     <string name="service_mount_back">Camera is facing BACKWARD: turn it to the buildings you\'re recording</string>
     <string name="service_camera_failed">Couldn\'t open the camera: %1$s</string>
@@ -758,7 +758,7 @@
     <string name="setup_camera360_short">Camera 360</string>
     <string name="setup_camera360_hint">The phone records GPS only, no photos.</string>
     <string name="setup_camera360_info">A 360° camera films, the phone records GPS. After Start, hold the QR code up to the camera for 2–3 s.</string>
-    <string name="c360_sync_hint">Hold up to the 360 camera, 2–3 s</string>
+    <string name="c360_sync_hint">Hold this code up to the 360 camera for 2–3 s</string>
     <string name="c360_sync_done">Done</string>
     <string name="c360_resync">Sync again</string>
     <string name="c360_gps_wait">Waiting for GPS…</string>
@@ -833,4 +833,17 @@
     </string-array>
     <string name="setup_camera_label">Camera</string>
     <string name="setup_camera_phone">Phone</string>
+    <string name="gps_wait_sky">Go into the open, away from tall buildings, for GPS</string>
+    <string name="setup_change">Change</string>
+    <string name="summary_title">Ride saved</string>
+    <string name="summary_upload_no_token">No access key yet: upload from Settings</string>
+    <string name="summary_upload_wifi">Waiting for Wi-Fi</string>
+    <string name="summary_upload_waiting">Waiting to send</string>
+    <string name="summary_upload_sending">Sending… %1$d%%</string>
+    <string name="summary_upload_sent">Sent ✓</string>
+    <string name="summary_upload_failed">Send failed: %1$s</string>
+    <string name="summary_upload_not_sent">Not sent</string>
+    <string name="summary_done">Done</string>
+    <string name="summary_theta_shots">360 photos</string>
+    <string name="summary_theta_skipped">skipped</string>
 </resources>

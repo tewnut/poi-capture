@@ -158,6 +158,9 @@ object Prefs {
     fun thetaEveryM(ctx: Context): Double =
         sp(ctx).getFloat("thetaEveryM", io.github.tewnut.poicapture.core.ThetaOsc.DEFAULT_EVERY_M.toFloat()).toDouble()
     fun saveThetaEveryM(ctx: Context, v: Double) = sp(ctx).edit().putFloat("thetaEveryM", v.toFloat()).apply()
+    /** A ride was started on this phone once: New ride then folds its choices into one line (Đổi opens them). */
+    fun startedRide(ctx: Context): Boolean = sp(ctx).getBoolean("startedRide", false)
+    fun setStartedRide(ctx: Context) = sp(ctx).edit().putBoolean("startedRide", true).apply()
     fun askPhotoRole(ctx: Context): Boolean = sp(ctx).getBoolean("askPhotoRole", false)
     fun setAskPhotoRole(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("askPhotoRole", v).apply()
     fun savePhotoRoles(ctx: Context, r: PhotoRoles?) = sp(ctx).edit().apply {
@@ -183,6 +186,8 @@ private fun App() {
     var capturing by rememberSaveable { mutableStateOf<String?>(null) }
     var mapOf by rememberSaveable { mutableStateOf<String?>(null) }
     var mapTitle by rememberSaveable { mutableStateOf("") }   // the session's name, as in the list
+    // a ride just ended with Save: its summary (RideEnd.encode) before the list
+    var summary by rememberSaveable { mutableStateOf<String?>(null) }
 
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
     LaunchedEffect(Unit) {
@@ -207,6 +212,12 @@ private fun App() {
         OnboardingScreen(onDone = { onboarded = true; screen = "home" })
         return
     }
+    // the ride just saved: its numbers and upload, then the list
+    val ended = io.github.tewnut.poicapture.core.RideEnd.decode(summary)
+    if (ended != null && capturing == null) {
+        io.github.tewnut.poicapture.ui.RideSummaryScreen(ended, onDone = { summary = null; screen = "home" })
+        return
+    }
     // GPS is a must: no way into the app without precise location, the camera and the phone's location on.
     // A session already recording keeps its screen (the service reports a lost GPS itself).
     if (!access.ok && capturing == null) {
@@ -216,7 +227,8 @@ private fun App() {
 
     val sid = capturing
     if (sid != null) {
-        CaptureScreen(sid, onDone = { capturing = null; screen = "home" }, onCancel = { capturing = null; screen = "new" })
+        CaptureScreen(sid, onDone = { e -> capturing = null; screen = "home"; summary = e?.encode() },
+            onCancel = { capturing = null; screen = "new" })
         return
     }
     val ms = mapOf

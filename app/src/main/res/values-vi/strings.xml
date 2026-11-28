@@ -181,8 +181,8 @@
     <string name="capture_shoot">Chụp</string>
     <string name="capture_next_place">Địa điểm tiếp theo</string>
     <string name="capture_pin_status">Ghim, tình trạng…</string>
-    <string name="capture_pause">Dừng</string>
-    <string name="capture_resume">Tiếp</string>
+    <string name="capture_pause">Tạm dừng</string>
+    <string name="capture_resume">Ghi tiếp</string>
     <string name="capture_recording">● Đang ghi</string>
     <string name="capture_paused">Ⅱ Tạm dừng</string>
     <string name="capture_side_right">GHI BÊN PHẢI →</string>
@@ -250,7 +250,7 @@
     <string name="service_gps_permission">GPS: chưa cấp quyền vị trí chính xác</string>
     <string name="service_hot">Máy đang nóng: che nắng hoặc nghỉ một lúc</string>
     <string name="service_missed_shot">Máy chụp không kịp: chạy chậm lại để không bỏ sót mặt tiền</string>
-    <string name="service_turn_landscape">Xoay ngang điện thoại: để dọc thì nửa ảnh là mặt đường và bầu trời</string>
+    <string name="service_turn_landscape">↻ Xoay ngang điện thoại</string>
     <string name="service_mount_front">Camera đang nhìn về phía TRƯỚC: xoay camera sang dãy nhà cần ghi</string>
     <string name="service_mount_back">Camera đang nhìn về phía SAU: xoay camera sang dãy nhà cần ghi</string>
     <string name="service_camera_failed">Không mở được camera: %1$s</string>
@@ -735,7 +735,7 @@
     <string name="setup_camera360_short">Camera 360</string>
     <string name="setup_camera360_hint">Điện thoại chỉ ghi GPS, không chụp ảnh.</string>
     <string name="setup_camera360_info">Camera 360 quay đường, điện thoại ghi GPS. Sau Bắt đầu, đưa mã QR trước camera 2–3 giây.</string>
-    <string name="c360_sync_hint">Đưa trước camera 360, 2–3 giây</string>
+    <string name="c360_sync_hint">Đưa mã này trước camera 360 trong 2–3 giây</string>
     <string name="c360_sync_done">Xong</string>
     <string name="c360_resync">Đồng bộ lại</string>
     <string name="c360_gps_wait">Đang chờ GPS…</string>
@@ -810,4 +810,17 @@
     </string-array>
     <string name="setup_camera_label">Camera</string>
     <string name="setup_camera_phone">Điện thoại</string>
+    <string name="gps_wait_sky">Ra chỗ thoáng, xa nhà cao để bắt GPS</string>
+    <string name="setup_change">Đổi</string>
+    <string name="summary_title">Đã lưu chuyến đi</string>
+    <string name="summary_upload_no_token">Chưa có mã truy cập: tải lên trong Cài đặt</string>
+    <string name="summary_upload_wifi">Đang chờ Wi-Fi</string>
+    <string name="summary_upload_waiting">Đang chờ gửi</string>
+    <string name="summary_upload_sending">Đang gửi… %1$d%%</string>
+    <string name="summary_upload_sent">Đã gửi ✓</string>
+    <string name="summary_upload_failed">Gửi lỗi: %1$s</string>
+    <string name="summary_upload_not_sent">Chưa gửi</string>
+    <string name="summary_done">Xong</string>
+    <string name="summary_theta_shots">ảnh 360</string>
+    <string name="summary_theta_skipped">bỏ lỡ</string>
 </resources>
