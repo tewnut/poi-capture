@@ -35,6 +35,10 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UIRequiredDeviceCapabilities: "gps location-services still-camera"
         INFOPLIST_KEY_CFBundleLocalizations: "en vi"
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "NO"  # only HTTPS: no export-compliance question per build
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon        # Assets.xcassets (the store icon, 1024 px, no alpha)
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: KGK45GQM68                       # Tasco Joint Stock Company (public: in every signed app)
         FRAMEWORK_SEARCH_PATHS: "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
         OTHER_LDFLAGS: "$(inherited) -framework Shared"
     preBuildScripts:

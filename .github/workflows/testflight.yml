@@ -1,0 +1,131 @@
+# iPhone app to TestFlight, for every version tag (the same tags as the Android release) or by hand.
+# Archive with automatic signing through an App Store Connect API key, then export with destination "upload":
+# Xcode signs (cloud-managed distribution certificate) and sends the build to App Store Connect; it appears in
+# TestFlight after Apple's processing (10-30 min). Build number = the workflow run number (always increasing).
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   ASC_KEY_ID         App Store Connect API key's Key ID          (Users and Access -> Integrations -> Team Keys)
+#   ASC_ISSUER_ID      the Issuer ID shown above the keys
+#   ASC_KEY_P8         the key file's contents (AuthKey_XXXX.p8), downloaded once; role Admin (cloud signing)
+# A Team Key is made by the Account Holder or an Admin (an App Manager does not see Team Keys).
+# Without them the job says so and stops (the Android release does not depend on it).
+name: testflight
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build, e.g. v0.22.4"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      APPLE_TEAM_ID: KGK45GQM68     # Tasco Joint Stock Company; also DEVELOPMENT_TEAM in ios/project.yml
+    steps:
+      - name: Secrets present?
+        id: check
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ] || [ -z "$ASC_KEY_P8" ]; then
+            echo "App Store Connect secrets not set: no TestFlight upload (see the top of .github/workflows/testflight.yml)"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.check.outputs.go == 'true'
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-java@v5
+        if: steps.check.outputs.go == 'true'
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: API key and version
+        if: steps.check.outputs.go == 'true'
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/asc"
+          printf '%s\n' "$ASC_KEY_P8" | tr -d '\r' > "$RUNNER_TEMP/asc/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/asc/AuthKey.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/asc/AuthKey.p8" >> "$GITHUB_ENV"
+          V=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          if [ "v$V" != "$TAG" ]; then echo "::error::tag $TAG does not match the app version $V"; exit 1; fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+
+      - name: Generate the Xcode project
+        if: steps.check.outputs.go == 'true'
+        run: |
+          chmod +x gradlew
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      - name: Archive
+        if: steps.check.outputs.go == 'true'
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/PoiCapture.xcodeproj -scheme PoiCapture -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/PoiCapture.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="${{ github.run_number }}" \
+            archive > archive.log 2>&1 || { grep -E "error:|warning: .*sign" archive.log | sort -u | head -50; tail -40 archive.log; exit 1; }
+          tail -5 archive.log
+
+      - name: Upload to App Store Connect (TestFlight)
+        if: steps.check.outputs.go == 'true'
+        run: |
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$APPLE_TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict></plist>
+          EOF
+          set -o pipefail
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/PoiCapture.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            > export.log 2>&1 || { grep -E "error|Error" export.log | sort -u | head -50; tail -40 export.log; exit 1; }
+          tail -8 export.log
+          echo "Uploaded $VERSION (build ${{ github.run_number }}): it shows in TestFlight after Apple's processing."
+
+      - name: Remove the key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc"
+
+      - name: Keep the logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-logs
+          path: |
+            archive.log
+            export.log
+          if-no-files-found: ignore
