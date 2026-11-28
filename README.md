@@ -161,7 +161,9 @@ Or open the folder in Android Studio and set the Gradle JDK to a 17/21 JDK. Requ
 
 ## Release
 
-Bump `versionCode` / `versionName` in `app/build.gradle.kts`, commit, then push a matching tag:
+Bump `versionCode` / `versionName` in `app/build.gradle.kts`, write the Vietnamese release notes in
+`release-notes/vi/<versionName>.txt` (at most 500 characters, [release-notes/README.md](release-notes/README.md)),
+commit, then push a matching tag:
 
 ```
 git tag v1.2.3
@@ -170,7 +172,9 @@ git push origin main v1.2.3
 
 [.github/workflows/release.yml](.github/workflows/release.yml) runs the unit tests, builds the release APK, signs it
 with the release key from the repository secrets (`RELEASE_KEYSTORE_B64`, `RELEASE_KEYSTORE_PASSWORD`,
-`RELEASE_KEY_ALIAS`), checks the signature and attaches `poi-capture-vX.Y.Z.apk` (+ `.sha256`) to the release. Keep the
+`RELEASE_KEY_ALIAS`), checks the signature and attaches `poi-capture-vX.Y.Z.apk` and `quet-pho-vX.Y.Z.aab` (the Play Console upload, + their
+`.sha256`) and `play-notes-vX.Y.Z.txt` (the notes as `<vi>…</vi>`, also shown on the release page) to the release; a
+tag without its notes file fails before the build. Keep the
 keystore backed up outside the repository: an APK signed with another key cannot update the installed app. A local
 signed build works the same way with `RELEASE_KEYSTORE_FILE` set to the keystore path.
 

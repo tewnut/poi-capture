@@ -5,6 +5,8 @@
 # release vX.Y.Z, with quet-pho-vX.Y.Z.aab (the same key, for the Play Console: there it is the upload key).
 # Download: https://github.com/<owner>/<repo>/releases/latest
 # An older tag without the .aab: Actions -> release -> Run workflow (from this branch), tag vX.Y.Z.
+# Release notes: release-notes/vi/X.Y.Z.txt (committed before the tag, <= 500 characters, release-notes/README.md)
+# become play-notes-vX.Y.Z.txt on the release, "<vi>...</vi>" ready to paste into the Play Console.
 name: release
 
 on:
@@ -44,6 +46,23 @@ jobs:
         run: |
           V=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
           if [ "v$V" != "$TAG" ]; then echo "::error::tag $TAG does not match versionName $V"; exit 1; fi
+
+      - name: Release notes (Play Console, Vietnamese)
+        run: |
+          V="${TAG#v}"
+          NOTES="release-notes/vi/$V.txt"
+          if [ ! -f "$NOTES" ]; then echo "::error::$NOTES is missing: write the release notes before tagging (release-notes/README.md)"; exit 1; fi
+          python3 - "$NOTES" "play-notes-$TAG.txt" <<'PY'
+          import sys
+          text = open(sys.argv[1], encoding='utf-8').read().strip()
+          if not text:
+              sys.exit(f'::error::{sys.argv[1]} is empty')
+          if len(text) > 500:
+              sys.exit(f'::error::{sys.argv[1]} has {len(text)} characters, the Play Console takes at most 500')
+          open(sys.argv[2], 'w', encoding='utf-8').write(f'<vi>\n{text}\n</vi>\n')
+          print(f'{len(text)} characters')
+          PY
+          cat "play-notes-$TAG.txt"
 
       - name: Release key
         env:
@@ -86,10 +105,12 @@ jobs:
 
       - name: Publish
         run: |
-          FILES="poi-capture-$TAG.apk poi-capture-$TAG.apk.sha256 quet-pho-$TAG.aab quet-pho-$TAG.aab.sha256"
+          FILES="poi-capture-$TAG.apk poi-capture-$TAG.apk.sha256 quet-pho-$TAG.aab quet-pho-$TAG.aab.sha256 play-notes-$TAG.txt"
+          { echo "Release notes for the Play Console (also play-notes-$TAG.txt):"; echo; echo '```'; cat "play-notes-$TAG.txt"; echo '```'; } > body.md
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" $FILES --clobber
+            gh release edit "$TAG" --notes-file body.md
           else
-            gh release create "$TAG" $FILES --verify-tag --title "Quét Phố $TAG" --generate-notes
+            gh release create "$TAG" $FILES --verify-tag --title "Quét Phố $TAG" --notes-file body.md --generate-notes
           fi
           gh release view "$TAG" --json assets -q '.assets[] | "\(.name) \(.size)"'
