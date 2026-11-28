@@ -38,6 +38,7 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    environment: release          # waits for a required reviewer's approval before it signs or uploads
     timeout-minutes: 30
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}

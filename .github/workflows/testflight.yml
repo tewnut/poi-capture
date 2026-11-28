@@ -30,6 +30,7 @@ concurrency:
 jobs:
   ios:
     runs-on: macos-15
+    environment: release          # waits for a required reviewer's approval before it signs or uploads
     timeout-minutes: 60
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
