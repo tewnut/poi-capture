@@ -76,20 +76,20 @@
     <!-- Onboarding (first run) -->
     <string name="onboarding_back">← Back</string>
     <string name="onboarding_continue">Continue</string>
-    <string name="onboarding_welcome_lead">Record shops and places along the street and put them on the map.</string>
+    <string name="onboarding_welcome_lead">Record shops, house numbers and traffic signs along the street and put them on the map.</string>
     <string name="onboarding_welcome_button">Set up</string>
     <string name="onboarding_welcome_time">One-time setup, about a minute.</string>
     <string name="onboarding_sweep_title">Street sweep</string>
-    <string name="onboarding_sweep_text">Ride along the street with the phone on a mount, or let a passenger hold it: the app photographs the shopfronts by itself.</string>
+    <string name="onboarding_sweep_text">Ride along the street with the phone on a mount or in hand: the app photographs the shopfronts, the house numbers or the signs ahead by itself.</string>
     <string name="onboarding_place_title">Place capture</string>
     <string name="onboarding_place_text">Stop at each shop: photograph the front, the sign, the inside, then pin it on the right building.</string>
     <string name="onboarding_position_title">Pinned to the building</string>
     <string name="onboarding_position_text">The app works out where the shopfront is from GPS and the camera direction. If it\'s off, drag it on the map.</string>
     <string name="onboarding_offline_title">No network needed while recording</string>
-    <string name="onboarding_offline_text">Photos stay on the phone until you send the file (Zalo, Drive, email…) or save it.</string>
+    <string name="onboarding_offline_text">Photos stay on the phone while you record; each ride uploads to your team’s server by itself when it ends and there is a network.</string>
 
-    <string name="onboarding_email_title">Contributor ID</string>
-    <string name="onboarding_email_lead">If your team gave you a contributor ID, enter it here. It goes with each session you send, so your work is credited to you.</string>
+    <string name="onboarding_email_title">Contributor ID (optional)</string>
+    <string name="onboarding_email_lead">Goes with each ride you send, so your work is credited to you.</string>
     <string name="onboarding_email_label">Contributor ID (optional)</string>
     <string name="onboarding_email_placeholder">e.g. HCM-024</string>
     <string name="onboarding_email_invalid">That doesn\'t look like an email, e.g. name@gmail.com</string>
@@ -132,7 +132,7 @@
 
     <string name="onboarding_ready_title">Ready</string>
     <string name="onboarding_ready_button">Start recording</string>
-    <string name="onboarding_mount_title">Two ways to sweep a street</string>
+    <string name="onboarding_mount_title">Ways to sweep a street</string>
     <string name="onboarding_mount_text">Clamp the phone firmly, best in landscape, back camera facing the buildings. The app measures the camera direction during the first few accelerations and brakes.</string>
     <string name="onboarding_summary_name">Contributor ID: %1$s</string>
     <string name="onboarding_summary_perms_ok">Camera and location allowed</string>
@@ -141,7 +141,7 @@
     <string name="onboarding_summary_roads">Road data: %1$s</string>
     <string name="onboarding_summary_roads_online">Road data: fetched online while recording</string>
     <string name="onboarding_summary_roads_pending">A pack you picked can be used once it has downloaded.</string>
-    <string name="onboarding_ready_after">When done, open “Sessions” to review on the map and send (Zalo, Drive, email…).</string>
+    <string name="onboarding_ready_after">When done, open “Rides” to review on the map; rides upload by themselves once the access key is set.</string>
 
     <!-- New (setup) screen -->
     <string name="setup_need_permissions">Camera and precise location are needed. Open Settings → Permissions to turn them on.</string>
@@ -639,8 +639,8 @@
     <string name="upload_now">Upload now</string>
     <string name="upload_retry">Retry</string>
     <string name="onboarding_upload_later">You can set or change it later in Settings → Upload server.</string>
-    <string name="onboarding_key_title">Access key</string>
-    <string name="onboarding_key_lead">Scan the QR code your admin gave you, or type your access key. Each ride is then sent to the server by itself when it ends.</string>
+    <string name="onboarding_key_title">Codes from your team</string>
+    <string name="onboarding_key_lead">Scan the QR code your admin gave you (or type the access key), then your contributor ID if you have one. Each ride is then sent to the server by itself when it ends.</string>
     <string name="onboarding_key_skip">Skip and start</string>
     <string name="upload_server_at">Server: %s</string>
     <string name="upload_server_change">Change</string>
@@ -752,4 +752,5 @@
     <string name="plan_points_map">Now tap where that spot really is on the map</string>
     <string name="plan_reset">Reset</string>
     <string name="plan_done">Done</string>
+    <string name="onboarding_signs_text">Signs rides: the camera looks straight ahead in the riding direction, on a mount or in hand. The app shoots more often when it sees a sign.</string>
 </resources>

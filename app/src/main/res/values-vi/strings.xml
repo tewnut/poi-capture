@@ -72,20 +72,20 @@
     <!-- Onboarding (first run) -->
     <string name="onboarding_back">← Quay lại</string>
     <string name="onboarding_continue">Tiếp tục</string>
-    <string name="onboarding_welcome_lead">Ghi lại cửa hàng, quán xá trên phố để đưa lên bản đồ.</string>
+    <string name="onboarding_welcome_lead">Ghi lại cửa hàng, số nhà và biển báo giao thông trên phố để đưa lên bản đồ.</string>
     <string name="onboarding_welcome_button">Bắt đầu thiết lập</string>
     <string name="onboarding_welcome_time">Thiết lập một lần, khoảng 1 phút.</string>
     <string name="onboarding_sweep_title">Quét đường</string>
-    <string name="onboarding_sweep_text">Chạy xe dọc phố với điện thoại gắn trên xe, hoặc người ngồi sau cầm: app tự chụp dãy cửa hàng.</string>
+    <string name="onboarding_sweep_text">Chạy xe dọc phố với điện thoại gắn trên xe hoặc cầm tay: app tự chụp dãy cửa hàng, số nhà hoặc biển báo phía trước.</string>
     <string name="onboarding_place_title">Chụp địa điểm</string>
     <string name="onboarding_place_text">Dừng ở từng cửa hàng: chụp mặt tiền, biển hiệu, bên trong, rồi ghim lên đúng tòa nhà.</string>
     <string name="onboarding_position_title">Vị trí đặt vào tòa nhà</string>
     <string name="onboarding_position_text">App tính vị trí mặt tiền từ GPS và hướng camera. Sai chỗ nào, kéo lại trên bản đồ.</string>
     <string name="onboarding_offline_title">Không cần mạng khi ghi</string>
-    <string name="onboarding_offline_text">Ảnh lưu trên máy cho đến khi bạn gửi file (Zalo, Drive, email…) hoặc lưu lại.</string>
+    <string name="onboarding_offline_text">Ảnh lưu trên máy trong lúc ghi; chuyến đi tự tải lên máy chủ của nhóm khi kết thúc và có mạng.</string>
 
-    <string name="onboarding_email_title">Mã cộng tác viên</string>
-    <string name="onboarding_email_lead">Nếu nhóm đã cấp cho bạn mã cộng tác viên, hãy nhập ở đây. Mã đi kèm mỗi phiên bạn gửi để ghi công cho bạn.</string>
+    <string name="onboarding_email_title">Mã cộng tác viên (không bắt buộc)</string>
+    <string name="onboarding_email_lead">Đi kèm mỗi chuyến bạn gửi để ghi công cho bạn.</string>
     <string name="onboarding_email_label">Mã cộng tác viên (không bắt buộc)</string>
     <string name="onboarding_email_placeholder">VD: HCM-024</string>
     <string name="onboarding_email_invalid">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
@@ -127,7 +127,7 @@
 
     <string name="onboarding_ready_title">Sẵn sàng!</string>
     <string name="onboarding_ready_button">Bắt đầu ghi</string>
-    <string name="onboarding_mount_title">Hai cách quét đường</string>
+    <string name="onboarding_mount_title">Các cách quét đường</string>
     <string name="onboarding_mount_text">Kẹp chắc điện thoại, tốt nhất nằm ngang, camera sau nhìn sang dãy nhà. App tự đo hướng camera trong vài lần tăng tốc / phanh đầu tiên.</string>
     <string name="onboarding_summary_name">Mã cộng tác viên: %1$s</string>
     <string name="onboarding_summary_perms_ok">Đã cấp quyền camera và vị trí</string>
@@ -136,7 +136,7 @@
     <string name="onboarding_summary_roads">Dữ liệu đường: %1$s</string>
     <string name="onboarding_summary_roads_online">Dữ liệu đường: lấy qua mạng khi ghi</string>
     <string name="onboarding_summary_roads_pending">Gói đang tải (nếu bạn đã chọn) sẽ dùng được khi tải xong.</string>
-    <string name="onboarding_ready_after">Ghi xong, vào “Đã ghi” để xem lại trên bản đồ và gửi (Zalo, Drive, email…).</string>
+    <string name="onboarding_ready_after">Ghi xong, vào “Chuyến quét” để xem lại trên bản đồ; chuyến đi tự tải lên khi đã có mã truy cập.</string>
 
     <!-- New (setup) screen -->
     <string name="setup_need_permissions">Cần quyền camera và vị trí chính xác. Mở Cài đặt → Quyền để bật.</string>
@@ -619,8 +619,8 @@
     <string name="upload_now">Tải lên ngay</string>
     <string name="upload_retry">Thử lại</string>
     <string name="onboarding_upload_later">Bạn có thể đặt hoặc đổi sau trong Cài đặt → Máy chủ tải lên.</string>
-    <string name="onboarding_key_title">Mã truy cập</string>
-    <string name="onboarding_key_lead">Quét mã QR quản trị viên đưa cho bạn, hoặc nhập mã truy cập. Mỗi chuyến đi sẽ tự gửi lên máy chủ khi kết thúc.</string>
+    <string name="onboarding_key_title">Mã từ nhóm</string>
+    <string name="onboarding_key_lead">Quét mã QR quản trị viên đưa cho bạn (hoặc nhập mã truy cập), rồi nhập mã cộng tác viên nếu có. Mỗi chuyến đi sẽ tự gửi lên máy chủ khi kết thúc.</string>
     <string name="onboarding_key_skip">Bỏ qua và bắt đầu</string>
     <string name="upload_server_at">Máy chủ: %s</string>
     <string name="upload_server_change">Đổi</string>
@@ -729,4 +729,5 @@
     <string name="plan_points_map">Giờ chạm vào đúng chỗ đó trên bản đồ</string>
     <string name="plan_reset">Đặt lại</string>
     <string name="plan_done">Xong</string>
+    <string name="onboarding_signs_text">Đi quét biển báo: camera nhìn thẳng về phía trước theo hướng xe chạy, gắn trên xe hoặc cầm tay. App chụp dày hơn khi thấy biển.</string>
 </resources>

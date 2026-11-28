@@ -1,0 +1,5 @@
+- Đáp ứng yêu cầu mới của Google Play (Android 16, bộ nhớ trang 16 KB).
+- Bỏ quyền "Hoạt động thể chất".
+- Thiết lập lần đầu gọn hơn: mã truy cập và mã cộng tác viên trên cùng một trang; hướng dẫn thêm cách quét biển báo.
+- Màn hình ghi mới: nút Bắt đầu báo "Đang chờ GPS", không che tên đường.
+- Bản thử nghiệm có tên "Test Quét Phố" và biểu tượng màu cam, không nhầm với ứng dụng chính.

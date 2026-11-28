@@ -14,8 +14,8 @@ android {
         applicationId = "vn.vmaps.quetpho"          // the store id; the code keeps its package (namespace)
         minSdk = 30            // Android 11+: raw GNSS, camera/location foreground-service types
         targetSdk = 36         // Play: new apps and updates must target the latest API level
-        versionCode = 27
-        versionName = "0.22.2"
+        versionCode = 28
+        versionName = "0.22.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -89,7 +89,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
     // traffic-signs ride: the sign detector (assets/signs, ml/signs) on the CPU. MIT licence; native libs, so release
     // builds keep only the ARM ABIs real phones use; debug keeps arm64 and x86_64 (the emulator).
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

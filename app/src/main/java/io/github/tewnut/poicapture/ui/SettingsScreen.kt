@@ -163,7 +163,7 @@ private fun SettingsHome(contributorId: String, onOpen: (String) -> Unit, onBack
             else pluralStringResource(R.plurals.settings_tasks_open, openTasks, openTasks)) { onOpen(Page.TASKS) },
         NavItem("☁️", stringResource(R.string.upload_title),
             stringResource(if (uploadOk) R.string.settings_upload_connected else R.string.settings_upload_not_set),
-            valueColor = if (uploadOk) Palette.Green else Palette.Amber) { onOpen(Page.UPLOAD) },
+            valueColor = if (uploadOk) Palette.Green else Palette.Blue) { onOpen(Page.UPLOAD) },   // not set: an invitation, not an error
     )
     val items3 = listOf(
         NavItem("⚙️", stringResource(R.string.settings_advanced), stringResource(R.string.settings_advanced_sub)) { onOpen(Page.ADVANCED) },

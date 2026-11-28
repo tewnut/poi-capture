@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -310,9 +311,9 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null; roadReload++ })
                         }
                     }
+                    Spacer(Modifier.height(8.dp))   // the last line scrolls clear of the bottom bar
                 }
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    if (!ready) Hint(stringResource(R.string.setup_need_gps), Modifier.padding(bottom = 6.dp), Palette.Amber)
                     val onStartClick: () -> Unit = start@{
                             if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED ||
                                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -355,7 +356,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                         }
                     startRef[0] = onStartClick
                     Button(enabled = ready, modifier = Modifier.fillMaxWidth().height(56.dp), onClick = onStartClick) {
-                        Text(stringResource(R.string.setup_start), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        // waiting: said on the button itself (a line above it shrank the page and hid the street)
+                        Text(stringResource(if (ready) R.string.setup_start else R.string.setup_need_gps), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

@@ -16,7 +16,7 @@
         <item quantity="other">%1$d to do</item>
     </plurals>
     <string name="settings_upload_connected">Connected</string>
-    <string name="settings_upload_not_set">Not set up</string>
+    <string name="settings_upload_not_set">Scan the QR code to upload</string>
     <string name="settings_about">About</string>
     <string name="settings_about_version">Version %1$s</string>
     <string name="settings_about_licences">Licences</string>

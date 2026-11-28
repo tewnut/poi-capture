@@ -74,11 +74,12 @@ import io.github.tewnut.poicapture.net.RoadSource
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class Step { LANGUAGE, WELCOME, EMAIL, PERMISSIONS, ROADS, READY, KEY }
+private enum class Step { LANGUAGE, WELCOME, PERMISSIONS, ROADS, READY, KEY }
 
 /**
- * First run, once per phone: language → what the app does → email (not verified) → permissions → offline road data for
- * where the contributor is → mounting and facade distance. Every step is a must; all of it can be changed later in
+ * First run, once per phone: language → what the app does → permissions → offline road data for where the contributor
+ * is → the ways to ride → the codes from the team (access key by QR code, contributor ID) on one page.
+ * Every step is a must; all of it can be changed later in
  * Settings.
  */
 @Composable
@@ -102,12 +103,11 @@ fun OnboardingScreen(onDone: () -> Unit) {
         }
         when (step) {
             Step.LANGUAGE -> LanguageStep { step = Step.WELCOME }
-            Step.WELCOME -> WelcomeStep { step = Step.EMAIL }
-            Step.EMAIL -> EmailStep(ctx) { step = Step.PERMISSIONS }
+            Step.WELCOME -> WelcomeStep { step = Step.PERMISSIONS }
             Step.PERMISSIONS -> PermissionsStep(ctx) { step = Step.ROADS }
             Step.ROADS -> RoadsStep(ctx) { step = Step.READY }
             Step.READY -> ReadyStep(ctx) { step = Step.KEY }
-            // last: the access key (scan the admin's QR code), so the phone ends set up to send its rides
+            // last: the team's codes (the access key by the admin's QR code, and the optional contributor ID)
             Step.KEY -> KeyStep { Prefs.setOnboarded(ctx, true); onDone() }
         }
     }
@@ -218,21 +218,7 @@ private fun WelcomeStep(onNext: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------- 2. email
-
-/** The contributor ID the team gave (optional): no email, no name; Continue works with the field empty. */
-@Composable
-private fun EmailStep(ctx: Context, onNext: () -> Unit) {
-    var id by rememberSaveable { mutableStateOf(Prefs.contributorId(ctx)) }
-    fun next() { Prefs.saveContributorId(ctx, id); onNext() }
-    StepFrame(stringResource(R.string.onboarding_email_title), stringResource(R.string.onboarding_email_lead),
-        stringResource(if (id.isBlank()) R.string.onboarding_id_skip else R.string.onboarding_continue), onNext = ::next) {
-        WhiteCard {
-            IconRow("🪪", stringResource(R.string.onboarding_id_card_title), stringResource(R.string.onboarding_id_card_text))
-            ContributorIdField(id, { id = it }, onDone = ::next)
-        }
-    }
-}
+// ---------------------------------------------------------------- the contributor ID field (on the access key page)
 
 /** One line, no autocorrect, upper-case friendly: IDs are often like "HCM-024". */
 @Composable
@@ -399,7 +385,7 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------- 7. access key (last)
+// ---------------------------------------------------------------- 5. the team's codes (last)
 
 /**
  * The access key from the admin (scan its QR code, or type it); the project's server is already filled in. Skip
@@ -411,21 +397,27 @@ private fun KeyStep(onDone: () -> Unit) {
     var tick by remember { mutableIntStateOf(0) }
     // the card saves as typed; the button says Continue once a usable address is in
     val set = remember(tick) { io.github.tewnut.poicapture.capture.UploadServer.configured(ctx) }
+    // the contributor ID (optional) on the same page as the access key: one step for both codes from the team
+    var id by remember { mutableStateOf(Prefs.contributorId(ctx)) }
+    fun done() { Prefs.saveContributorId(ctx, id); onDone() }
     StepFrame(stringResource(R.string.onboarding_key_title), stringResource(R.string.onboarding_key_lead),
-        stringResource(if (set) R.string.onboarding_ready_button else R.string.onboarding_key_skip), onNext = onDone) {
+        stringResource(if (set) R.string.onboarding_ready_button else R.string.onboarding_key_skip), onNext = ::done) {
         WhiteCard {
             UploadServerCard(onChange = { tick++ }, keyFirst = true)
+        }
+        WhiteCard {
+            IconRow("🪪", stringResource(R.string.onboarding_email_title), stringResource(R.string.onboarding_email_lead))
+            ContributorIdField(id, { id = it; Prefs.saveContributorId(ctx, it) })
         }
         Hint(stringResource(R.string.onboarding_upload_later))
     }
 }
 
-// ---------------------------------------------------------------- 6. ready (then the access key)
+// ---------------------------------------------------------------- 4b. ready (then the codes)
 
 @Composable
 private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
     var settings by remember { mutableStateOf(Prefs.settings(ctx)) }
-    val id = remember { Prefs.contributorId(ctx) }
     val missing = perms().filter { p -> !granted(ctx, p.names.first()) && p.icon != "🔔" }
     val packs = remember { RoadSource.packs(ctx).installed().map { it.name } }
     val plan = CapturePlan.of(settings.facadeDistanceM)
@@ -437,10 +429,10 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
             IconRow("🛵", stringResource(R.string.setup_holding_mount), stringResource(R.string.onboarding_mount_text))
             HorizontalDivider(color = Palette.Line)
             IconRow("🙋", stringResource(R.string.setup_holding_hand), stringResource(R.string.onboarding_hand_text))
+            HorizontalDivider(color = Palette.Line)
+            IconRow("🚸", stringResource(R.string.setup_target_signs), stringResource(R.string.onboarding_signs_text))
         }
         WhiteCard {
-            Summary(true, if (id.isBlank()) stringResource(R.string.onboarding_summary_no_id) else stringResource(R.string.onboarding_summary_name, id),
-                if (id.isBlank()) stringResource(R.string.onboarding_summary_no_id_sub) else null)
             Summary(missing.isEmpty(), if (missing.isEmpty()) stringResource(R.string.onboarding_summary_perms_ok)
                 else stringResource(R.string.onboarding_summary_perms_missing, missing.joinToString(", ") { ctx.getString(it.title).lowercase(Locale.ROOT) }),
                 if (missing.isEmpty()) null else stringResource(R.string.onboarding_summary_perms_fix))

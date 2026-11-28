@@ -14,7 +14,7 @@
         <item quantity="other">%1$d việc cần làm</item>
     </plurals>
     <string name="settings_upload_connected">Đã kết nối</string>
-    <string name="settings_upload_not_set">Chưa cấu hình</string>
+    <string name="settings_upload_not_set">Quét mã QR để tải lên</string>
     <string name="settings_about">Giới thiệu</string>
     <string name="settings_about_version">Phiên bản %1$s</string>
     <string name="settings_about_licences">Giấy phép</string>
