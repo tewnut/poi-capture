@@ -174,7 +174,11 @@ git push origin main v1.2.3
 with the release key from the repository secrets (`RELEASE_KEYSTORE_B64`, `RELEASE_KEYSTORE_PASSWORD`,
 `RELEASE_KEY_ALIAS`), checks the signature and attaches `poi-capture-vX.Y.Z.apk` and `quet-pho-vX.Y.Z.aab` (the Play Console upload, + their
 `.sha256`) and `play-notes-vX.Y.Z.txt` (the notes as `<vi>…</vi>`, also shown on the release page) to the release; a
-tag without its notes file fails before the build. Keep the
+tag without its notes file fails before the build. With the repository secret `PLAY_SERVICE_ACCOUNT_JSON` (a Google
+Cloud service account's JSON key, with the Google Play Android Developer API enabled and release rights on the app in
+the Play Console) the .aab and its notes are then uploaded to Google Play's **internal** testing track
+([tools/play_upload.py](tools/play_upload.py)); promote to production in the Play Console, or run the workflow by hand
+with `play_track = production`. Keep the
 keystore backed up outside the repository: an APK signed with another key cannot update the installed app. A local
 signed build works the same way with `RELEASE_KEYSTORE_FILE` set to the keystore path.
 

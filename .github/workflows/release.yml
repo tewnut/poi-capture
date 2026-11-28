@@ -7,6 +7,9 @@
 # An older tag without the .aab: Actions -> release -> Run workflow (from this branch), tag vX.Y.Z.
 # Release notes: release-notes/vi/X.Y.Z.txt (committed before the tag, <= 500 characters, release-notes/README.md)
 # become play-notes-vX.Y.Z.txt on the release, "<vi>...</vi>" ready to paste into the Play Console.
+# Google Play: with the secret PLAY_SERVICE_ACCOUNT_JSON set, the .aab and its notes go to the "internal" testing
+# track by themselves (tools/play_upload.py); production stays a promotion in the Play Console, or Run workflow with
+# play_track = production. Without the secret the step is skipped (the files are on the GitHub release as before).
 name: release
 
 on:
@@ -17,6 +20,12 @@ on:
       tag:
         description: "Existing tag to build again, e.g. v0.8.0"
         required: true
+      play_track:
+        description: "Google Play track to upload to (none: do not upload)"
+        required: false
+        default: internal
+        type: choice
+        options: [internal, alpha, beta, production, none]
 
 permissions:
   contents: write              # create the release, upload the APK
@@ -114,3 +123,14 @@ jobs:
             gh release create "$TAG" $FILES --verify-tag --title "Quét Phố $TAG" --notes-file body.md --generate-notes
           fi
           gh release view "$TAG" --json assets -q '.assets[] | "\(.name) \(.size)"'
+
+      - name: Upload to Google Play
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          TRACK: ${{ github.event.inputs.play_track || 'internal' }}
+        run: |
+          if [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then echo "PLAY_SERVICE_ACCOUNT_JSON is not set: not uploaded to Google Play"; exit 0; fi
+          if [ "$TRACK" = "none" ]; then echo "play_track = none: not uploaded"; exit 0; fi
+          python3 -m pip install --quiet --disable-pip-version-check google-auth==2.38.0 google-api-python-client==2.160.0
+          V="${TAG#v}"
+          python3 tools/play_upload.py "quet-pho-$TAG.aab" --package vn.vmaps.quetpho --track "$TRACK" --notes "release-notes/vi/$V.txt" --name "$V"
