@@ -164,7 +164,10 @@ object Uploads {
     /** The session ended: upload it if the contributor asked for automatic uploads. */
     fun onSessionEnded(ctx: Context, sessionId: String) {
         if (!UploadServer.configured(ctx) || !UploadServer.auto(ctx)) return
-        if (CaptureService.store(ctx).items(sessionId).isEmpty()) return   // nothing recorded
+        // nothing recorded (a Camera 360 ride has no photos: its track is what it recorded)
+        val store = CaptureService.store(ctx)
+        val kind = store.load(sessionId)?.kind ?: return
+        if (!io.github.tewnut.poicapture.core.Camera360.worthKeeping(kind, store.items(sessionId).size, store.trackCount(sessionId))) return
         enqueue(ctx, sessionId, manual = false)
     }
 

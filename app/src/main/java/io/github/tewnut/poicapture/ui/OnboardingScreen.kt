@@ -222,11 +222,11 @@ private fun WelcomeStep(onNext: () -> Unit) {
 
 /** One line, no autocorrect, upper-case friendly: IDs are often like "HCM-024". */
 @Composable
-internal fun ContributorIdField(value: String, onChange: (String) -> Unit, onDone: () -> Unit = {}) {
+internal fun ContributorIdField(value: String, onChange: (String) -> Unit, onDone: () -> Unit = {}, help: Boolean = true) {
     OutlinedTextField(value, { onChange(it.take(64)) },
         label = { Text(stringResource(R.string.onboarding_email_label)) },
         placeholder = { Text(stringResource(R.string.onboarding_email_placeholder)) }, singleLine = true,
-        supportingText = { Text(stringResource(R.string.onboarding_id_help)) },
+        supportingText = if (help) { { Text(stringResource(R.string.onboarding_id_help)) } } else null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, autoCorrectEnabled = false, imeAction = ImeAction.Done),
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onDone() }),
         shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
@@ -407,7 +407,7 @@ private fun KeyStep(onDone: () -> Unit) {
         }
         WhiteCard {
             IconRow("🪪", stringResource(R.string.onboarding_email_title), stringResource(R.string.onboarding_email_lead))
-            ContributorIdField(id, { id = it; Prefs.saveContributorId(ctx, it) })
+            ContributorIdField(id, { id = it; Prefs.saveContributorId(ctx, it) }, help = false)
         }
         Hint(stringResource(R.string.onboarding_upload_later))
     }

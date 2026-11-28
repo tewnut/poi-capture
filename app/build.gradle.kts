@@ -90,6 +90,8 @@ dependencies {
     // traffic-signs ride: the sign detector (assets/signs, ml/signs) on the CPU. MIT licence; native libs, so release
     // builds keep only the ARM ABIs real phones use; debug keeps arm64 and x86_64 (the emulator).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+    // Camera 360 ride: the sync QR code shown to the 360° camera (docs/camera360.md §2). Encoder only, pure Java, ~0.5 MB
+    implementation("com.google.zxing:core:3.5.3")
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")

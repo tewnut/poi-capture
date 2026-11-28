@@ -115,6 +115,7 @@ fun SessionsScreen(onNew: () -> Unit, onOpenMap: (id: String, title: String) -> 
                     !io.github.tewnut.poicapture.core.SessionNaming.isOldStyle(it) }
                     ?: TrackStats.sessionName(items, s.startedAt ?: s.createdAt,
                         if (s.kind == SessionKind.INDOOR) s.building?.name ?: ctx.getString(R.string.setup_indoor_short)
+                        else if (s.kind == SessionKind.CAMERA360) ctx.getString(R.string.setup_camera360_short)
                         else if (!s.road.auto && s.kind != SessionKind.POI) roadText(ctx, s.road) else ctx.getString(R.string.session_no_street),
                         ways = s.road.ways)
                 SessionRow(s, title,
@@ -265,7 +266,9 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                         onSend: () -> Unit, onShare: () -> Unit, onMap: () -> Unit, onSave: () -> Unit, onDelete: () -> Unit) {
     val ctx = LocalContext.current
     val s = r.s
-    val empty = r.photos + r.videos == 0
+    // a Camera 360 ride never has photos: its track is what it recorded
+    val cam360 = s.kind == SessionKind.CAMERA360
+    val empty = !io.github.tewnut.poicapture.core.Camera360.worthKeeping(s.kind, r.photos + r.videos, r.stats.points)
     val up = rememberUpload(s.id, uploads)
     var menu by remember { mutableStateOf(false) }
     val open = r.photos > 0 && !recording
@@ -291,7 +294,7 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
             // what was recorded, the numbers that matter first, and how much there is to send
             Text(listOfNotNull(
                 if (s.kind == SessionKind.POI) ctx.plural(R.plurals.sessions_places, r.pois) else null,
-                if (s.mode == Mode.VIDEO) ctx.plural(R.plurals.sessions_videos, r.videos) else ctx.plural(R.plurals.sessions_photos, r.photos),
+                if (cam360) null else if (s.mode == Mode.VIDEO) ctx.plural(R.plurals.sessions_videos, r.videos) else ctx.plural(R.plurals.sessions_photos, r.photos),
                 km(r.stats.distanceM).takeIf { r.stats.distanceM > 0 },
                 if (r.marks > 0) ctx.plural(R.plurals.sessions_marks, r.marks) else null,
                 mb(r.bytes).takeIf { !empty },
@@ -301,7 +304,7 @@ private fun SessionCard(r: SessionRow, recording: Boolean, busy: Boolean, upload
                 duration(ctx, r.stats.durationMs).takeIf { r.stats.durationMs > 0 },
                 if (s.kind != SessionKind.SWEEP) null else ctx.getString(if (s.sideOfTravel == Side.RIGHT) R.string.sessions_side_right else R.string.sessions_side_left)
                     .let { if (s.mount != null) ctx.getString(R.string.sessions_side_measured, it) else it },
-                if (s.kind == SessionKind.POI) null else ctx.getString(when (s.mode) {
+                if (s.kind == SessionKind.POI || cam360) null else ctx.getString(when (s.mode) {
                     Mode.PHOTO_AUTO -> R.string.sessions_mode_auto; Mode.PHOTO_MANUAL -> R.string.sessions_mode_manual; Mode.VIDEO -> R.string.sessions_mode_video }),
                 if (r.relocated > 0) ctx.plural(R.plurals.sessions_relocated, r.relocated) else null,
             ).joinToString(" · "))
@@ -384,7 +387,8 @@ private fun Hero(r: SessionRow, recording: Boolean, empty: Boolean, up: UploadSt
         if (shown.isEmpty()) {
             Box(Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Palette.GreenLight, Palette.Canvas))),
                 contentAlignment = Alignment.Center) {
-                Text(if (r.s.mode == Mode.VIDEO && !poi) "🎬" else if (poi) "📍" else if (r.s.kind == SessionKind.INDOOR) "🏬" else "🛵", fontSize = 36.sp)
+                Text(if (r.s.kind == SessionKind.CAMERA360) "📷" else if (r.s.mode == Mode.VIDEO && !poi) "🎬" else if (poi) "📍"
+                    else if (r.s.kind == SessionKind.INDOOR) "🏬" else "🛵", fontSize = 36.sp)
             }
         } else Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             shown.forEachIndexed { i, p ->
@@ -399,6 +403,7 @@ private fun Hero(r: SessionRow, recording: Boolean, empty: Boolean, up: UploadSt
             Pill(if (poi) "📍 " + stringResource(R.string.sessions_kind_poi)
                 else if (r.s.kind == SessionKind.INDOOR) "🏬 " + stringResource(R.string.setup_indoor_short) +
                     (r.s.building?.name?.let { " · $it" } ?: "")
+                else if (r.s.kind == SessionKind.CAMERA360) "📷 360"
                 else "🛵 " + stringResource(R.string.sessions_kind_sweep) + " · " +
                     when (r.s.target) {
                         io.github.tewnut.poicapture.core.SweepTarget.ADDRESSES -> "🔢 " + stringResource(R.string.setup_target_addresses_short)

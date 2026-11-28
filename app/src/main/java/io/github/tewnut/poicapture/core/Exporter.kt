@@ -104,11 +104,11 @@ object Exporter {
 
     fun fileName(s: Session): String {
         val label = (if (s.kind == SessionKind.POI) "place" else if (s.kind == SessionKind.INDOOR) "indoor-" + (s.building?.name ?: "")
-            else if (s.road.auto) "auto" else s.road.label).replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-').take(40).ifEmpty { "road" }
+            else if (s.kind == SessionKind.CAMERA360) "camera360" else if (s.road.auto) "auto" else s.road.label).replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-').take(40).ifEmpty { "road" }
         val start = (s.startedAt ?: s.createdAt).let {
             try { DateTimeFormatter.ofPattern("yyyyMMddHHmm").withZone(ZoneOffset.UTC).format(Instant.parse(it)) } catch (e: Exception) { "start" }
         }
-        val side = if (s.kind == SessionKind.POI || s.kind == SessionKind.INDOOR) "" else "_${s.sideOfTravel.json}"
+        val side = if (s.kind == SessionKind.POI || s.kind == SessionKind.INDOOR || s.kind == SessionKind.CAMERA360) "" else "_${s.sideOfTravel.json}"
         return "poi-capture_${label}${side}_$start.zip"
     }
 

@@ -86,6 +86,9 @@ import io.github.tewnut.poicapture.core.Side
 @Composable
 fun CaptureScreen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit = onDone) {
     val ctx = LocalContext.current
+    // Camera 360 ride: its own screen, no camera at all (docs/camera360.md)
+    val kind = remember(sessionId) { CaptureService.store(ctx).load(sessionId)?.kind }
+    if (kind == SessionKind.CAMERA360) { Camera360Screen(sessionId, onDone, onCancel); return }
     val activity = ctx as Activity
     var service by remember { mutableStateOf<CaptureService?>(null) }
     var confirmEnd by remember { mutableStateOf(false) }

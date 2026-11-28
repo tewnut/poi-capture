@@ -76,20 +76,20 @@
     <!-- Onboarding (first run) -->
     <string name="onboarding_back">← Back</string>
     <string name="onboarding_continue">Continue</string>
-    <string name="onboarding_welcome_lead">Record shops, house numbers and traffic signs along the street and put them on the map.</string>
+    <string name="onboarding_welcome_lead">Put shops, house numbers and road signs on the map.</string>
     <string name="onboarding_welcome_button">Set up</string>
     <string name="onboarding_welcome_time">One-time setup, about a minute.</string>
     <string name="onboarding_sweep_title">Street sweep</string>
-    <string name="onboarding_sweep_text">Ride along the street with the phone on a mount or in hand: the app photographs the shopfronts, the house numbers or the signs ahead by itself.</string>
+    <string name="onboarding_sweep_text">Ride along the street; the app takes the photos.</string>
     <string name="onboarding_place_title">Place capture</string>
-    <string name="onboarding_place_text">Stop at each shop: photograph the front, the sign, the inside, then pin it on the right building.</string>
+    <string name="onboarding_place_text">Stop at each shop and photograph it.</string>
     <string name="onboarding_position_title">Pinned to the building</string>
-    <string name="onboarding_position_text">The app works out where the shopfront is from GPS and the camera direction. If it\'s off, drag it on the map.</string>
+    <string name="onboarding_position_text">From GPS and the camera direction; drag it if it is off.</string>
     <string name="onboarding_offline_title">No network needed while recording</string>
-    <string name="onboarding_offline_text">Photos stay on the phone while you record; each ride uploads to your team’s server by itself when it ends and there is a network.</string>
+    <string name="onboarding_offline_text">Rides upload by themselves when there is a network.</string>
 
-    <string name="onboarding_email_title">Contributor ID (optional)</string>
-    <string name="onboarding_email_lead">Goes with each ride you send, so your work is credited to you.</string>
+    <string name="onboarding_email_title">Contributor ID</string>
+    <string name="onboarding_email_lead">Optional; so your work is credited to you.</string>
     <string name="onboarding_email_label">Contributor ID (optional)</string>
     <string name="onboarding_email_placeholder">e.g. HCM-024</string>
     <string name="onboarding_email_invalid">That doesn\'t look like an email, e.g. name@gmail.com</string>
@@ -98,13 +98,13 @@
     <string name="onboarding_name_help">Shown on your sessions. Leave empty to use the part of your email before @.</string>
 
     <string name="onboarding_perm_camera">Camera</string>
-    <string name="onboarding_perm_camera_why">Take photos and video of shopfronts.</string>
+    <string name="onboarding_perm_camera_why">Photograph shopfronts and signs.</string>
     <string name="onboarding_perm_location">Precise location</string>
-    <string name="onboarding_perm_location_why">Know where each photo was taken and which street you\'re on.</string>
+    <string name="onboarding_perm_location_why">Know where each photo was taken.</string>
     <string name="onboarding_perm_notifications">Notifications</string>
-    <string name="onboarding_perm_notifications_why">Show that recording is on while the screen is off.</string>
+    <string name="onboarding_perm_notifications_why">Show the recording with the screen off.</string>
     <string name="onboarding_perms_title">Permissions</string>
-    <string name="onboarding_perms_lead">The app only uses these while you\'re recording.</string>
+    <string name="onboarding_perms_lead">Used only while recording.</string>
     <string name="onboarding_perms_grant">Allow</string>
     <string name="onboarding_perm_missing">Not yet</string>
     <string name="onboarding_and">%1$s and %2$s</string>
@@ -112,13 +112,13 @@
     <string name="onboarding_open_settings">Open app settings</string>
 
     <string name="onboarding_roads_title">Road data</string>
-    <string name="onboarding_roads_lead">Road data for your province / city lets the app know street names even offline.</string>
+    <string name="onboarding_roads_lead">To know street names even offline.</string>
     <string name="onboarding_roads_loading">Loading the list of provinces / cities…</string>
     <string name="onboarding_roads_error">Couldn\'t load the list: %1$s</string>
     <string name="onboarding_retry">Retry</string>
     <string name="onboarding_roads_here">You\'re in %1$s</string>
     <string name="onboarding_roads_installed">Road data ready, you can record.</string>
-    <string name="onboarding_roads_downloading">Downloading now (also on mobile data). It continues in the background, you can go on.</string>
+    <string name="onboarding_roads_downloading">Downloading; you can go on.</string>
     <string name="onboarding_roads_waiting">Waiting for your location to find your province / city… or pick one below.</string>
     <string name="onboarding_roads_no_pack">No pack covers where you are: pick one below.</string>
     <string name="onboarding_roads_need">Download road data to continue</string>
@@ -128,12 +128,12 @@
     </plurals>
     <string name="onboarding_roads_others">Other provinces / cities</string>
     <string name="onboarding_roads_all">Provinces / cities</string>
-    <string name="onboarding_roads_credit">Road data © OpenStreetMap contributors (ODbL), via Geofabrik. Manage packs in Settings.</string>
+    <string name="onboarding_roads_credit">Road data © OpenStreetMap contributors (ODbL).</string>
 
     <string name="onboarding_ready_title">Ready</string>
     <string name="onboarding_ready_button">Start recording</string>
     <string name="onboarding_mount_title">Ways to sweep a street</string>
-    <string name="onboarding_mount_text">Clamp the phone firmly, best in landscape, back camera facing the buildings. The app measures the camera direction during the first few accelerations and brakes.</string>
+    <string name="onboarding_mount_text">Clamp it firmly, back camera facing the buildings.</string>
     <string name="onboarding_summary_name">Contributor ID: %1$s</string>
     <string name="onboarding_summary_perms_ok">Camera and location allowed</string>
     <string name="onboarding_summary_perms_missing">Missing permission: %1$s</string>
@@ -141,7 +141,7 @@
     <string name="onboarding_summary_roads">Road data: %1$s</string>
     <string name="onboarding_summary_roads_online">Road data: fetched online while recording</string>
     <string name="onboarding_summary_roads_pending">A pack you picked can be used once it has downloaded.</string>
-    <string name="onboarding_ready_after">When done, open “Rides” to review on the map; rides upload by themselves once the access key is set.</string>
+    <string name="onboarding_ready_after">Review your rides in “Rides”.</string>
 
     <!-- New (setup) screen -->
     <string name="setup_need_permissions">Camera and precise location are needed. Open Settings → Permissions to turn them on.</string>
@@ -192,7 +192,7 @@
     <string name="capture_paused">Ⅱ Paused</string>
     <string name="capture_side_right">SHOOTING RIGHT →</string>
     <string name="capture_side_left">← SHOOTING LEFT</string>
-    <string name="capture_end_title">End this session?</string>
+    <string name="capture_end_title">End this ride?</string>
     <plurals name="capture_end_videos">
         <item quantity="one">%1$d video clip recorded.</item>
         <item quantity="other">%1$d video clips recorded.</item>
@@ -201,7 +201,7 @@
         <item quantity="one">%1$d photo taken.</item>
         <item quantity="other">%1$d photos taken.</item>
     </plurals>
-    <string name="capture_end_body">The session stays on the phone; check the photo locations and send it from “Sessions”.</string>
+    <string name="capture_end_body">The ride stays on the phone; review it in “Rides”.</string>
     <string name="capture_end_save">End and save</string>
     <string name="capture_discard">Discard</string>
     <string name="capture_discard_title">Discard this ride?</string>
@@ -286,7 +286,7 @@
     </plurals>
     <string name="sessions_local_only">Data stays on this phone until you send it. %1$s free.</string>
     <string name="sessions_loading">Reading your sessions…</string>
-    <string name="sessions_empty">No sessions yet</string>
+    <string name="sessions_empty">No rides yet</string>
     <string name="sessions_delete_title">Delete this session?</string>
     <string name="sessions_delete_sent">This session was sent. Its photos and videos on this phone will be deleted.</string>
     <string name="sessions_delete_unsent">This session was NOT sent or saved. Its photos and videos will be lost for good.</string>
@@ -436,9 +436,9 @@
     <!-- access gate: GPS is a must -->
     <string name="gate_title">GPS is needed</string>
     <string name="gate_lead">Every photo needs a precise GPS position, so the app opens once all of these are on.</string>
-    <string name="gate_precise_why">In Android\'s dialog choose “Precise”, not “Approximate”, and “While using the app”.</string>
+    <string name="gate_precise_why">Choose “Precise” and “While using the app”.</string>
     <string name="gate_location_on">Phone location (GPS)</string>
-    <string name="gate_location_on_why">Turn on Location in the quick settings or in Settings → Location.</string>
+    <string name="gate_location_on_why">Turn on Location in quick settings.</string>
     <string name="gate_denied">Still missing? Open the app\'s settings → Permissions, allow Camera, and for Location pick “Allow only while using the app” with “Use precise location” on.</string>
     <plurals name="sessionmap_no_gps">
         <item quantity="one">%1$d photo has no GPS position and isn\'t on the map</item>
@@ -460,7 +460,7 @@
     <string name="capture_gps_lost_resume">The session starts by itself as soon as the GPS is found.</string>
     <!-- navigation: home = sessions -->
     <string name="nav_back">Back</string>
-    <string name="sessions_empty_text">Ride along a street or stop at a few shops. Your recordings show up here, ready to send.</string>
+    <string name="sessions_empty_text">The rides you record show up here.</string>
     <string name="sessionmap_counter">%1$d / %2$d</string>
     <!-- device check: what the phone must have -->
     <string name="device_title">This phone can\'t record</string>
@@ -527,13 +527,13 @@
     <string name="sessionmap_place_no_name">No name yet</string>
     <string name="sessionmap_edit_texts">Edit name and texts</string>
     <string name="sessionmap_save">Save</string>
-    <string name="onboarding_id_help">Optional. You can add or change it later in Settings.</string>
+    <string name="onboarding_id_help">You can change it in Settings.</string>
     <string name="onboarding_id_card_title">No email or name needed</string>
     <string name="onboarding_id_card_text">Only the ID is sent with your sessions. No ID? Leave it empty.</string>
     <string name="onboarding_id_skip">Skip for now</string>
     <string name="onboarding_summary_no_id">No contributor ID</string>
     <string name="onboarding_summary_no_id_sub">Optional: add it in Settings if your team gives you one.</string>
-    <string name="onboarding_hand_text">A passenger holds the phone sideways and aims at the shopfronts, on either side. Each photo gets its own direction; photos wait while the phone swings or points at the road.</string>
+    <string name="onboarding_hand_text">A passenger holds it sideways, aimed at the buildings.</string>
     <string name="setup_hand_info">A passenger holds the phone sideways and aims at the shopfronts, on either side of the street. Each photo gets its own direction from the gyroscope and compass, so turning is fine; auto photos wait while the phone swings fast or points at the road.</string>
     <string name="setup_info_both">Both</string>
     <string name="settings_advanced">Advanced</string>
@@ -611,8 +611,8 @@
     <string name="upload_http_warning">http:// sends the photos and the token unencrypted: use https:// outside a test network.</string>
     <string name="upload_token_label">Access token (optional)</string>
     <string name="upload_token_label_required">Access token (required)</string>
-    <string name="upload_token_help">Sent as Authorization: Bearer. Kept encrypted on this phone, never in exported files.</string>
-    <string name="upload_default_needs_token">This is the project\'s server: enter its token to upload. Ask the project lead for it.</string>
+    <string name="upload_token_help">Stored encrypted on the phone, never in exports.</string>
+    <string name="upload_default_needs_token">An access key is needed to upload.</string>
     <string name="upload_token_show">Show</string>
     <string name="upload_token_hide">Hide</string>
     <string name="upload_test">Test connection</string>
@@ -627,7 +627,7 @@
         <item quantity="one">%1$d ride is on the server and was removed from the phone (%2$s freed).</item>
         <item quantity="other">%1$d rides are on the server and were removed from the phone (%2$s freed).</item>
     </plurals>
-    <string name="upload_never_recording">Nothing is uploaded while a session is recording. An interrupted upload continues where it stopped.</string>
+    <string name="upload_never_recording">Never uploads while recording; an interrupted upload resumes.</string>
     <string name="upload_status_none">Not uploaded</string>
     <string name="upload_status_waiting">Waiting to upload</string>
     <string name="upload_status_wifi">Waiting for Wi-Fi to upload</string>
@@ -638,9 +638,9 @@
     <string name="upload_action">Upload</string>
     <string name="upload_now">Upload now</string>
     <string name="upload_retry">Retry</string>
-    <string name="onboarding_upload_later">You can set or change it later in Settings → Upload server.</string>
+    <string name="onboarding_upload_later">You can change this later in Settings.</string>
     <string name="onboarding_key_title">Codes from your team</string>
-    <string name="onboarding_key_lead">Scan the QR code your admin gave you (or type the access key), then your contributor ID if you have one. Each ride is then sent to the server by itself when it ends.</string>
+    <string name="onboarding_key_lead">Scan the QR code from your admin. Rides then upload by themselves.</string>
     <string name="onboarding_key_skip">Skip and start</string>
     <string name="upload_server_at">Server: %s</string>
     <string name="upload_server_change">Change</string>
@@ -752,5 +752,17 @@
     <string name="plan_points_map">Now tap where that spot really is on the map</string>
     <string name="plan_reset">Reset</string>
     <string name="plan_done">Done</string>
-    <string name="onboarding_signs_text">Signs rides: the camera looks straight ahead in the riding direction, on a mount or in hand. The app shoots more often when it sees a sign.</string>
+    <string name="onboarding_signs_text">The camera looks straight ahead.</string>
+    <!-- Camera 360 ride (docs/camera360.md) -->
+    <string name="setup_camera360_choice">Camera 360</string>
+    <string name="setup_camera360_short">Camera 360</string>
+    <string name="setup_camera360_hint">The phone records GPS only, no photos.</string>
+    <string name="setup_camera360_info">A 360° camera films, the phone records GPS. After Start, hold the QR code up to the camera for 2–3 s.</string>
+    <string name="c360_sync_hint">Hold up to the 360 camera, 2–3 s</string>
+    <string name="c360_sync_done">Done</string>
+    <string name="c360_resync">Sync again</string>
+    <string name="c360_gps_wait">Waiting for GPS…</string>
+    <string name="c360_speed">km/h</string>
+    <string name="c360_screen_off">You can turn the screen off.</string>
+    <string name="c360_discard_body">The ride is deleted from the phone and not sent.</string>
 </resources>

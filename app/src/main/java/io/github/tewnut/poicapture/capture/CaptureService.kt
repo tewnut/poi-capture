@@ -102,6 +102,7 @@ import io.github.tewnut.poicapture.core.SessionNaming
 import io.github.tewnut.poicapture.core.facadeFields
 import io.github.tewnut.poicapture.core.PlacePosition
 import io.github.tewnut.poicapture.core.SessionKind
+import io.github.tewnut.poicapture.core.Camera360
 import io.github.tewnut.poicapture.core.Remeasure
 import io.github.tewnut.poicapture.core.CompassYaw
 import io.github.tewnut.poicapture.core.Side
@@ -257,6 +258,9 @@ class CaptureService : LifecycleService() {
     private val hand get() = session.kind == SessionKind.SWEEP && session.holding == Holding.HAND
     /** indoor mode: on foot, in the hand, position from the steps (docs/indoor.md) */
     private val indoor get() = session.kind == SessionKind.INDOOR
+    /** Camera 360 ride (docs/camera360.md §2): GPS and IMU only, the phone's camera is never opened */
+    private val cam360 get() = session.kind == SessionKind.CAMERA360
+    private var cameraStarted = false
     private var indoorTracker: IndoorTracker? = null
     private val _indoor = MutableStateFlow(IndoorUi())
     val indoorState: StateFlow<IndoorUi> = _indoor
@@ -365,6 +369,9 @@ class CaptureService : LifecycleService() {
         if (s.kind == SessionKind.INDOOR) {
             fp.facadeDistanceM = null      // the photo position comes from the steps (indoorMeta)
             _state.update { it.copy(mount = "hand") }
+        } else if (s.kind == SessionKind.CAMERA360) {
+            fp.facadeDistanceM = null      // no photos: the 360° camera's frames are placed on the track on the PC
+            _state.update { it.copy(mount = "none") }
         } else if (s.kind == SessionKind.POI) {
             fp.facadeDistanceM = null      // a place is pinned on its building: no facade estimate from the street
             val pois = store.pois(s.id)
@@ -376,8 +383,10 @@ class CaptureService : LifecycleService() {
         pm = getSystemService(POWER_SERVICE) as PowerManager
         wake = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "poicapture:capture")?.apply { acquire(12 * 3600_000L) }
         startSensors()
-        watchOrientation()
-        startCamera()
+        if (!cam360) {
+            watchOrientation()
+            startCamera()
+        }
         return START_NOT_STICKY
     }
 
@@ -385,7 +394,7 @@ class CaptureService : LifecycleService() {
         if (activeSession.value != null) finishSession()
         // release the camera while the photo executor still runs: CameraX reports a photo still in flight as failed
         // on that executor, and a shut-down executor rejects it (crash after "End and save" mid-shot)
-        runCatching { ProcessCameraProvider.getInstance(this).get().unbindAll() }
+        if (cameraStarted) runCatching { ProcessCameraProvider.getInstance(this).get().unbindAll() }
         io.shutdown()
         signScan.shutdown()
         runCatching { ocr.execute { runCatching { signDetector?.close() } } }   // after the last detection still queued
@@ -401,12 +410,14 @@ class CaptureService : LifecycleService() {
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(R.string.notif_recording, if (indoor) session.building?.name ?: getString(R.string.setup_indoor_short)
-                else roadText(this, session.road)))
+                else if (cam360) getString(R.string.setup_camera360_short) else roadText(this, session.road)))
             .setOngoing(true)
             .setContentIntent(open)
             .build()
+        // Camera 360: the phone's camera stays off, so the service is a location one only
         ServiceCompat.startForeground(this, NOTIF_ID, n,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            if (cam360) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            else ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
     }
 
     // ---------- GPS, raw GNSS, IMU ----------
@@ -556,9 +567,9 @@ class CaptureService : LifecycleService() {
         val ft = if (session.kind == SessionKind.POI) FootTracker().also { foot = it } else null
         if (indoor) startIndoor()
         imu = ImuRecorder(getSystemService(SENSOR_SERVICE) as SensorManager, store.imuFile(session.id),
-            if (hand || indoor) null else mountEstimator,
+            if (hand || indoor || cam360) null else mountEstimator,
             onStep = ft?.let { t -> { ns: Long -> t.onHeading(imu?.walkHeadingDeg()); t.onStep(ns) } }).also { it.start() }
-        if (session.mode == Mode.PHOTO_AUTO && framesLog == null) framesLog = runCatching {
+        if (session.mode == Mode.PHOTO_AUTO && !cam360 && framesLog == null) framesLog = runCatching {
             val f = store.framesFile(session.id)
             val fresh = !f.exists() || f.length() == 0L
             java.io.FileWriter(f, true).buffered().also {
@@ -578,9 +589,9 @@ class CaptureService : LifecycleService() {
         // Doppler speed only (position-derived speeds are too noisy for acceleration)
         mountEstimator.onFix(l.elapsedRealtimeNanos, if (l.hasSpeed()) l.speed.toDouble() else null, if (l.hasBearing()) l.bearing.toDouble() else null)
         if (indoor) { onIndoorFix(f, l); return }
-        if (session.kind != SessionKind.POI) checkMount()   // on foot / between shops: not a mounted camera
+        if (session.kind != SessionKind.POI && !cam360) checkMount()   // on foot / between shops: not a mounted camera
         // another type of road (alley → main road…): the expected distance to the fronts, so the photo spacing, follows
-        if (session.kind != SessionKind.POI) {
+        if (session.kind != SessionKind.POI && !cam360) {
             val hw = fp.roadWay()?.highway
             val d = CapturePlan.facadeForRoad(hw)
             if (d != facadeNow || hw != roadTypeNow) {
@@ -607,7 +618,7 @@ class CaptureService : LifecycleService() {
                 speedKmh = fp.speedKmh?.roundToInt(),
                 roadDistanceM = fp.match?.distanceM?.roundToInt(),
                 trackPoints = it.trackPoints + 1,
-                warnings = if (session.kind == SessionKind.POI) fp.warnings().filter { w -> w is CaptureWarning.WeakGps }.map { w -> w.toUiText() } +
+                warnings = if (session.kind == SessionKind.POI || cam360) fp.warnings().filter { w -> w is CaptureWarning.WeakGps }.map { w -> w.toUiText() } +
                     lightWarnings() + (if (hot) listOf(UiText(R.string.service_hot)) else emptyList())
                 else lightWarnings() + portraitWarning() + mountWarning() + fp.warnings().map { w -> w.toUiText() } +
                     (if (System.currentTimeMillis() - lastMissedShotMs < 10_000) listOf(UiText(R.string.service_missed_shot)) else emptyList()) +
@@ -622,7 +633,7 @@ class CaptureService : LifecycleService() {
             updateMatcher(f.ll, force = false)
             loadRoadsAround(f.ll)
         }
-        if (_state.value.running && session.mode == Mode.PHOTO_AUTO) {
+        if (_state.value.running && session.mode == Mode.PHOTO_AUTO && !cam360) {
             // no camera frames (no analysis stream, or it stalled): count the slide from the GPS speed instead
             val now = SystemClock.elapsedRealtimeNanos()
             if (now - lastFrameNs > 1_000_000_000L) {
@@ -743,6 +754,7 @@ class CaptureService : LifecycleService() {
     // ---------- camera ----------
 
     private fun startCamera() {
+        cameraStarted = true
         val fut = ProcessCameraProvider.getInstance(this)
         fut.addListener({
             try {
@@ -1609,6 +1621,20 @@ class CaptureService : LifecycleService() {
     }
 
     /**
+     * Camera 360: the sync QR code was on the screen from [fromMs] to [toMs] (wall clock), shown for [why]. Kept in
+     * `session.camera360.syncs` with the GPS minus phone clock difference of the last fresh fix.
+     */
+    fun addSync(fromMs: Long, toMs: Long, why: Camera360.When) {
+        if (activeSession.value == null || !cam360) return
+        val gpsMinusPhone = freshFix()?.let { f ->
+            val ageMs = (SystemClock.elapsedRealtimeNanos() - (f.elapsedNanos ?: return@let null)) / 1_000_000
+            f.t - (System.currentTimeMillis() - ageMs)
+        }
+        session.camera360 = Camera360.withSync(session.camera360, Camera360.Sync(fromMs, toMs, why, gpsMinusPhone))
+        store.save(session)
+    }
+
+    /**
      * End the session: stop everything, write the summary, leave the foreground. [discard]: the contributor throws the
      * ride away (the caller deletes it): nothing is sent to the server and no coverage is computed.
      */
@@ -1629,7 +1655,7 @@ class CaptureService : LifecycleService() {
         session.endedAt = iso(System.currentTimeMillis())
         // saved with its name: the street it was recorded on and the day
         session.name = if (indoor) indoorName() else runCatching { TrackStats.sessionName(store.items(session.id),
-            session.startedAt ?: session.createdAt, getString(R.string.session_no_street),
+            session.startedAt ?: session.createdAt, getString(if (cam360) R.string.setup_camera360_short else R.string.session_no_street),
             ways = session.road.ways + cellWays.values.flatten()) }.getOrNull()
         session.counts = JSONObject().put("photos", ui.photos).put("videos", ui.videos).put("trackPoints", ui.trackPoints)
         store.save(session)

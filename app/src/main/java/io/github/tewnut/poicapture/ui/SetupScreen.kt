@@ -287,6 +287,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     Choice(stringResource(R.string.setup_kind_label), listOfNotNull(
                         SessionKind.SWEEP to stringResource(R.string.setup_sweep_short),
                         SessionKind.POI to stringResource(R.string.setup_place_short),
+                        SessionKind.CAMERA360 to stringResource(R.string.setup_camera360_choice),
                         if (INDOOR_ENABLED) SessionKind.INDOOR to stringResource(R.string.setup_indoor_short) else null), kind) { kind = it }
                     if (kind == SessionKind.SWEEP) {
                         Choice(stringResource(R.string.setup_target_label), listOf(
@@ -299,6 +300,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     }
                     // indoor: shops only, in the hand: no target or holding to pick; the building instead of the road
                     if (indoor) BuildingCard(lookup, onSearch = { searching = true })
+                    // Camera 360: the phone only records where it went (docs/camera360.md §1)
+                    if (kind == SessionKind.CAMERA360) Hint(stringResource(R.string.setup_camera360_hint))
                     if (!indoor) Column {
                         Hint(stringResource(R.string.setup_you_are_on))
                         Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
@@ -315,10 +318,12 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                 }
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     val onStartClick: () -> Unit = start@{
-                            if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED ||
+                            // Camera 360: the phone's camera is never opened, location is enough
+                            val cam360 = kind == SessionKind.CAMERA360
+                            if ((!cam360 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) ||
                                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                                permLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION))
+                                permLauncher.launch(listOfNotNull(Manifest.permission.CAMERA.takeIf { !cam360 }, Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION).toTypedArray())
                                 return@start
                             }
                             if (CaptureService.activeSession.value != null) {
@@ -335,7 +340,7 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                             val s = Session(id = uid("s_", now), createdAt = iso(now), contributor = contributor, note = "",
                                 // a sweep always shoots by itself (no hand on the phone while riding), a place is shot by hand
                                 // indoor: on foot, auto photos like a sweep
-                                vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else Mode.PHOTO_AUTO,
+                                vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI || cam360) Mode.PHOTO_MANUAL else Mode.PHOTO_AUTO,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
                                 settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M,
                                     // house numbers are small print: the largest photo the camera gives
@@ -348,7 +353,8 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                                 building = if (indoor && !noBuilding) building else null,
                                 indoor = if (!indoor) null else JSONObject().put("stepLengthM", io.github.tewnut.poicapture.core.Pdr.DEFAULT_STEP_M)
                                     .put("start", anyFix?.let { f -> JSONObject().put("lat", f.lat).put("lon", f.lon)
-                                        .put("accuracyM", f.accuracyM.toDouble()).put("gps", f.gps && f.freshGps()) } ?: JSONObject.NULL))
+                                        .put("accuracyM", f.accuracyM.toDouble()).put("gps", f.gps && f.freshGps()) } ?: JSONObject.NULL),
+                                camera360 = if (cam360) io.github.tewnut.poicapture.core.Camera360.empty() else null)
                             CaptureService.store(ctx).create(s)
                             // how the building was found (or not): the walk's first indoor.jsonl lines (docs/indoor.md §5)
                             lookup.flushTo(CaptureService.store(ctx).indoorFile(s.id))
@@ -546,6 +552,8 @@ private fun SetupInfo(photoEveryM: Double, maxSpeedKmh: Int, onClose: () -> Unit
                 Section(stringResource(R.string.setup_indoor_title))
                 Item("🏬", stringResource(R.string.setup_indoor_title), stringResource(R.string.setup_indoor_info))
             }
+            Section(stringResource(R.string.setup_camera360_short))
+            Item("📷", stringResource(R.string.setup_camera360_short), stringResource(R.string.setup_camera360_info))
             Section(stringResource(R.string.setup_info_both))
             Item("🛣️", stringResource(R.string.setup_you_are_on), stringResource(R.string.setup_road_auto_hint))
             Item("🛰️", stringResource(R.string.setup_info_gps_title), stringResource(R.string.setup_info_gps))

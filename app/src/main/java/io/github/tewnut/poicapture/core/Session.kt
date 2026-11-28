@@ -116,6 +116,8 @@ class Session(
     // dead-reckoning summary {stepLengthM, anchors, start}
     var building: Building? = null,
     var indoor: JSONObject? = null,
+    // Camera 360 ride (docs/camera360.md §2): {"syncs": [{fromMs, toMs, when}, …]}, when the sync QR code was shown
+    var camera360: JSONObject? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("schema", SCHEMA).put("kind", kind.json).put("createdAt", createdAt)
@@ -143,6 +145,7 @@ class Session(
         .put("mount", mount.orNull())
         .put("photoRoles", photoRoles?.toJson()?.getJSONArray("photoRoles").orNull())
         .also { o -> if (kind == SessionKind.INDOOR) o.put("building", building?.toJson().orNull()).put("indoor", indoor.orNull()) }
+        .also { o -> if (kind == SessionKind.CAMERA360) o.put("camera360", camera360 ?: Camera360.empty()) }
         .also { o -> if (parentId != null) o.put("parentId", parentId).put("part", part.orNull()).put("parts", parts.orNull()) }
 
     companion object {
@@ -178,6 +181,7 @@ class Session(
             target = SweepTarget.of(o.optStr("target")),
             building = Building.fromJson(o.optJSONObject("building")),
             indoor = o.optJSONObject("indoor"),
+            camera360 = o.optJSONObject("camera360"),
         )
     }
 }

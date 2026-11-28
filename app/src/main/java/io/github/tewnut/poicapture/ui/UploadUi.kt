@@ -142,13 +142,13 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
     if (valid && url.trim().startsWith("http://", ignoreCase = true)) Hint(stringResource(R.string.upload_http_warning), color = Palette.Amber)
     OutlinedTextField(token, { token = it.take(500); UploadServer.setToken(ctx, token); result = null; scanned = null; onChange() },
         label = { Text(stringResource(if (projectServer) R.string.upload_token_label_required else R.string.upload_token_label)) }, singleLine = true,
-        supportingText = { Text(stringResource(R.string.upload_token_help)) },
+        supportingText = if (keyFirst) null else { { Text(stringResource(R.string.upload_token_help)) } },   // first run: no details
         visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = if (token.isNotEmpty()) { { TextButton(onClick = { showToken = !showToken }) {
             Text(stringResource(if (showToken) R.string.upload_token_hide else R.string.upload_token_show)) } } } else null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
         shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
-    if (projectServer && token.isBlank())
+    if (projectServer && token.isBlank() && !keyFirst)
         Hint(stringResource(R.string.upload_default_needs_token), color = Palette.Amber)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         OutlinedButton(enabled = valid && !testing, onClick = { test() }) { Text(stringResource(if (testing) R.string.upload_testing else R.string.upload_test)) }
@@ -156,6 +156,7 @@ fun UploadServerCard(onChange: () -> Unit = {}, keyFirst: Boolean = false) {
     }
     result?.let { (text, ok) -> Hint(text, color = if (ok) Palette.Green else Palette.Red) }
     if (result != null && noUpload) Hint(stringResource(R.string.upload_test_no_upload), color = Palette.Amber)
+    if (keyFirst) return   // first run: automatic upload stays on; its options are in Settings → Upload server
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(stringResource(R.string.upload_auto), modifier = Modifier.weight(1f), color = Palette.Ink)
         Switch(auto, { auto = it; UploadServer.setAuto(ctx, it) })
