@@ -51,6 +51,7 @@ fun ThetaSetupCard(everyM: Double, onEveryM: (Double) -> Unit) {
                 placeholder = { Text("THETAYR12345678.OSC", fontSize = 12.sp) })
             OutlinedTextField(password, { password = it.trim() }, Modifier.weight(1f), singleLine = true,
                 label = { Text(stringResource(R.string.theta_password), fontSize = 12.sp) },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                 placeholder = { Text(ThetaOsc.passwordFrom(serial).ifEmpty { "…" }, fontSize = 12.sp) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii))
         }

@@ -99,12 +99,17 @@ object ThetaLink {
         val cm = cm ?: return
         unregister()
         val digits = ThetaOsc.passwordFrom(ssidOrSerial)
+        val fullSsid = ssidOrSerial.startsWith(ThetaOsc.SSID_PREFIX, ignoreCase = true) && ssidOrSerial.contains('.')
+        val passphrase = password.ifEmpty { digits }   // a Theta's default Wi-Fi password: its serial's digits
+        // never "any THETA network", never an open one: this camera's name or serial, with its password
+        if ((!fullSsid && digits.isEmpty()) || passphrase.isEmpty()) {
+            _state.update { it.copy(status = Status.FAILED, error = "serial?") }
+            return
+        }
         val spec = WifiNetworkSpecifier.Builder().apply {
-            // the exact name when given; else any THETA network with these digits (the system dialog lists the matches)
-            if (ssidOrSerial.startsWith(ThetaOsc.SSID_PREFIX, ignoreCase = true) && ssidOrSerial.contains('.')) setSsid(ssidOrSerial)
-            else if (digits.isNotEmpty()) setSsidPattern(PatternMatcher("${ThetaOsc.SSID_PREFIX}.*$digits.*", PatternMatcher.PATTERN_SIMPLE_GLOB))
-            else setSsidPattern(PatternMatcher(ThetaOsc.SSID_PREFIX, PatternMatcher.PATTERN_PREFIX))
-            if (password.isNotEmpty()) setWpa2Passphrase(password)
+            if (fullSsid) setSsid(ssidOrSerial)
+            else setSsidPattern(PatternMatcher("${ThetaOsc.SSID_PREFIX}.*$digits.*", PatternMatcher.PATTERN_SIMPLE_GLOB))
+            setWpa2Passphrase(passphrase)
         }.build()
         val req = NetworkRequest.Builder()
             .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
@@ -143,6 +148,15 @@ object ThetaLink {
     /** The camera answered on its network: its info, its clock from the phone, the ride's options. */
     private fun handshake(n: Network) {
         try {
+            // the answer must be a RICOH camera with the serial asked for, before it gets the clock or any position
+            val asked = target?.first?.let { ThetaOsc.passwordFrom(it) }.orEmpty()
+            val who = clientOn(n).info()
+            val serialOk = asked.isEmpty() || who.serial?.filter { it.isDigit() }?.let { it == asked || it.endsWith(asked) || asked.endsWith(it) } == true
+            if (who.manufacturer?.contains("RICOH", ignoreCase = true) != true || !serialOk) {
+                if (network == n) _state.update { it.copy(status = Status.FAILED, error = "not this camera (${who.manufacturer ?: "?"} ${who.serial ?: "?"})") }
+                unregister(); network = null
+                return
+            }
             val r = clientOn(n).connect(System.currentTimeMillis(), ZoneId.systemDefault())
             if (network != n) return
             info = r.info

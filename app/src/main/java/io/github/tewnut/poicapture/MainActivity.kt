@@ -144,9 +144,14 @@ object Prefs {
     fun thetaOn(ctx: Context): Boolean = sp(ctx).getBoolean("thetaOn", false)
     fun saveThetaOn(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("thetaOn", v).apply()
     fun thetaSerial(ctx: Context): String = sp(ctx).getString("thetaSerial", "") ?: ""
-    fun thetaPassword(ctx: Context): String = sp(ctx).getString("thetaPassword", "") ?: ""
+    /** Only a changed password is kept, encrypted like the upload token; empty = the serial's digits (Theta default). */
+    fun thetaPassword(ctx: Context): String = sp(ctx).getString("thetaPassword", null)
+        ?.let { runCatching { io.github.tewnut.poicapture.capture.UploadServer.Secret.decrypt(it) }.getOrNull() } ?: ""
     fun saveThetaWifi(ctx: Context, serial: String, password: String) =
-        sp(ctx).edit().putString("thetaSerial", serial).putString("thetaPassword", password).apply()
+        sp(ctx).edit().putString("thetaSerial", serial).apply {
+            if (password.isEmpty()) remove("thetaPassword")
+            else putString("thetaPassword", io.github.tewnut.poicapture.capture.UploadServer.Secret.encrypt(password))
+        }.apply()
     fun thetaEveryM(ctx: Context): Double =
         sp(ctx).getFloat("thetaEveryM", io.github.tewnut.poicapture.core.ThetaOsc.DEFAULT_EVERY_M.toFloat()).toDouble()
     fun saveThetaEveryM(ctx: Context, v: Double) = sp(ctx).edit().putFloat("thetaEveryM", v.toFloat()).apply()

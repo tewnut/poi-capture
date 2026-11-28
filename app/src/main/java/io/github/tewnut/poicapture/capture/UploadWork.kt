@@ -95,7 +95,7 @@ object UploadServer {
     fun client(ctx: Context): TusClient = TusClient(url(ctx), token(ctx))
 
     /** AES-GCM with a non-exportable Keystore key: what EncryptedSharedPreferences does, without the dependency. */
-    private object Secret {
+    internal object Secret {   // also the Theta's Wi-Fi password (Prefs.thetaPassword)
         private const val ALIAS = "poicapture-upload-token"
         private fun key(): SecretKey {
             val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
