@@ -742,4 +742,25 @@
     <string name="c360_speed">km/h</string>
     <string name="c360_screen_off">Có thể tắt màn hình.</string>
     <string name="c360_discard_body">Chuyến đi bị xoá khỏi điện thoại, không gửi đi.</string>
+    <!-- Camera 360: điện thoại điều khiển Ricoh Theta (docs/camera360.md §4) -->
+    <string name="theta_control_label">Điều khiển camera</string>
+    <string name="theta_none">Không</string>
+    <string name="theta_name">Ricoh Theta</string>
+    <string name="theta_hint">Bật camera và Wi-Fi. Số serial ở đáy camera.</string>
+    <string name="theta_serial">Số serial hoặc tên Wi-Fi</string>
+    <string name="theta_password">Mật khẩu</string>
+    <string name="theta_serial_needed">Nhập số serial</string>
+    <string name="theta_connect">Kết nối</string>
+    <string name="theta_reconnect">Kết nối lại</string>
+    <string name="theta_connecting">Đang kết nối…</string>
+    <string name="theta_connected">Đã kết nối %1$s</string>
+    <string name="theta_battery">pin %1$d%%</string>
+    <string name="theta_not_connected">Chưa kết nối</string>
+    <string name="theta_lost">Mất Wi-Fi camera</string>
+    <string name="theta_failed">Không kết nối được: %1$s</string>
+    <string name="theta_every">Chụp mỗi</string>
+    <string name="theta_shots">Ảnh</string>
+    <string name="theta_skipped">Bỏ qua</string>
+    <string name="theta_failed_count">Lỗi</string>
+    <string name="theta_last_error">Lỗi: %1$s</string>
 </resources>

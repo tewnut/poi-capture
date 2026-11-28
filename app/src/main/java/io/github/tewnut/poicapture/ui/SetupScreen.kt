@@ -158,6 +158,11 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     var kind by remember { mutableStateOf(SessionKind.SWEEP) }
     var holding by remember { mutableStateOf(Prefs.holding(ctx)) }
     var target by remember { mutableStateOf(Prefs.target(ctx)) }
+    // Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4)
+    var thetaOn by remember { mutableStateOf(Prefs.thetaOn(ctx)) }
+    var thetaEveryM by remember { mutableStateOf(Prefs.thetaEveryM(ctx)) }
+    // leaving the setup without starting a Theta ride lets the camera's Wi-Fi go
+    DisposableEffect(Unit) { onDispose { if (!io.github.tewnut.poicapture.capture.ThetaLink.forRide) io.github.tewnut.poicapture.capture.ThetaLink.release() } }
     var nearWays by remember { mutableStateOf<List<Way>?>(null) }
     var roadStatus by remember { mutableStateOf<Int?>(null) }   // string resource of the road data status, null = fine
     var roadSource by remember { mutableStateOf("") }
@@ -301,7 +306,15 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     // indoor: shops only, in the hand: no target or holding to pick; the building instead of the road
                     if (indoor) BuildingCard(lookup, onSearch = { searching = true })
                     // Camera 360: the phone only records where it went (docs/camera360.md §1)
-                    if (kind == SessionKind.CAMERA360) Hint(stringResource(R.string.setup_camera360_hint))
+                    if (kind == SessionKind.CAMERA360) {
+                        Hint(stringResource(R.string.setup_camera360_hint))
+                        Choice(stringResource(R.string.theta_control_label), listOf(false to stringResource(R.string.theta_none),
+                            true to stringResource(R.string.theta_name)), thetaOn) {
+                            thetaOn = it; Prefs.saveThetaOn(ctx, it)
+                            if (!it) io.github.tewnut.poicapture.capture.ThetaLink.release()
+                        }
+                        if (thetaOn) ThetaSetupCard(thetaEveryM) { thetaEveryM = it; Prefs.saveThetaEveryM(ctx, it) }
+                    }
                     if (!indoor) Column {
                         Hint(stringResource(R.string.setup_you_are_on))
                         Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
@@ -354,7 +367,12 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                                 indoor = if (!indoor) null else JSONObject().put("stepLengthM", io.github.tewnut.poicapture.core.Pdr.DEFAULT_STEP_M)
                                     .put("start", anyFix?.let { f -> JSONObject().put("lat", f.lat).put("lon", f.lon)
                                         .put("accuracyM", f.accuracyM.toDouble()).put("gps", f.gps && f.freshGps()) } ?: JSONObject.NULL),
-                                camera360 = if (cam360) io.github.tewnut.poicapture.core.Camera360.empty() else null)
+                                camera360 = if (!cam360) null
+                                    else if (thetaOn) io.github.tewnut.poicapture.core.ThetaRide.start(thetaEveryM)
+                                    else io.github.tewnut.poicapture.core.Camera360.empty())
+                            // the camera's Wi-Fi stays for the ride (released when it ends); not connected yet: the ride
+                            // screen connects
+                            io.github.tewnut.poicapture.capture.ThetaLink.forRide = cam360 && thetaOn
                             CaptureService.store(ctx).create(s)
                             // how the building was found (or not): the walk's first indoor.jsonl lines (docs/indoor.md §5)
                             lookup.flushTo(CaptureService.store(ctx).indoorFile(s.id))

@@ -58,6 +58,8 @@ import io.github.tewnut.poicapture.capture.CaptureUi
 import io.github.tewnut.poicapture.capture.Uploads
 import io.github.tewnut.poicapture.core.Camera360
 import io.github.tewnut.poicapture.core.QrModules
+import io.github.tewnut.poicapture.core.ThetaRide
+import io.github.tewnut.poicapture.core.ThetaShooter
 import io.github.tewnut.poicapture.core.TrackStats
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -69,6 +71,8 @@ import java.util.Locale
  * Camera 360 ride (docs/camera360.md §1–2): no camera preview, the phone records GPS only. The sync QR code comes up
  * right after the start, once more when the ride is ended (before the end dialog), and on "Đồng bộ lại"; each showing
  * is kept in `session.camera360.syncs`. The screen is not kept on: the phone may ride in a pocket, screen off.
+ * With a Ricoh Theta the phone controls (docs/camera360.md §4) the camera's clock is set at connect: no code at the
+ * start or the end ("Đồng bộ lại" stays as a fallback); the panel shows the camera, photos taken and skipped.
  */
 @Composable
 fun Camera360Screen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit) {
@@ -89,6 +93,8 @@ fun Camera360Screen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit)
     val ui: CaptureUi = svc?.state?.collectAsState()?.value ?: CaptureUi()
     val active = svc?.takeIf { CaptureService.activeSession.value != null }
     val startedAt = active?.session?.startedAt
+    val thetaRide = svc?.let { s -> runCatching { ThetaRide.isTheta(s.session.camera360) }.getOrNull() } == true
+    val thetaStats = svc?.thetaStats?.collectAsState()?.value ?: ThetaShooter.Stats()
 
     // the sync screen being shown (Camera360.When json) and since when
     var syncing by rememberSaveable(sessionId) { mutableStateOf<String?>(null) }
@@ -103,7 +109,7 @@ fun Camera360Screen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit)
         if (ui.running || !ui.gpsFresh) return@LaunchedEffect
         val first = s.session.startedAt == null
         s.start()
-        if (first && s.state.value.running) showSync(Camera360.When.START)
+        if (first && s.state.value.running && !thetaRide) showSync(Camera360.When.START)
     }
 
     fun discard() {
@@ -122,7 +128,7 @@ fun Camera360Screen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit)
         onDone()
     }
     // not started (no GPS yet): leaving drops the empty ride; started: the end sync code, then the end dialog
-    fun askEnd() { if (startedAt == null) discard() else showSync(Camera360.When.END) }
+    fun askEnd() { if (startedAt == null) discard() else if (thetaRide) confirmEnd = true else showSync(Camera360.When.END) }
 
     val sync = syncing
     if (sync != null) {
@@ -183,6 +189,7 @@ fun Camera360Screen(sessionId: String, onDone: () -> Unit, onCancel: () -> Unit)
                     Text(stringResource(if (ui.running) R.string.capture_recording else R.string.capture_paused),
                         color = if (ui.running) Color(0xFFFF6B6B) else Palette.AmberLight, fontWeight = FontWeight.Bold)
                     Text(stringResource(R.string.c360_screen_off), color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+                    if (thetaRide) ThetaRidePanel(thetaStats)
                 }
             }
             if (startedAt != null) Button(onClick = { showSync(Camera360.When.MANUAL) }, modifier = Modifier.fillMaxWidth().height(56.dp),

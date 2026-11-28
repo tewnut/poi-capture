@@ -58,6 +58,17 @@ python <skill>/scripts/prepare.py <work>/sweep <work>
   correction). Read shops on the left / right blocks; on a signs ride read the front block.
 - `<work>/camera360.json` keeps the clock, the front estimates, the frames kept and the warnings: copy its warnings
   into the report.
+- **Ricoh Theta controlled by the phone** (`session.camera360.control` = `"theta-osc"`, docs/camera360.md §4): the
+  phone asked for each photo and kept a record of it in `camera360.shots` (`fileName` like `R0010023.JPG`, the
+  phone's fix at that moment). Give the camera's `DCIM/100RICOH` folder (copied over USB) as the camera files. Each
+  photo whose name matches a shot (any case) takes the shot's position, time and travel bearing (`positionFrom`
+  "theta shot") and is always kept (the phone spaced them every `everyM`); no sync code is looked for (clock source
+  "theta shots": the offset for files without a shot is measured on the matched ones). Report from
+  `camera360.json` `theta`: shots, matched, `failedShots` (the camera did not deliver), `shotsWithoutFile` (a file
+  not copied?), `filesWithoutShot` (placed by time), `exifGpsFar` (EXIF GPS over 30 m from the shot: the shot's
+  position is used; many of them = check the ride). The front may not be measurable from photos 8 m apart:
+  if the run stops on "front direction", give `--front-deg` (find the road ahead's x on one photo: deg =
+  (x / width − 0.5) × 360) and check the front views.
 
 ## 2. Read the contact sheets
 

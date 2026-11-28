@@ -103,6 +103,10 @@ import io.github.tewnut.poicapture.core.facadeFields
 import io.github.tewnut.poicapture.core.PlacePosition
 import io.github.tewnut.poicapture.core.SessionKind
 import io.github.tewnut.poicapture.core.Camera360
+import io.github.tewnut.poicapture.core.ShotFix
+import io.github.tewnut.poicapture.core.ThetaRide
+import io.github.tewnut.poicapture.core.ThetaShooter
+import io.github.tewnut.poicapture.core.ThetaShot
 import io.github.tewnut.poicapture.core.Remeasure
 import io.github.tewnut.poicapture.core.CompassYaw
 import io.github.tewnut.poicapture.core.Side
@@ -260,6 +264,12 @@ class CaptureService : LifecycleService() {
     private val indoor get() = session.kind == SessionKind.INDOOR
     /** Camera 360 ride (docs/camera360.md §2): GPS and IMU only, the phone's camera is never opened */
     private val cam360 get() = session.kind == SessionKind.CAMERA360
+    /** Camera 360 with a Ricoh Theta the phone controls (docs/camera360.md §4): a photo every N m, over the camera's Wi-Fi */
+    private var theta: ThetaShooter? = null
+    private val thetaExec = Executors.newSingleThreadExecutor()
+    private val mainHandler = android.os.Handler(Looper.getMainLooper())
+    private val _thetaStats = MutableStateFlow(ThetaShooter.Stats())
+    val thetaStats: StateFlow<ThetaShooter.Stats> = _thetaStats
     private var cameraStarted = false
     private var indoorTracker: IndoorTracker? = null
     private val _indoor = MutableStateFlow(IndoorUi())
@@ -387,6 +397,7 @@ class CaptureService : LifecycleService() {
             watchOrientation()
             startCamera()
         }
+        if (cam360 && ThetaRide.isTheta(s.camera360)) startTheta()
         return START_NOT_STICKY
     }
 
@@ -396,6 +407,7 @@ class CaptureService : LifecycleService() {
         // on that executor, and a shut-down executor rejects it (crash after "End and save" mid-shot)
         if (cameraStarted) runCatching { ProcessCameraProvider.getInstance(this).get().unbindAll() }
         io.shutdown()
+        thetaExec.shutdown()
         signScan.shutdown()
         runCatching { ocr.execute { runCatching { signDetector?.close() } } }   // after the last detection still queued
         ocr.shutdown()
@@ -607,6 +619,9 @@ class CaptureService : LifecycleService() {
         }
         val line = f.toTrackJson(fp.travelBearing).toString()
         io.execute { runCatching { store.trackFile(session.id).appendText(line + "\n") } }
+        // Theta ride: a 360 photo every N m ridden, gpsInfo set to this fix first
+        if (_state.value.running) theta?.onFix(ShotFix(f.t, f.lat, f.lon, f.accuracyM, f.altitudeM, f.speedMps,
+            fp.travelBearing ?: f.bearingDeg))
 
         val hot = pm?.let { (it.getThermalHeadroom(10).takeIf { h -> !h.isNaN() } ?: 0f) >= 1f || it.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE } ?: false
         val g = gnss
@@ -1618,6 +1633,33 @@ class CaptureService : LifecycleService() {
 
     fun pause() {
         _state.update { it.copy(running = false) }
+        theta?.reset()
+    }
+
+    /**
+     * Theta ride (docs/camera360.md §4): the shooter takes a photo every `camera360.everyM` metres through [ThetaLink]
+     * (no camera connected = the trigger is skipped and counted; the GPS ride goes on). The link asks for the camera's
+     * Wi-Fi again by itself after a drop.
+     */
+    private fun startTheta() {
+        val c = session.camera360 ?: return
+        ThetaLink.info?.let { ThetaRide.withCamera(c, it); store.save(session) }
+        ThetaLink.forRide = true
+        ThetaLink.keepTrying(true)
+        val s = ThetaShooter({ ThetaLink.client() }, ThetaRide.everyM(c), thetaExec,
+            onShot = { shot -> mainHandler.post { onThetaShot(shot) } }, onStats = { _thetaStats.value = it })
+        val (ok, failed) = ThetaRide.counts(c)
+        s.restore(ok, failed)
+        theta = s
+    }
+
+    /** A Theta shot finished (main thread): kept in `session.camera360.shots`, with the camera's info once known. */
+    private fun onThetaShot(shot: ThetaShot) {
+        if (activeSession.value == null) return
+        val c = session.camera360 ?: return
+        if (!c.has("camera")) ThetaLink.info?.let { ThetaRide.withCamera(c, it) }
+        ThetaRide.withShot(c, shot)
+        store.save(session)
     }
 
     /**
@@ -1649,6 +1691,10 @@ class CaptureService : LifecycleService() {
         gnss?.let { session.gnss = it.summary(); it.stop() }
         imu?.stop()
         stopIndoor()
+        if (theta != null) {
+            theta = null
+            ThetaLink.release()   // the phone leaves the camera's Wi-Fi; the camera's files stay on it (imported on the PC)
+        }
         framesLog?.let { runCatching { it.close() } }
         framesLog = null
         val ui = _state.value

@@ -5,7 +5,8 @@ The processing on the PC puts every camera frame on the phone's track by time, c
 left, right) and from there the pipeline is the usual one (reading, blur, review). The camera needs no GPS of its
 own; when it has one (GoPro MAX) its track is a fallback or a cross-check.
 
-This file is the contract between the app (section 2) and the processing (section 3).
+This file is the contract between the app (section 2) and the processing (section 3). Section 4: a Ricoh Theta the
+phone controls (it triggers the photos and writes its GPS into them; no sync code needed).
 
 ## 1. Capture (what the rider does)
 
@@ -116,3 +117,130 @@ timestamp (ffprobe packet times) and falls back to decoding from the start. QR d
   semantics, EXIF tags, HEVC decoding by OpenCV, rotation metadata), the code's readability at real distance,
   motion blur and lighting, the front estimate on real streets and helmet mounts, and the speed on a long 5.7K
   video (frames are decoded sequentially).
+
+## 4. Ricoh Theta: điều khiển từ điện thoại / phone-controlled
+
+With a Ricoh Theta (SC2, V, Z1, X) the phone does not only record GPS next to the camera: it **triggers** a 360
+photo every N metres over the camera's own Wi-Fi and, before each one, writes its GPS fix into the camera
+(`gpsInfo`), so every photo carries the phone's position in its EXIF, and the phone keeps a record of each shot. The
+camera's clock is set from the phone at connect: **no sync QR is needed** ("Đồng bộ lại" stays as a fallback).
+
+### 4.1 Người lái làm gì / the rider's steps
+
+1. Bật Theta và Wi-Fi của camera (chế độ trực tiếp: the camera is the access point). Gắn camera (mũ bảo hiểm hoặc
+   gậy trên xe).
+2. Quét Phố: Ghi mới → Chế độ **Camera 360** → Điều khiển camera **Ricoh Theta**.
+3. Nhập **số serial** (8 số, ở đáy camera) hoặc tên Wi-Fi (`THETAYR12345678.OSC`); Mật khẩu để trống = số serial
+   (mặc định của Theta). Chọn **Chụp mỗi** 5 / 8 / 12 / 20 m (mặc định 8 m).
+4. **Kết nối** → Android hiện hộp thoại kết nối thiết bị: chọn Wi-Fi THETA. Xong: "Đã kết nối RICOH THETA X · pin
+   80%". Mobile data keeps working for the map and the upload.
+5. **Bắt đầu**. Không có mã QR. Đi xe: điện thoại tự chụp mỗi N m (không chụp khi đứng yên). Màn hình: trạng thái kết
+   nối, Ảnh, Bỏ qua (camera còn bận với ảnh trước, hoặc chưa kết nối), lỗi cuối. Mất Wi-Fi camera: chuyến đi GPS vẫn
+   tiếp tục; điện thoại tự kết nối lại sau 15 giây (có thể hiện lại hộp thoại) hoặc bấm **Kết nối lại**.
+6. **Kết thúc** → Lưu. Điện thoại rời Wi-Fi camera. Gửi chuyến đi như thường.
+7. On the PC: copy the camera's `DCIM/100RICOH` folder over USB (the phone does not download the photos: 5–12 MB
+   each), then `camera360.py <ride> <that folder> <work>` (section 3; matching by file name, 4.5).
+
+### 4.2 App: networking (as built)
+
+- `ConnectivityManager.requestNetwork` with a `WifiNetworkSpecifier` (Android 10+; the app's minimum is 11): the exact
+  SSID when the rider typed one (`THETA….OSC`), else the pattern `THETA.*<digits>.*` (no digits: the prefix
+  `THETA`); WPA2 passphrase = the typed password, else the serial digits. The request drops
+  `NET_CAPABILITY_INTERNET` (the camera has none). Android shows its own device-connect dialog; after 60 s without a
+  network: "Không kết nối được: Wi-Fi".
+- The process is **not** bound to that network: only the OSC requests go over it (`Network.openConnection`), so the
+  default network (mobile data) keeps serving map tiles, road data and uploads.
+- Cleartext HTTP is allowed for `192.168.1.1` only (`res/xml/network_security_config.xml`). Permissions added:
+  `CHANGE_NETWORK_STATE`, `ACCESS_WIFI_STATE` (both normal).
+- Lost (`onLost`): shown as "Mất Wi-Fi camera"; during a ride the request is made again after 15 s (also after a
+  refusal / timeout), "Kết nối lại" asks at once. A trigger while not connected is counted as skipped. The ride's
+  end (or leaving the setup without starting) releases the network.
+- Code: `core/ThetaOsc.kt` (OSC client behind the `OscTransport` interface, the distance trigger `ThetaShooter`, the
+  `ThetaRide` JSON helpers; pure JVM, unit-tested against a fake OSC server in `ThetaOscTest`),
+  `capture/ThetaLink.kt` (the Wi-Fi link), `capture/CaptureService.kt` (`startTheta`, shots into the session),
+  `ui/ThetaViews.kt` (setup card, ride panel).
+
+### 4.3 App: the OSC calls (RICOH THETA API v2.1, OSC API level 2)
+
+- At connect: `GET /osc/info` (model, serialNumber, firmwareVersion; an `apiLevel` without 2 = a Theta S / SC in API
+  v2.0: refused, sessions are not handled), then `camera.setOptions` `{"dateTimeZone": "2026:11:28 10:00:00+07:00"}`
+  (the phone's clock and zone), then best effort, each its own call, a refusal only noted: `captureMode` "image",
+  `exposureDelay` 0 (no self-timer), `sleepDelay` 65535 and `offDelay` 65535 (the OSC spec's "never"). Then
+  `POST /osc/state` for `batteryLevel` (0–1), again every 60 s while connected.
+- Each shot: `camera.setOptions` `{"gpsInfo": {"lat": 10.776942, "lng": 106.700925, "_altitude": 12.3,
+  "_dateTimeZone": "2026:11:28 10:15:02+07:00", "_datum": "WGS84"}}` (the fix that triggered it, 6 decimals), then
+  `camera.takePicture` → `inProgress` with an `id` → `POST /osc/commands/status {"id": …}` every 300 ms until `done`
+  (`results.fileUrl`) or `error`, at most 20 s. A refused gpsInfo still takes the photo (noted in the shot's `error`).
+- Trigger: distance along the GPS track since the last trigger, counting only moving segments (Doppler speed, else
+  from the two fixes, ≥ 0.7 m/s); the first moving fix shoots. One shot at a time: a trigger while the previous shot
+  is not done is **skipped** and counted, and the distance starts again from there.
+- Every request: `Accept: application/json`, `X-XSRF-Protected: 1`, POSTs `Content-Type:
+  application/json;charset=utf-8`; 5 s connect / read timeout.
+
+### 4.4 The session
+
+`session.camera360` of a Theta ride (`kind` `camera360`, everything else as in section 2):
+
+```json
+{
+  "syncs": [],
+  "control": "theta-osc",
+  "everyM": 8,
+  "camera": {"model": "RICOH THETA X", "serial": "12345678", "firmware": "2.10.1"},
+  "shots": [
+    {"tMs": 1795000002000, "lat": 10.7769421, "lon": 106.7009245, "accuracyM": 3.5, "bearing": 92.4,
+     "speedMps": 5.6, "cmdId": "23",
+     "fileUrl": "http://192.168.1.1/files/150100525831424d42079d18e0b6c300/100RICOH/R0010023.JPG",
+     "fileName": "R0010023.JPG", "ok": true},
+    {"tMs": 1795000003600, "lat": 10.776941, "lon": 106.7010061, "accuracyM": 3.5, "bearing": 92.1,
+     "speedMps": 5.5, "cmdId": null, "fileUrl": null, "fileName": null, "ok": false,
+     "error": "timeout: no file after 20 s"}
+  ]
+}
+```
+
+- `tMs`: the phone's wall clock (ms) right before `takePicture` was sent (the clock of the sync code's `epochMs`).
+  `lat` / `lon` / `accuracyM` / `speedMps`: the GPS fix that triggered the shot (also written to `gpsInfo`; it had
+  just arrived, ≲ 1 s old). `bearing`: the travel bearing (the app's track heading, else the fix's bearing), degrees
+  from north, may be null.
+- `ok` false: `error` says why (the OSC error code and message, `timeout`, `io`: the Wi-Fi gone). `error` on an ok
+  shot: the photo was taken but gpsInfo was refused.
+- `camera`: from `/osc/info` (when the ride starts, or with the first shot if connected later). `syncs`: only when
+  "Đồng bộ lại" was used. Shots are saved as they finish; a shot still running when the ride ends is not recorded.
+
+### 4.5 Processing (`camera360.py`, as built)
+
+- A ride with `control` `"theta-osc"`: each camera photo whose file name equals a shot's `fileName` (else the last
+  part of its `fileUrl`), case-insensitive, is a **shot photo**: position, time (`tMs` + the syncs' median
+  `gpsMinusPhoneMs`, 0 without), travel bearing and speed come from the shot; `positionFrom` "theta shot", no
+  `elapsedNanos` (so prepare.py keeps that position: "gps fix" in photos.json). Shot photos are all kept (the phone
+  spaced them); `--every-m` applies to the other frames. The photo's EXIF GPS, when present, is compared: over 30 m
+  from the shot → a warning listing the files (the shot's position is used). A shot photo needs no EXIF time.
+- Clock: no sync code is looked for; `clock.source` "theta shots", offset = median of (shot time − EXIF time) over the
+  shot photos (absorbs the shutter delay and an EXIF time read in the wrong zone), used for the files without a shot
+  (time matching as in section 3). No shot matches a file: a warning, then section 3 unchanged (the camera's clock
+  as is is then usually close: the phone set it).
+- `camera360.json` `theta`: `shots`, `shotsWithFile`, `matched`, `failedShots`, `shotsWithoutFile`,
+  `filesWithoutShot`, `exifGpsChecked`, `exifGpsFar`. Items: `camera360.shot` {`tMs`, `cmdId`, `exifGpsM`}.
+- Tests: `scripts/tests/test_camera360_theta.py` (synthetic shots and equirectangular `R00100NN.JPG`).
+
+### 4.6 Models, and what is not verified
+
+- Built from the OSC spec and RICOH THETA API v2.1 only: **no Theta was available**. Verified: the client against a
+  fake OSC server (request bodies, polling, errors, timeouts), the trigger logic, the processing on synthetic files,
+  the Android build. Not verified on a real camera / phone: the Wi-Fi specifier dialog and reconnects on real
+  phones (some vendors may drop a local-only network in the background), the shot-to-shot time of each model,
+  whether each model writes gpsInfo into the EXIF exactly as set, which best-effort options each model accepts.
+- **Shot-to-shot time**: a 360 still takes the camera a few seconds to process (longer on the X at full resolution,
+  and with RAW on the Z1). At 8 m and 30 km/h (≈ 1 s per trigger) most triggers are skipped: ride slower or set a
+  larger spacing; the Bỏ qua count shows it.
+- Theta S / SC: API v2.0 (sessions): refused. SC2 / V / Z1 / X: API v2.1. Client mode (camera on a router, digest
+  auth) and Bluetooth control: not handled. Theta X: its access point must be on in its own menu. An owner may have
+  changed the Wi-Fi password: type it in the Mật khẩu field.
+- `offDelay` / `sleepDelay` 65535 is the OSC spec's "never"; a model may accept only its own list of values
+  (`offDelaySupport` / `sleepDelaySupport`): a refusal is noted at connect, and the camera may then sleep at a long
+  stop.
+- Front: the Theta's equirectangular centre is the camera's own reference direction; from photos 8 m apart the
+  motion estimate may fail: use `--front-deg` (SKILL.md).
+- "Tải ảnh từ camera" (downloading the photos over the camera's Wi-Fi after the ride) is **not built**: the photos
+  are imported from the camera over USB and matched by name.

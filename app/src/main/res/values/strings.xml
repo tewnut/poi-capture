@@ -765,4 +765,25 @@
     <string name="c360_speed">km/h</string>
     <string name="c360_screen_off">You can turn the screen off.</string>
     <string name="c360_discard_body">The ride is deleted from the phone and not sent.</string>
+    <!-- Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4) -->
+    <string name="theta_control_label">Camera control</string>
+    <string name="theta_none">None</string>
+    <string name="theta_name">Ricoh Theta</string>
+    <string name="theta_hint">Camera on, Wi-Fi on. Serial: under the camera.</string>
+    <string name="theta_serial">Serial or Wi-Fi name</string>
+    <string name="theta_password">Password</string>
+    <string name="theta_serial_needed">Enter the serial</string>
+    <string name="theta_connect">Connect</string>
+    <string name="theta_reconnect">Reconnect</string>
+    <string name="theta_connecting">Connecting…</string>
+    <string name="theta_connected">%1$s connected</string>
+    <string name="theta_battery">battery %1$d%%</string>
+    <string name="theta_not_connected">Not connected</string>
+    <string name="theta_lost">Camera Wi-Fi lost</string>
+    <string name="theta_failed">Cannot connect: %1$s</string>
+    <string name="theta_every">Photo every</string>
+    <string name="theta_shots">Photos</string>
+    <string name="theta_skipped">Skipped</string>
+    <string name="theta_failed_count">Failed</string>
+    <string name="theta_last_error">Error: %1$s</string>
 </resources>

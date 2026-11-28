@@ -17,6 +17,13 @@ and end codes give a linear drift.
 No code found: --offset-s, else the camera's clock as is (said loudly: positions may be off by the clock error x
 speed).
 
+Ricoh Theta controlled by the phone (session.camera360.control "theta-osc", docs/camera360.md section 4): the ride
+has camera360.shots, one per photo the phone asked for, with its fileName (R0010023.JPG). A camera photo whose file
+name matches a shot (case-insensitive) takes its position, time and travel bearing from the shot (cross-checked
+against the photo's EXIF GPS: a warning over 30 m) and is always kept (the phone already spaced them); no sync code
+is looked for: the clock offset for any other file comes from the matched photos (shot time - EXIF time). Files
+without a shot fall back to the time matching above.
+
 Front: the direction of the 360 image that looks along the travel, from the motion (optical flow on the horizon:
 the point the scene flows out of), else --front-deg (degrees clockwise from the image centre).
 
@@ -47,6 +54,8 @@ QR_RE = re.compile(r'^QPSYNC1 (\S+) (\d{10,})$')
 STANDING_MPS = 0.7      # the app's "waiting" speed: nothing is kept below it
 QR_REDRAW_MS = 100      # the phone redraws the code every 100 ms: a code is 0-100 ms old when seen (+50 ms on average)
 MAX_GAP_S = 5.0         # interpolate between fixes at most this far apart
+THETA_CONTROL = 'theta-osc'
+EXIF_FAR_M = 30.0       # a Theta photo's EXIF GPS this far from its shot record: warned
 
 
 def log(*a):
@@ -115,19 +124,67 @@ def exif_time_ms(dto, subsec=None, offset=None, local_tz=None):
     return int(round(t.timestamp() * 1000 + frac * 1000)), tz is not None
 
 
-def photo_frame(path):
-    """One 360 photo: {src, kind, index, camMs, width, height, tzKnown}."""
+def photo_frame(path, need_time=True):
+    """One 360 photo: {src, kind, index, camMs, width, height, tzKnown, exifGps}. need_time False (a Theta photo with
+    a shot record): no EXIF time is accepted (camMs None)."""
     from PIL import Image
     with Image.open(path) as im:
         w, h = im.size
         ex = im.getexif()
         sub = ex.get_ifd(0x8769)
+        gps = exif_gps(ex.get_ifd(0x8825))
     dto = sub.get(36867) or ex.get(306)
-    if not dto:
+    if not dto and need_time:
         raise Refused(f"{path}: no EXIF DateTimeOriginal: cannot time it")
-    ms, tz_known = exif_time_ms(dto, sub.get(37521) or sub.get(37520), sub.get(36881) or sub.get(36880))
+    ms, tz_known = (exif_time_ms(dto, sub.get(37521) or sub.get(37520), sub.get(36881) or sub.get(36880)) if dto
+                    else (None, False))
     check_equirect(path, w, h)
-    return {'src': path, 'kind': 'photo', 'index': 0, 'camMs': ms, 'width': w, 'height': h, 'tzKnown': tz_known}
+    return {'src': path, 'kind': 'photo', 'index': 0, 'camMs': ms, 'width': w, 'height': h, 'tzKnown': tz_known,
+            'exifGps': gps}
+
+
+def exif_gps(g):
+    """(lat, lon) from an EXIF GPS IFD (GPSLatitudeRef 1, GPSLatitude 2, GPSLongitudeRef 3, GPSLongitude 4), None
+    when missing or unreadable."""
+    try:
+        if not g or 2 not in g or 4 not in g:
+            return None
+
+        def deg(v):
+            d, m, s = (float(x) for x in v)
+            return d + m / 60.0 + s / 3600.0
+        lat, lon = deg(g[2]), deg(g[4])
+        if str(g.get(1, 'N')).strip('\x00 ').upper().startswith('S'):
+            lat = -lat
+        if str(g.get(3, 'E')).strip('\x00 ').upper().startswith('W'):
+            lon = -lon
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat == 0 and lon == 0):
+            return None
+        return lat, lon
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def shot_key(shot):
+    """The camera file a Theta shot record names: its fileName, else the last part of its fileUrl; lower case."""
+    n = shot.get('fileName') or (shot.get('fileUrl') or '').rstrip('/').split('/')[-1].split('?')[0]
+    return n.strip().lower() or None
+
+
+def theta_shots(session):
+    """{file name (lower case): shot} of a phone-controlled Theta ride (camera360.control "theta-osc"): the shots
+    that gave a file. Empty for any other ride."""
+    c = session.get('camera360') or {}
+    if c.get('control') != THETA_CONTROL:
+        return {}
+    out = {}
+    for s in c.get('shots') or []:
+        if isinstance(s, dict) and s.get('ok') and s.get('tMs') is not None and s.get('lat') is not None \
+                and s.get('lon') is not None:
+            k = shot_key(s)
+            if k:
+                out[k] = s
+    return out
 
 
 def check_equirect(path, w, h):
@@ -791,6 +848,11 @@ def run(argv=None):
     track = Track(fixes)
     ride_span = (fixes[0]['t'], fixes[-1]['t'])
     syncs = [s for s in ((session.get('camera360') or {}).get('syncs') or []) if isinstance(s, dict)]
+    c360 = session.get('camera360') or {}
+    shots = theta_shots(session)
+    # the shots' tMs is the phone's wall clock (as the sync code's epochMs): onto the track's GPS time as clock_model does
+    gms = sorted(s['gpsMinusPhoneMs'] for s in syncs if isinstance(s.get('gpsMinusPhoneMs'), (int, float)))
+    gm = gms[len(gms) // 2] if gms else 0
 
     # 1. frames and camera times
     frames = []
@@ -801,19 +863,47 @@ def run(argv=None):
             if w:
                 warn(w)
         else:
-            frames.append(photo_frame(f))
+            frames.append(photo_frame(f, need_time=os.path.basename(f).lower() not in shots))
+    matched = []
+    for f in frames:
+        s = shots.get(os.path.basename(f['src']).lower()) if f['kind'] == 'photo' else None
+        if s is not None:
+            f['shot'] = s
+            f['shotMs'] = int(s['tMs']) + gm
+            matched.append(f)
+            if f['camMs'] is None:
+                f['camMs'], f['noExifTime'] = f['shotMs'], True   # no EXIF time: only to sort it (its position comes from the shot)
+    theta = None
+    if c360.get('control') == THETA_CONTROL:
+        n_shots = len(c360.get('shots') or [])
+        got = {os.path.basename(f['src']).lower() for f in matched}
+        theta = {'shots': n_shots, 'shotsWithFile': len(shots), 'matched': len(matched),
+                 'filesWithoutShot': sum(1 for f in frames if f['kind'] == 'photo' and 'shot' not in f)
+                 + sum(1 for f in frames if f['kind'] == 'video'),
+                 'shotsWithoutFile': sorted(k for k in shots if k not in got),
+                 'failedShots': sum(1 for s in c360.get('shots') or [] if isinstance(s, dict) and not s.get('ok'))}
+        log(f"theta: {n_shots} shot(s) recorded by the phone ({len(shots)} with a file), {len(matched)} matched by "
+            f"file name, {theta['filesWithoutShot']} camera file(s) without a shot (time matching)")
+        if shots and not matched:
+            warn(f"none of the {len(shots)} Theta shots' files (e.g. {sorted(shots)[0].upper()}) is among the camera "
+                 f"files given: wrong folder? Falling back to time matching")
+        if theta['shotsWithoutFile']:
+            warn(f"{len(theta['shotsWithoutFile'])} Theta shot(s) whose file is not among the camera files: "
+                 + ', '.join(k.upper() for k in theta['shotsWithoutFile'][:5])
+                 + (' ...' if len(theta['shotsWithoutFile']) > 5 else ''))
     frames.sort(key=lambda f: (f['camMs'], f['src'], f['index']))
     n_photo = sum(1 for f in frames if f['kind'] == 'photo')
     log(f"camera: {len(files)} file(s), {len(frames)} frames ({n_photo} photos), "
         f"{iso(frames[0]['camMs'])} .. {iso(frames[-1]['camMs'])} (camera clock)")
-    if n_photo and not all(f['tzKnown'] for f in frames if f['kind'] == 'photo'):
+    if n_photo and not all(f['tzKnown'] for f in frames if f['kind'] == 'photo' and 'shot' not in f):
         warn("some photos have no OffsetTimeOriginal: their time was read in this PC's time zone")
 
     # 2. clock offset
     stats = {'looked': 0, 'otherRide': 0}
     shift = coarse_shift(frames, ride_span)
     dets, how_found = [], None
-    if a.offset_s is None or syncs:
+    # Theta shots matched: they give the offset (below), no sync code is looked for
+    if not matched and (a.offset_s is None or syncs):
         if shift is not None and syncs:
             fps_step = 500   # 2 frames a second while searching; codes stay on screen 2-3 s
             for s in syncs:
@@ -838,7 +928,22 @@ def run(argv=None):
     if stats['otherRide']:
         warn(f"{stats['otherRide']} sync code(s) of another ride seen: ignored")
     model = clock_model(uniq, syncs)
-    if model:
+    if matched:
+        # the camera's clock was set from the phone at connect; the matched photos measure what is left of the
+        # difference (and absorb an EXIF time read in the wrong zone) for the files without a shot
+        offs = sorted(f['shotMs'] - f['camMs'] for f in matched if not f.get('noExifTime'))
+        o = offs[len(offs) // 2] if offs else 0
+        clock = {'source': 'theta shots', 'offsetMs': round(o), 'shots': len(offs),
+                 'spreadMs': round(offs[-1] - offs[0]) if offs else None, 'framesLooked': 0}
+        off_fn = lambda c, o=o: o
+        log(f"clock: from {len(offs)} Theta shot(s) matched by file name (no sync code needed): track = camera "
+            f"{o / 1000:+.3f} s" + (f" (spread {clock['spreadMs']} ms)" if offs else ' (no EXIF times)'))
+        if offs and offs[-1] - offs[0] > 3000:
+            warn(f"the Theta photos' EXIF times vs their shots vary by {(offs[-1] - offs[0]) / 1000:.1f} s: the "
+                 f"files without a shot may be placed off (median used)")
+        if a.offset_s is not None:
+            warn(f"--offset-s {a.offset_s} ignored: the Theta shots give the offset")
+    elif model:
         clock = {'source': 'sync codes', 'found': how_found, 'codes': len(uniq), 'framesLooked': stats['looked'],
                  'offsetMs': round(model['offsetMs']),
                  'driftPpm': round(model['driftPpm'], 1) if model['driftPpm'] is not None else None,
@@ -865,26 +970,58 @@ def run(argv=None):
         off_fn = lambda c: 0.0
         warn("NO SYNC CODE FOUND and no --offset-s: the camera's own clock is used AS IS. Positions are off by the "
              "camera's clock error x the speed (1 s at 30 km/h = 8 m). Look for the code by hand (the frames at the "
-             "start), then run again with --offset-s")
+             "start), then run again with --offset-s"
+             + (" (a Theta ride: the phone set the camera's clock at connect, so it is usually within a second)"
+                if theta is not None else ''))
 
     # 3. positions
-    placed = []
+    placed, shot_placed, far = [], [], []
     for f in frames:
+        s = f.get('shot')
+        if s is not None:
+            # a Theta shot: the phone's fix when it asked for the photo; the track only gives the distance ridden
+            f['phoneMs'] = f['shotMs']
+            p = track.at(f['phoneMs']) or {}
+            spd = s.get('speedMps')
+            f.update({'lat': float(s['lat']), 'lon': float(s['lon']), 'how': 'theta shot', 's': p.get('s'), 'en': None,
+                      'accuracyM': s.get('accuracyM'), 'speedMps': spd if spd is not None else p.get('speedMps'),
+                      'travelBearing': s.get('bearing')})
+            if f.get('exifGps'):
+                d = dist_m(f['lat'], f['lon'], *f['exifGps'])
+                f['exifGpsM'] = d
+                if d > EXIF_FAR_M:
+                    far.append((os.path.basename(f['src']), d))
+            shot_placed.append(f)
+            continue
         f['phoneMs'] = int(round(f['camMs'] + off_fn(f['camMs'])))
         p = track.at(f['phoneMs'])
         if p is not None:
             f.update(p)
             placed.append(f)
-    log(f"positions: {len(placed)} of {len(frames)} frames on the phone's track "
+    if theta is not None:
+        theta['exifGpsChecked'] = sum(1 for f in shot_placed if f.get('exifGpsM') is not None)
+        theta['exifGpsFar'] = [{'file': n, 'm': round(d, 1)} for n, d in far]
+        if far:
+            warn(f"{len(far)} Theta photo(s) whose EXIF GPS is over {EXIF_FAR_M:g} m from the phone's shot record "
+                 f"(the shot's position is used): " + ', '.join(f"{n} {d:.0f} m" for n, d in far[:5])
+                 + (' ...' if len(far) > 5 else ''))
+    log(f"positions: {len(shot_placed)} Theta photo(s) from their shots, {len(placed)} of "
+        f"{len(frames) - len(shot_placed)} other frames on the phone's track "
+        f"({iso(ride_span[0])} .. {iso(ride_span[1])})" if theta is not None else
+        f"positions: {len(placed)} of {len(frames)} frames on the phone's track "
         f"({iso(ride_span[0])} .. {iso(ride_span[1])})")
-    if not placed:
+    if not placed and not shot_placed:
         raise SystemExit("no frame falls on the phone's track: wrong ride, or the clock is off (try --offset-s)")
-    kept = select_every(placed, a.every_m)
-    log(f"kept {len(kept)} frames, one every {a.every_m:g} m ridden (none while standing)")
+    # Theta shots are all kept (the phone spaced them every everyM); the other frames every --every-m
+    kept = sorted(shot_placed + select_every(placed, a.every_m), key=lambda f: (f['phoneMs'], f['src'], f['index']))
+    placed = sorted(placed + shot_placed, key=lambda f: f['phoneMs'])
+    log(f"kept {len(kept)} frames" + (f" ({len(shot_placed)} Theta shots, the rest" if shot_placed else ',')
+        + f" one every {a.every_m:g} m ridden (none while standing)" + (')' if shot_placed else ''))
     if not kept:
         raise SystemExit('no frame kept: the ride never moved?')
     for f in kept:
-        f['travelBearing'] = track.travel_bearing(f['phoneMs'])
+        if f.get('travelBearing') is None:
+            f['travelBearing'] = track.travel_bearing(f['phoneMs'])
 
     # 4. front direction
     front = {'source': None}
@@ -936,10 +1073,15 @@ def run(argv=None):
                 'cameraYawToTravelDeg': ang, 'cameraBearingSource': 'camera360', 'bearingSource': 'camera360',
                 'sideOfTravel': 'right' if 0 < ang < 180 else 'left' if -180 < ang < 0 else None,
                 'hFovDeg': a.hfov, 'width': ow, 'height': oh, 'orientation': 'landscape', 'exifOrientation': 1,
-                'positionFrom': 'phone track', 'positionHow': f.get('how'), 'roadName': None,
+                'positionFrom': 'theta shot' if 'shot' in f else 'phone track', 'positionHow': f.get('how'),
+                'roadName': None,
                 'blur': {'sharpness': round(sharp, 1), 'blurry': None},
                 'camera360': {'view': name, 'viewYawDeg': ang, 'frontDeg': round(fy, 1), 'file': os.path.basename(f['src']),
-                              'frameIndex': f['index'], 'cameraMs': f['camMs'], 's': round(f['s'], 1)},
+                              'frameIndex': f['index'], 'cameraMs': None if f.get('noExifTime') else f['camMs'],
+                              's': round(f['s'], 1) if f.get('s') is not None else None,
+                              **({'shot': {'tMs': f['shot'].get('tMs'), 'cmdId': f['shot'].get('cmdId'),
+                                           'exifGpsM': round(f['exifGpsM'], 1) if f.get('exifGpsM') is not None else None}}
+                                 if 'shot' in f else {})},
             })
         if (n + 1) % 50 == 0:
             log(f"  {n + 1} / {len(kept)} frames cut")
@@ -952,6 +1094,8 @@ def run(argv=None):
     proc = {'files': [os.path.basename(f) for f in files], 'frames': len(frames), 'placed': len(placed),
             'kept': len(kept), 'everyM': a.every_m, 'views': blocks, 'size': [ow, oh], 'hFovDeg': a.hfov,
             'clock': clock, 'front': front, 'warnings': warnings}
+    if theta is not None:
+        proc['theta'] = theta
     sess = dict(session)
     sess.update({'kind': 'sweep', 'source': 'camera360', 'rideKind': session.get('kind'),
                  'camera': {'source': 'camera360', 'hFovDeg': a.hfov, 'width': ow, 'height': oh},

@@ -122,35 +122,52 @@ def y_at(pts, t_ms):
     return pts[0][1] if t_ms < pts[0][0] else pts[-1][1]
 
 
-def write_ride(folder, sid, t0_ms, segments, syncs, kind='camera360'):
-    """A raw session folder from the phone (session.json, empty items.jsonl, track.jsonl). -> track points."""
+def write_ride(folder, sid, t0_ms, segments, syncs, kind='camera360', camera360=None):
+    """A raw session folder from the phone (session.json, empty items.jsonl, track.jsonl). camera360: more fields of
+    session.camera360 (a Theta ride: control, everyM, camera, shots). -> track points."""
     os.makedirs(folder, exist_ok=True)
     pts = write_track(os.path.join(folder, 'track.jsonl'), t0_ms, segments)
     with open(os.path.join(folder, 'session.json'), 'w', encoding='utf-8') as f:
-        json.dump({'id': sid, 'kind': kind, 'name': 'Đường Thử 2026-11-28 10h00', 'camera360': {'syncs': syncs}}, f,
-                  ensure_ascii=False)
+        json.dump({'id': sid, 'kind': kind, 'name': 'Đường Thử 2026-11-28 10h00',
+                   'camera360': {'syncs': syncs, **(camera360 or {})}}, f, ensure_ascii=False)
     open(os.path.join(folder, 'items.jsonl'), 'w').close()
     return pts
 
 
-def exif_bytes(cam_ms, tz_h=7):
-    """EXIF with DateTimeOriginal (local camera time), SubSecTimeOriginal and OffsetTimeOriginal."""
+def exif_bytes(cam_ms, tz_h=7, gps=None):
+    """EXIF with DateTimeOriginal (local camera time), SubSecTimeOriginal and OffsetTimeOriginal (tz_h None: no
+    offset, as a camera that does not write it); gps = (lat, lon) adds a GPS IFD (as a Theta with gpsInfo set)."""
     from PIL import Image
+    from PIL.TiffImagePlugin import IFDRational
     import datetime as dt
-    tz = dt.timezone(dt.timedelta(hours=tz_h))
-    t = dt.datetime.fromtimestamp(cam_ms / 1000, tz)
     ex = Image.Exif()
-    ifd = ex.get_ifd(0x8769)
-    ifd[36867] = t.strftime('%Y:%m:%d %H:%M:%S')
-    ifd[37521] = f'{t.microsecond // 1000:03d}'
-    ifd[36881] = f'{"+" if tz_h >= 0 else "-"}{abs(tz_h):02d}:00'
+    if cam_ms is not None:
+        tz = dt.timezone(dt.timedelta(hours=tz_h or 0))
+        t = dt.datetime.fromtimestamp(cam_ms / 1000, tz)
+        ifd = ex.get_ifd(0x8769)
+        ifd[36867] = t.strftime('%Y:%m:%d %H:%M:%S')
+        ifd[37521] = f'{t.microsecond // 1000:03d}'
+        if tz_h is not None:
+            ifd[36881] = f'{"+" if tz_h >= 0 else "-"}{abs(tz_h):02d}:00'
+    if gps is not None:
+        def dms(v):
+            v = abs(v)
+            d = int(v)
+            m = int((v - d) * 60)
+            s = (v - d - m / 60) * 3600
+            return (IFDRational(d, 1), IFDRational(m, 1), IFDRational(int(round(s * 10000)), 10000))
+        g = ex.get_ifd(0x8825)
+        g[1] = 'N' if gps[0] >= 0 else 'S'
+        g[2] = dms(gps[0])
+        g[3] = 'E' if gps[1] >= 0 else 'W'
+        g[4] = dms(gps[1])
     return ex
 
 
-def save_jpg(path, bgr, cam_ms=None, tz_h=7):
+def save_jpg(path, bgr, cam_ms=None, tz_h=7, gps=None):
     from PIL import Image
     im = Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-    if cam_ms is None:
+    if cam_ms is None and gps is None:
         im.save(path, quality=95)
     else:
-        im.save(path, quality=95, exif=exif_bytes(cam_ms, tz_h))
+        im.save(path, quality=95, exif=exif_bytes(cam_ms, tz_h, gps))

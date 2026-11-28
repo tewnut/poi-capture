@@ -140,6 +140,16 @@ object Prefs {
     /** Maps: satellite imagery instead of the street map (remembered). */
     fun satellite(ctx: Context): Boolean = sp(ctx).getBoolean("satellite", false)
     fun saveSatellite(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("satellite", v).apply()
+    /** Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4), its serial / Wi-Fi name, password, spacing. */
+    fun thetaOn(ctx: Context): Boolean = sp(ctx).getBoolean("thetaOn", false)
+    fun saveThetaOn(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("thetaOn", v).apply()
+    fun thetaSerial(ctx: Context): String = sp(ctx).getString("thetaSerial", "") ?: ""
+    fun thetaPassword(ctx: Context): String = sp(ctx).getString("thetaPassword", "") ?: ""
+    fun saveThetaWifi(ctx: Context, serial: String, password: String) =
+        sp(ctx).edit().putString("thetaSerial", serial).putString("thetaPassword", password).apply()
+    fun thetaEveryM(ctx: Context): Double =
+        sp(ctx).getFloat("thetaEveryM", io.github.tewnut.poicapture.core.ThetaOsc.DEFAULT_EVERY_M.toFloat()).toDouble()
+    fun saveThetaEveryM(ctx: Context, v: Double) = sp(ctx).edit().putFloat("thetaEveryM", v.toFloat()).apply()
     fun askPhotoRole(ctx: Context): Boolean = sp(ctx).getBoolean("askPhotoRole", false)
     fun setAskPhotoRole(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("askPhotoRole", v).apply()
     fun savePhotoRoles(ctx: Context, r: PhotoRoles?) = sp(ctx).edit().apply {
