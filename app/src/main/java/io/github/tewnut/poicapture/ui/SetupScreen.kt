@@ -14,7 +14,33 @@ import android.os.Build
 import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.ui.layout.layout
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Velocity
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -236,25 +262,116 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     val gpsHint = rememberGpsWaitHint(!indoor && live == null && loc.status == LocStatus.SEARCHING)
 
     androidx.activity.compose.BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
-        var info by remember { mutableStateOf(false) }
-        ScreenHeader(stringResource(R.string.home_new_session), onBack = onBack) {
-            androidx.compose.material3.IconButton(onClick = { info = true }) {
-                androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Outlined.Info, stringResource(R.string.setup_info_title), tint = Palette.Ink)
+    // Thu gọn folds the choices again only once a ride was started; the first time they stay open
+    val canFold = remember { Prefs.startedRide(ctx) }
+
+    // ---------- the sheet over the map (like Google Maps): heights in px, measured ----------
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    var headerH by remember { mutableIntStateOf(0) }    // the top bar, status bar included
+    var fullH by remember { mutableIntStateOf(0) }      // from under the top bar to the bottom (or the keyboard)
+    var choicesH by remember { mutableIntStateOf(0) }   // the choices' natural height
+    var barH by remember { mutableIntStateOf(0) }       // street, GPS, Start, navigation bar included
+    val handleH = with(density) { SHEET_HANDLE.roundToPx() }
+    val measured = fullH > 0 && barH > 0
+    // never lower than the street and Start; at most the choices' own height (or the screen)
+    val minPx = (handleH + barH).toFloat()
+    val maxPx = maxOf(minPx, minOf(fullH, handleH + choicesH + barH).toFloat())
+    val partialPx = (fullH * SHEET_PARTIAL).coerceIn(minPx, maxPx)
+    fun px(a: SheetAnchor) = when (a) { SheetAnchor.MIN -> minPx; SheetAnchor.PARTIAL -> partialPx; SheetAnchor.MAX -> maxPx }
+    var anchor by remember { mutableStateOf(SheetAnchor.MAX) }
+    var sheetH by remember { mutableFloatStateOf(-1f) }   // -1: not measured yet (the sheet fills the screen once)
+    var dragging by remember { mutableStateOf(false) }
+    val anim = remember { arrayOfNulls<Job>(1) }
+    fun animateTo(target: Float) {
+        anim[0]?.cancel()
+        if (sheetH < 0f) { sheetH = target; return }
+        anim[0] = scope.launch {
+            animate(sheetH, target, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) { v, _ -> sheetH = v }
+        }
+    }
+    // a finger moved dy (down > 0): the sheet follows it between its lowest and highest; returns the part used
+    val moveSheet: (Float) -> Float = { dy ->
+        if (sheetH < 0f) 0f else {
+            val before = sheetH
+            val after = (before - dy).coerceIn(minPx, maxPx)
+            if (after != before) { anim[0]?.cancel(); dragging = true; sheetH = after }
+            before - after
+        }
+    }
+    // the finger lifted: the next height in a quick throw's direction, else the nearest
+    val settle: (Float) -> Unit = { v ->
+        dragging = false
+        val fast = with(density) { SHEET_FLING.toPx() }
+        val h = sheetH
+        val order = SheetAnchor.entries.sortedBy { px(it) }
+        val pick = when {
+            v < -fast -> order.firstOrNull { px(it) > h + 1f } ?: order.last()
+            v > fast -> order.lastOrNull { px(it) < h - 1f } ?: order.first()
+            else -> order.minBy { kotlin.math.abs(px(it) - h) }
+        }
+        anchor = pick
+        animateTo(px(pick))
+    }
+    val moveRef = rememberUpdatedState(moveSheet)
+    val settleRef = rememberUpdatedState(settle)
+    // the choices scroll inside the sheet: pulling up grows the sheet first, pulling down at their top lowers it
+    val sheetScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
+                if (source != NestedScrollSource.UserInput || available.y >= 0f) Offset.Zero
+                else Offset(0f, moveRef.value(available.y))
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+                if (source != NestedScrollSource.UserInput || available.y <= 0f) Offset.Zero
+                else Offset(0f, moveRef.value(available.y))
+            override suspend fun onPreFling(available: Velocity): Velocity =
+                if (dragging) { settleRef.value(available.y); available } else Velocity.Zero
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                if (dragging) settleRef.value(0f)
+                return Velocity.Zero
             }
         }
+    }
+    val sheetTarget = px(anchor)
+    // the content changed height (choices opened, a card, the GPS hint): keep the sheet at the same place, re-measured
+    LaunchedEffect(sheetTarget, measured) { if (measured && !dragging) animateTo(sheetTarget) }
+    // Đổi / Thu gọn: the sheet to the choices' height (all of them, or the one line)
+    LaunchedEffect(expanded) { anchor = SheetAnchor.MAX }
+    // no GPS for 20 s: lower a tall sheet so the map and the accuracy circle show next to the hint
+    LaunchedEffect(gpsHint) { if (gpsHint && anchor == SheetAnchor.MAX && maxPx > partialPx + 1f) anchor = SheetAnchor.PARTIAL }
+    // a tap on the map: the sheet down to its content (choices folded), or half the screen the first time
+    val onMapTap: (LatLon) -> Unit = { p ->
+        if (anchor != SheetAnchor.MIN) {
+            if (canFold && expanded) expanded = false
+            else if (anchor == SheetAnchor.MAX && maxPx > partialPx + 1f) anchor = SheetAnchor.PARTIAL
+        }
+        // indoor: a tap picks the building there (the guess was wrong)
+        if (indoor) lookup.at(p, "tap")
+    }
+    val headerDp = with(density) { headerH.toDp() }
+    // the map centres the rider in the part the sheet leaves (the settled height, at most half the screen)
+    val coveredPx = minOf(sheetTarget, fullH * SHEET_PARTIAL).roundToInt()
+    var info by remember { mutableStateOf(false) }
+    val sideInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
+
+    Box(Modifier.fillMaxSize().background(Palette.Canvas)) {
         if (info) SetupInfo(plan.photoEveryM, plan.maxSpeedKmh) { info = false }
         if (searching) BuildingSearchSheet(settings.overpassUrl,
             (anyFix ?: lastKnown)?.let { LatLon(it.lat, it.lon) } ?: mapCenter[0],
             onPick = { h -> searching = false; lookup.pick(h) }, onLog = { lookup.log(it) }, onClose = { searching = false })
         if (tasksOpen) TasksSheet(loc.fix?.let { LatLon(it.lat, it.lon) }, taskFocus, onChanged = { tasksTick++ }) { tasksOpen = false; taskFocus = null }
-        // ---------- map ----------
-        Box(Modifier.weight(0.38f).heightIn(min = 150.dp).fillMaxWidth()) {
-            LiveMap(settings.tileUrl, loc.fix, if (showCoverage) mine else CoverLayer(), tasks,
-                { taskFocus = it; tasksOpen = true }, Modifier.fillMaxSize().clipToBounds(),
-                building = if (indoor && !noBuilding) building else null,
-                // indoor: a tap picks the building there (the guess was wrong)
-                onTap = if (indoor) { p -> lookup.at(p, "tap") } else null, center = mapCenter)
+        // ---------- map: the whole screen, behind ----------
+        LiveMap(settings.tileUrl, loc.fix, if (showCoverage) mine else CoverLayer(), tasks,
+            { taskFocus = it; tasksOpen = true }, Modifier.fillMaxSize().clipToBounds(),
+            building = if (indoor && !noBuilding) building else null,
+            onTap = onMapTap, center = mapCenter, insetTop = headerH, insetBottom = coveredPx)
+        // the map's chips, in the part of the map in view (no touch handling of its own: drags reach the map)
+        // (the sheet's height is read while laying out only: a drag must not recompose the screen and redraw the map)
+        Box(Modifier.fillMaxSize().windowInsetsPadding(sideInsets).padding(top = headerDp).layout { m, c ->
+            val h = (c.maxHeight - sheetH.coerceAtLeast(0f).roundToInt()).coerceAtLeast(0)
+            val p = m.measure(c.copy(minHeight = h, maxHeight = h))
+            layout(p.width, c.maxHeight) { p.place(0, 0) }
+        }) {
             if (indoor && lookup.pickOnMap) Pill(stringResource(R.string.setup_building_tap_now), bg = Palette.Black, fg = Palette.Lime,
                 modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp))
             val openTasks = tasks.count { it.open }
@@ -269,17 +386,46 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(containerColor = Color.White, selectedContainerColor = Palette.GreenLight))
             }
         }
+        // ---------- top bar, over the map ----------
+        Surface(Modifier.fillMaxWidth().onSizeChanged { headerH = it.height }, color = Palette.Canvas, shadowElevation = 4.dp) {
+            Box(Modifier.statusBarsPadding().windowInsetsPadding(sideInsets)) {
+                ScreenHeader(stringResource(R.string.home_new_session), onBack = onBack) {
+                    androidx.compose.material3.IconButton(onClick = { info = true }) {
+                        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Outlined.Info, stringResource(R.string.setup_info_title), tint = Palette.Ink)
+                    }
+                }
+            }
+        }
 
-        // ---------- what will happen + Start ----------
-        Surface(Modifier.weight(0.62f), shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
-            Column(Modifier.fillMaxSize()) {
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp),
+        // ---------- the sheet: what will happen + Start ----------
+        Box(Modifier.fillMaxSize().padding(top = headerDp).imePadding().windowInsetsPadding(sideInsets).onSizeChanged { fullH = it.height }) {
+            Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().layout { m, c ->
+                    // not measured yet: the whole height once, to measure the choices and the bottom part
+                    val h = if (sheetH < 0f) c.maxHeight else sheetH.roundToInt().coerceIn(0, c.maxHeight)
+                    val p = m.measure(c.copy(minHeight = h, maxHeight = h))
+                    layout(p.width, h) { p.place(0, 0) }
+                },
+                shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
+                Column(Modifier.fillMaxSize().draggable(rememberDraggableState { moveSheet(it) }, Orientation.Vertical,
+                    onDragStopped = { v -> settle(v) })) {
+                    // the handle: drag it (or the street / Start part) to see the map
+                    Box(Modifier.fillMaxWidth().height(SHEET_HANDLE), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(width = 36.dp, height = 4.dp).background(Palette.Muted.copy(alpha = 0.45f), RoundedCornerShape(2.dp)))
+                    }
+                Column(Modifier.weight(1f).nestedScroll(sheetScroll).verticalScroll(rememberScrollState())) {
+                Column(Modifier.fillMaxWidth().onSizeChanged { choicesH = it.height }.padding(start = 16.dp, end = 16.dp, top = 2.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // only when there is something to do (permission, location off); the map shows the satellites
                     if (loc.status != LocStatus.SEARCHING) LocationHelp(loc)
                     // after the first ride the choices fold into one line ("Quét đường · Biển báo · Kẹp cố định") with Đổi;
                     // the first time they are all open. Folding is only a view: the ride is set up the same way.
                     if (!expanded) ChoiceSummary(io.github.tewnut.poicapture.core.SetupSummary.parts(kind, target, use360, thetaOn, holding)) { expanded = true }
+                    // opened with Đổi: Thu gọn folds them again
+                    if (expanded && canFold) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { expanded = false }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
+                            Text(stringResource(R.string.setup_collapse), fontWeight = FontWeight.Bold)
+                        }
+                    }
                     // three quick choices, short labels only: what each means is behind the (i) button
                     if (expanded) Choice(stringResource(R.string.setup_kind_label), listOfNotNull(
                         SessionKind.SWEEP to stringResource(R.string.setup_sweep_short),
@@ -322,7 +468,10 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     }
                     Spacer(Modifier.height(8.dp))   // the last line scrolls clear of the bottom bar
                 }
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                }   // the choices
+                // pinned at the bottom of the sheet whatever its height (measured as a whole: the sheet's lowest point)
+                Column(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true).onSizeChanged { barH = it.height }
+                    .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     // where the ride starts and the GPS, always in view right above Start
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Hint(if (indoor) "" else stringResource(R.string.setup_you_are_on), Modifier.padding(end = 8.dp))
@@ -389,10 +538,18 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                         Text(stringResource(if (ready) R.string.setup_start else R.string.setup_need_gps), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
                 }
+                }   // the sheet's column
             }
         }
     }
 }
+
+/** The sheet's resting heights: the street and Start only, half the screen, the choices' own height (or the screen). */
+private enum class SheetAnchor { MIN, PARTIAL, MAX }
+private val SHEET_HANDLE = 22.dp
+private const val SHEET_PARTIAL = 0.5f
+/** A throw faster than this goes to the next height in its direction. */
+private val SHEET_FLING = 400.dp
 
 /** The choices folded: "Quét đường · Biển báo · Kẹp cố định" and Đổi, which opens them. */
 @Composable
@@ -477,11 +634,15 @@ data class CoverLayer(val lines: List<List<LatLon>> = emptyList(), val points: L
 fun Hint(t: String, modifier: Modifier = Modifier, color: Color = Palette.Muted) =
     Text(t, modifier = modifier, style = MaterialTheme.typography.bodySmall, color = color)
 
-/** Map centred on the rider: blue dot with an accuracy circle, re-centre on request. */
+/**
+ * Map centred on the rider: blue dot with an accuracy circle, re-centre on request. [insetTop] / [insetBottom]: px of the
+ * view hidden under the top bar / the sheet; the rider is kept in the middle of the part in between.
+ */
 @Composable
 private fun LiveMap(tileUrl: String, me: LiveLocation?, mine: CoverLayer,
                     tasks: List<io.github.tewnut.poicapture.core.FieldTask>, onTask: (String) -> Unit, modifier: Modifier,
-                    building: Building? = null, onTap: ((LatLon) -> Unit)? = null, center: Array<LatLon?>? = null) {
+                    building: Building? = null, onTap: ((LatLon) -> Unit)? = null, center: Array<LatLon?>? = null,
+                    insetTop: Int = 0, insetBottom: Int = 0) {
     val ctx = LocalContext.current
     val map = remember {
         MapView(ctx).apply {
@@ -531,6 +692,9 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, mine: CoverLayer,
         onDispose { map.removeMapListener(l) }
     }
     AndroidView({ map }, modifier) { m ->
+        // the map's centre drawn in the middle of the part in view, not of the whole view
+        val offY = (insetTop - insetBottom) / 2
+        if (m.mapCenterOffsetY != offY) m.setMapCenterOffset(0, offY)
         m.overlays.clear()
         if (onTap != null) m.overlays.add(org.osmdroid.views.overlay.MapEventsOverlay(object : org.osmdroid.events.MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint): Boolean { tap.value?.invoke(LatLon(p.latitude, p.longitude)); return tap.value != null }
@@ -585,8 +749,9 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, mine: CoverLayer,
             } else if (SystemClock.elapsedRealtime() - touchedAt[0] > FOLLOW_PAUSE_MS && m.width > 0) {
                 // glide the map once the dot leaves the middle half of the view, so it never runs off the edge
                 val px = m.projection.toPixels(here, null)
-                val dx = px.x - m.width / 2f; val dy = px.y - m.height / 2f
-                if (kotlin.math.abs(dx) > m.width / 4f || kotlin.math.abs(dy) > m.height / 4f) m.controller.animateTo(here)
+                val dx = px.x - m.width / 2f; val dy = px.y - (m.height / 2f + offY)
+                val inView = (m.height - insetTop - insetBottom).coerceAtLeast(m.height / 4)
+                if (kotlin.math.abs(dx) > m.width / 4f || kotlin.math.abs(dy) > inView / 4f) m.controller.animateTo(here)
             }
         }
         m.invalidate()

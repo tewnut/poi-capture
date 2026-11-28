@@ -91,7 +91,7 @@
     <string name="onboarding_email_invalid">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
     <string name="onboarding_name_label">Tên hiển thị (không bắt buộc)</string>
     <string name="onboarding_name_placeholder">Nguyễn Văn A</string>
-    <string name="onboarding_name_help">Hiện trên các phiên ghi. Để trống thì dùng phần trước @ của email.</string>
+    <string name="onboarding_name_help">Hiện trên các chuyến đi. Để trống thì dùng phần trước @ của email.</string>
 
     <string name="onboarding_perm_camera">Camera</string>
     <string name="onboarding_perm_camera_why">Chụp mặt tiền và biển báo.</string>
@@ -270,23 +270,23 @@
     <string name="sessions_send_chooser">Gửi %1$s</string>
     <string name="sessions_packed">Đã đóng gói %1$s. Chọn Zalo, Drive, email… để gửi.</string>
     <string name="sessions_pack_failed">Không đóng gói được: %1$s</string>
-    <string name="sessions_none_unsent">Không có phiên nào chờ gửi.</string>
+    <string name="sessions_none_unsent">Không có chuyến đi nào chờ gửi.</string>
     <plurals name="sessions_unsent">
-        <item quantity="other">%1$d phiên chưa gửi · %2$s · %3$s</item>
+        <item quantity="other">%1$d chuyến đi chưa gửi · %2$s · %3$s</item>
     </plurals>
     <string name="sessions_local_only">Dữ liệu chỉ nằm trong máy tới khi bạn gửi. Còn trống %1$s.</string>
-    <string name="sessions_loading">Đang đọc các phiên đã ghi…</string>
+    <string name="sessions_loading">Đang đọc các chuyến đi đã ghi…</string>
     <string name="sessions_empty">Chưa có chuyến đi nào</string>
-    <string name="sessions_delete_title">Xoá phiên này?</string>
-    <string name="sessions_delete_sent">Phiên đã được gửi. Ảnh và video trong máy sẽ bị xoá.</string>
-    <string name="sessions_delete_unsent">Phiên CHƯA được gửi hay lưu. Ảnh và video sẽ mất hẳn.</string>
+    <string name="sessions_delete_title">Xoá chuyến đi này?</string>
+    <string name="sessions_delete_sent">Chuyến đi đã được gửi. Ảnh và video trong máy sẽ bị xoá.</string>
+    <string name="sessions_delete_unsent">Chuyến đi CHƯA được gửi hay lưu. Ảnh và video sẽ mất hẳn.</string>
     <string name="sessions_deleting">Đang xoá…</string>
-    <string name="sessions_deleted">Đã xoá phiên.</string>
+    <string name="sessions_deleted">Đã xoá chuyến đi.</string>
     <string name="sessions_delete">Xoá</string>
     <string name="sessions_keep">Không</string>
     <string name="sessions_more">Thêm</string>
     <string name="sessions_save_zip">Lưu file zip vào máy</string>
-    <string name="sessions_delete_session">Xoá phiên</string>
+    <string name="sessions_delete_session">Xoá chuyến đi</string>
     <string name="sessions_badge_recording">Đang ghi</string>
     <string name="sessions_badge_empty">Trống</string>
     <string name="sessions_badge_sent">Đã gửi</string>
@@ -331,7 +331,7 @@
 
     <!-- Photo map (ui/SessionMap.kt) -->
     <string name="sessionmap_no_photos_live">Chưa có ảnh. Ảnh sẽ hiện trên bản đồ ngay khi chụp.</string>
-    <string name="sessionmap_no_photos">Phiên này không có ảnh.</string>
+    <string name="sessionmap_no_photos">Chuyến đi này không có ảnh.</string>
     <string name="sessionmap_photo_desc">Ảnh %1$d</string>
     <string name="sessionmap_photo_thumb_desc">Ảnh %1$d, chạm để xem lớn</string>
     <string name="sessionmap_no_road">Chưa nhận ra đường</string>
@@ -402,7 +402,7 @@
     <string name="settings_title">Cài đặt</string>
     <string name="settings_contributor">Mã cộng tác viên</string>
     <string name="settings_email">Email</string>
-    <string name="settings_email_ok">Không bắt buộc. Mã do nhóm cấp, đi kèm mỗi phiên bạn gửi.</string>
+    <string name="settings_email_ok">Không bắt buộc. Mã do nhóm cấp, đi kèm mỗi chuyến đi bạn gửi.</string>
     <string name="settings_email_bad">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
     <string name="settings_display_name">Tên hiển thị (không bắt buộc)</string>
     <string name="settings_road_data">Dữ liệu đường offline</string>
@@ -437,11 +437,11 @@
     <string name="onboarding_language_phone_text">Ngôn ngữ của điện thoại: hiện là %1$s</string>
     <!-- capture: GPS lost -->
     <string name="capture_gps_lost_title">Đang chờ GPS</string>
-    <string name="capture_gps_lost_text">Phiên bắt đầu khi máy bắt được vệ tinh. Sau đó, nếu mất GPS (trong nhà, dưới mái hiên) chỉ hiện cảnh báo: ảnh dùng vị trí cuối cùng.</string>
+    <string name="capture_gps_lost_text">Chuyến đi bắt đầu khi máy bắt được vệ tinh. Sau đó, nếu mất GPS (trong nhà, dưới mái hiên) chỉ hiện cảnh báo: ảnh dùng vị trí cuối cùng.</string>
     <string name="capture_gps_lost_sky">Ra chỗ thoáng, xa nhà cao tầng, cây và mái che.</string>
     <string name="capture_gps_lost_location">Giữ Vị trí của điện thoại bật, với vị trí chính xác cho app này.</string>
     <string name="capture_gps_lost_settings">Cài đặt vị trí</string>
-    <string name="capture_gps_lost_resume">Phiên tự bắt đầu ngay khi bắt được GPS.</string>
+    <string name="capture_gps_lost_resume">Chuyến đi tự bắt đầu ngay khi bắt được GPS.</string>
     <!-- navigation: home = sessions -->
     <string name="nav_back">Quay lại</string>
     <string name="sessions_empty_text">Các chuyến đi bạn ghi sẽ hiện ở đây.</string>
@@ -479,7 +479,7 @@
     <string name="setup_need_email">Nhập email để bắt đầu</string>
     <string name="setup_info_title">Cách dùng</string>
     <string name="setup_info_gps_title">GPS</string>
-    <string name="setup_info_gps">Nút Bắt đầu mở khi máy bắt được vệ tinh trong 5 giây gần nhất: hãy bắt đầu ngoài trời thoáng. Sau đó phiên vẫn tiếp tục nếu mất GPS (trong nhà, dưới mái hiên): ảnh dùng vị trí cuối cùng và được đánh dấu cho bước xử lý. Vị trí từ Wi-Fi không bao giờ dùng cho ảnh.</string>
+    <string name="setup_info_gps">Nút Bắt đầu mở khi máy bắt được vệ tinh trong 5 giây gần nhất: hãy bắt đầu ngoài trời thoáng. Sau đó chuyến đi vẫn tiếp tục nếu mất GPS (trong nhà, dưới mái hiên): ảnh dùng vị trí cuối cùng và được đánh dấu cho bước xử lý. Vị trí từ Wi-Fi không bao giờ dùng cho ảnh.</string>
     <string name="sessionmap_warn_far">Xa hơn %1$d m so với chỗ chụp</string>
     <string name="sessionmap_warn_road">Đang nằm trên đường, không phải trên nhà</string>
     <string name="sessionmap_warn_across">Ở bên kia đường so với hướng camera</string>
@@ -512,7 +512,7 @@
     <string name="sessionmap_save">Lưu</string>
     <string name="onboarding_id_help">Có thể đổi trong Cài đặt.</string>
     <string name="onboarding_id_card_title">Không cần email hay tên</string>
-    <string name="onboarding_id_card_text">Chỉ mã này được gửi kèm các phiên. Chưa có mã? Để trống.</string>
+    <string name="onboarding_id_card_text">Chỉ mã này được gửi kèm các chuyến đi. Chưa có mã? Để trống.</string>
     <string name="onboarding_id_skip">Bỏ qua</string>
     <string name="onboarding_summary_no_id">Chưa có mã cộng tác viên</string>
     <string name="onboarding_summary_no_id_sub">Không bắt buộc: thêm trong Cài đặt khi nhóm cấp mã.</string>
@@ -541,14 +541,14 @@
     <!-- việc từ người duyệt -->
     <string name="settings_tasks">Việc từ người duyệt</string>
     <string name="tasks_title">Việc cần làm</string>
-    <string name="tasks_intro">Những địa điểm người duyệt muốn kiểm tra tại chỗ. Xuất từ Quét Phố Reviewer (Việc cần làm → Xuất), gửi file sang điện thoại (Zalo, Drive…) rồi nhập ở đây. Việc hiện trên bản đồ Phiên mới.</string>
+    <string name="tasks_intro">Những địa điểm người duyệt muốn kiểm tra tại chỗ. Xuất từ Quét Phố Reviewer (Việc cần làm → Xuất), gửi file sang điện thoại (Zalo, Drive…) rồi nhập ở đây. Việc hiện trên bản đồ Chuyến đi mới.</string>
     <string name="tasks_none">Chưa có việc nào trên điện thoại này.</string>
     <string name="tasks_counts">%1$d việc cần làm · %2$d đã xong hoặc bỏ qua</string>
     <string name="tasks_import">Nhập file việc</string>
     <string name="tasks_import_short">Nhập</string>
     <string name="tasks_clear">Xoá tất cả</string>
     <string name="tasks_clear_title">Xoá tất cả việc?</string>
-    <string name="tasks_clear_text">Danh sách việc sẽ bị xoá khỏi điện thoại. Phiên và ảnh của bạn vẫn giữ nguyên.</string>
+    <string name="tasks_clear_text">Danh sách việc sẽ bị xoá khỏi điện thoại. Chuyến đi và ảnh của bạn vẫn giữ nguyên.</string>
     <string name="tasks_bad_file">Đây không phải file việc. Trong Quét Phố Reviewer, mở mục Việc cần làm và bấm Xuất.</string>
     <string name="tasks_sheet_hint">Chụp địa điểm xong trong vòng %1$d m quanh một việc thì việc đó tự hoàn thành.</string>
     <string name="tasks_type_visit">Đến chụp</string>
@@ -571,7 +571,7 @@
     </plurals>
     <!-- Máy chủ tải lên (tus): Cài đặt, hướng dẫn đầu, thẻ phiên -->
     <string name="upload_title">Máy chủ tải lên</string>
-    <string name="upload_sub">Gửi phiên lên máy chủ của nhóm (tus)</string>
+    <string name="upload_sub">Gửi chuyến đi lên máy chủ của nhóm (tus)</string>
     <string name="upload_scan">Quét mã QR thiết lập</string>
     <string name="upload_scan_done">Đã thiết lập với tên “%1$s”</string>
     <string name="upload_scan_done_unnamed">Đã thiết lập từ mã QR</string>
@@ -601,7 +601,7 @@
     <string name="upload_test_token">Máy chủ từ chối mã truy cập (HTTP %d)</string>
     <string name="upload_test_http">Máy chủ trả lời HTTP %d</string>
     <string name="upload_test_failed">Không kết nối được máy chủ: %s</string>
-    <string name="upload_auto">Tự tải lên mỗi phiên khi kết thúc</string>
+    <string name="upload_auto">Tự tải lên mỗi chuyến đi khi kết thúc</string>
     <string name="upload_wifi">Chỉ khi có Wi-Fi</string>
     <string name="upload_remove_after">Xoá khỏi điện thoại khi đã lên máy chủ</string>
     <plurals name="sessions_removed_after_upload">
@@ -812,6 +812,7 @@
     <string name="setup_camera_phone">Điện thoại</string>
     <string name="gps_wait_sky">Ra chỗ thoáng, xa nhà cao để bắt GPS</string>
     <string name="setup_change">Đổi</string>
+    <string name="setup_collapse">Thu gọn</string>
     <string name="summary_title">Đã lưu chuyến đi</string>
     <string name="summary_upload_no_token">Chưa có mã truy cập: tải lên trong Cài đặt</string>
     <string name="summary_upload_wifi">Đang chờ Wi-Fi</string>

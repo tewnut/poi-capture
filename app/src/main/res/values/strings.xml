@@ -835,6 +835,7 @@
     <string name="setup_camera_phone">Phone</string>
     <string name="gps_wait_sky">Go into the open, away from tall buildings, for GPS</string>
     <string name="setup_change">Change</string>
+    <string name="setup_collapse">Collapse</string>
     <string name="summary_title">Ride saved</string>
     <string name="summary_upload_no_token">No access key yet: upload from Settings</string>
     <string name="summary_upload_wifi">Waiting for Wi-Fi</string>
