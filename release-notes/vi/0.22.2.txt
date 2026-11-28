@@ -1,0 +1,6 @@
+- Mã ứng dụng mới (vn.vmaps.quetpho): máy cài như một ứng dụng mới. Hãy tải lên các chuyến đi còn trong bản cũ trước khi chuyển sang.
+- Hỗ trợ Android 16.
+- Chế độ trong nhà tạm ẩn trong lúc hoàn thiện.
+- Đi quét biển báo: khi thấy biển, ứng dụng chụp dày hơn để biển rõ hơn.
+- Đi quét số nhà: lọc bớt số không phải số nhà (giá, biển số xe).
+- Cài đặt gọn hơn: mỗi mục một trang, quản lý bản đồ ngoại tuyến riêng.

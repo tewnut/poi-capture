@@ -19,6 +19,7 @@ import json, os, re, shutil, sys, tempfile, zipfile
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build  # noqa: E402
+from paths import arg_path  # noqa: E402
 
 
 from safety import inside, safe_id, extract  # noqa: E402  (untrusted export: paths and ids are checked)
@@ -74,12 +75,12 @@ def load_session(src):
 
 def main():
     if '--list' in sys.argv:
-        _s, places, _t, _tmp = load_session(sys.argv[1])
+        _s, places, _t, _tmp = load_session(arg_path(sys.argv[1]))
         for k, p in enumerate(places, 1):
             print(f"P{k}: {len(p['photos'])} photos at {p['position']['lat']:.6f},{p['position']['lon']:.6f} "
                   f"({p['position'].get('source')}) -> " + ', '.join(os.path.basename(x['path']) for x in p['photos']))
         return
-    src, readings_f, out = sys.argv[1:4]
+    src, readings_f, out = (arg_path(x) for x in sys.argv[1:4])
     ses, places, track, tmp = load_session(src)
     readings = json.load(open(readings_f, encoding='utf-8'))
     previous = {}

@@ -1,0 +1,53 @@
+id,code,qcvn,group,en,vi
+0,W.224,W.224,warning,Pedestrian Crossing,Đường người đi bộ cắt ngang
+1,W.205c,W.205c,warning,Equal-level Intersection,Đường giao nhau (ngã ba bên phải)
+2,P.102,P.102,prohibitory,No Entry,Cấm đi ngược chiều
+3,R.302a,R.302a,mandatory,Right Turn Only,Phải đi vòng sang bên phải
+4,W.205a,W.205a,warning,Intersection,Giao nhau với đường đồng cấp
+5,W.207,W.207,warning,Intersection with a non-priority road,Giao nhau với đường không ưu tiên
+6,W.201a,W.201a,warning,Danger zone on the left,Chỗ ngoặt nguy hiểm vòng bên trái
+7,P.123a,P.123a,prohibitory,No Left Turn,Cấm rẽ trái
+8,I.434a,I.434a,information,Bus Stop,Bến xe buýt
+9,R.303,R.303,mandatory,Roundabout,Nơi giao nhau chạy theo vòng xuyến
+10,P.130,P.130,prohibitory,No Stopping and No Parking,Cấm dừng và đỗ xe
+11,I.409,I.409,information,U-Turn Allowed,Chỗ quay xe
+12,R.415a,R.415a,mandatory,Lane Allocation,Biển gộp làn đường theo phương tiện
+13,W.245a,W.245a,warning,Slow Down,Đi chậm
+14,P.106a*Xe tải,P.106a,prohibitory,No Trucks Allowed,Cấm xe tải
+15,W.203c,W.203c,warning,Narrow Road on the Right,Đường bị thu hẹp về phía phải
+16,P.117*,P.117,prohibitory,Height Limit,Giới hạn chiều cao
+17,P.124a*,P.124a,prohibitory,No U-Turn,Cấm quay đầu
+18,P.107,P.107,prohibitory,No Passenger Cars and Trucks,Cấm ô tô khách và ô tô tải
+19,P.124d,P.124d,prohibitory,No U-Turn and No Right Turn,Cấm rẽ phải và quay đầu
+20,P.103a,P.103a,prohibitory,No Cars Allowed,Cấm ô tô
+21,W.203b,W.203b,warning,Narrow Road on the Left,Đường bị thu hẹp về phía trái
+22,W.221b,W.221b,warning,Uneven Road,Gồ giảm tốc phía trước
+23,P.111,P.111,prohibitory,No Two or Three-wheeled Vehicles,Cấm xe hai và ba bánh
+24,P.129,P.129,prohibitory,Customs Checkpoint,Kiểm tra
+25,S.505a*Xe máy,S.505a (motorbikes),auxiliary,Motorcycles Only,Chỉ dành cho xe máy
+26,W.246a,W.246a,warning,Obstacle on the Road,Chướng ngoại vật phía trước
+27,W.225,W.225,warning,Children Present,Trẻ em
+28,S.505a*Xe tải và công,S.505a (trucks + containers),auxiliary,Trucks and Containers,Xe tải và xe công
+29,P.104,P.104,prohibitory,No Motorcycles Allowed,Cấm mô tô và xe máy
+30,S.505a*Xe tải,S.505a (trucks),auxiliary,Trucks Only,Chỉ dành cho xe tải
+31,Camera,(camera-surveilled road; no single QCVN code in dataset),information,Road with Surveillance Camera,Đường có camera giám sát
+32,P.123b,P.123b,prohibitory,No Right Turn,Cấm rẽ phải
+33,W.202b,W.202b,warning,Double curve first to right,"Nhiều chỗ ngoặt nguy hiểm liên tiếp, chỗ đầu tiên sang phải"
+34,B.8a,"(no semi-trailers; dataset code B.8a, QCVN P.1xx family)",prohibitory,No Containers Allowed,Cấm xe sơ-mi rơ-moóc
+35,P.137,P.137,prohibitory,No Left or Right Turn,Cấm rẽ trái và phải
+36,P.139,P.139,prohibitory,No Straight and Right Turn,Cấm đi thẳng và rẽ phải
+37,W.205b,W.205b,warning,Intersection with T-Junction,Đường giao nhau (ngã ba bên trái)
+38,P.127*50,P.127 (50),prohibitory,Speed limit (50km/h),Giới hạn tốc độ (50km/h)
+39,P.127*60,P.127 (60),prohibitory,Speed limit (60km/h),Giới hạn tốc độ (60km/h)
+40,P.127*80,P.127 (80),prohibitory,Speed limit (80km/h),Giới hạn tốc độ (80km/h)
+41,P.127*40,P.127 (40),prohibitory,Speed limit (40km/h),Giới hạn tốc độ (40km/h)
+42,R.301e,R.301e,mandatory,Left Turn,Các xe chỉ được rẽ trái
+43,W.239b*,W.239b,warning,Low Clearance,Chiều cao tĩnh không thực tế
+44,W.233,W.233,warning,Other Danger,Nguy hiểm khác
+45,I.407a,I.407a,information,One-way street,Đường một chiều
+46,P.131a,P.131a,prohibitory,No Parking,Cấm đỗ xe
+47,P.124b1,P.124b1,prohibitory,No U-Turn for Cars,Cấm ô tô quay đầu xe (được rẽ trái)
+48,W.210,W.210,warning,Level Crossing with Barriers,Giao nhau với đường sắt có rào chắn
+49,P.124c,P.124c,prohibitory,No U-Turn and No Left Turn,Cấm rẽ trái và quay đầu xe
+50,W.201b,W.201b,warning,Danger zone on the right,Chỗ ngoặt nguy hiểm vòng bên phải
+51,W.246c,W.246c,warning,Warning: Obstacle ahead – pass on the right,Chú ý chướng ngại vật – vòng tránh sang bên phải

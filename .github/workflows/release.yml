@@ -2,7 +2,15 @@
 #   git tag v0.8.0 && git push origin v0.8.0
 # GitHub runs the unit tests, builds app-release.apk, signs it with the release key kept in the repository secrets
 # (RELEASE_KEYSTORE_B64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS) and attaches poi-capture-vX.Y.Z.apk to the
-# release vX.Y.Z. Download: https://github.com/<owner>/<repo>/releases/latest
+# release vX.Y.Z, with quet-pho-vX.Y.Z.aab (the same key, for the Play Console: there it is the upload key).
+# Download: https://github.com/<owner>/<repo>/releases/latest
+# An older tag without the .aab: Actions -> release -> Run workflow (from this branch), tag vX.Y.Z.
+# Release notes: release-notes/vi/X.Y.Z.txt (committed before the tag, <= 500 characters, release-notes/README.md)
+# become play-notes-vX.Y.Z.txt on the release, "<vi>...</vi>" ready to paste into the Play Console.
+# Google Play: with the secret PLAY_SERVICE_ACCOUNT_JSON set, the .aab and its notes go to the "internal" testing
+# track by themselves (tools/play_upload.py); production stays a promotion in the Play Console, or Run workflow with
+# play_track = production, which uploads a DRAFT to roll out in the Play Console. Without the secret the step is
+# skipped (the files are on the GitHub release as before).
 name: release
 
 on:
@@ -13,6 +21,12 @@ on:
       tag:
         description: "Existing tag to build again, e.g. v0.8.0"
         required: true
+      play_track:
+        description: "Google Play track to upload to (none: do not upload)"
+        required: false
+        default: internal
+        type: choice
+        options: [internal, alpha, beta, production, none]
 
 permissions:
   contents: write              # create the release, upload the APK
@@ -24,6 +38,7 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    environment: release          # waits for a required reviewer's approval before it signs or uploads
     timeout-minutes: 30
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -31,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.tag && format('refs/tags/{0}', github.event.inputs.tag) || github.ref }}   # a tag only
 
       - uses: actions/setup-java@v5
         with:
@@ -40,8 +55,26 @@ jobs:
 
       - name: The tag must match versionName
         run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "::error::$TAG is not a version tag (vX.Y.Z)"; exit 1; fi
           V=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
           if [ "v$V" != "$TAG" ]; then echo "::error::tag $TAG does not match versionName $V"; exit 1; fi
+
+      - name: Release notes (Play Console, Vietnamese)
+        run: |
+          V="${TAG#v}"
+          NOTES="release-notes/vi/$V.txt"
+          if [ ! -f "$NOTES" ]; then echo "::error::$NOTES is missing: write the release notes before tagging (release-notes/README.md)"; exit 1; fi
+          python3 - "$NOTES" "play-notes-$TAG.txt" <<'PY'
+          import sys
+          text = open(sys.argv[1], encoding='utf-8').read().strip()
+          if not text:
+              sys.exit(f'::error::{sys.argv[1]} is empty')
+          if len(text) > 500:
+              sys.exit(f'::error::{sys.argv[1]} has {len(text)} characters, the Play Console takes at most 500')
+          open(sys.argv[2], 'w', encoding='utf-8').write(f'<vi>\n{text}\n</vi>\n')
+          print(f'{len(text)} characters')
+          PY
+          cat "play-notes-$TAG.txt"
 
       - name: Release key
         env:
@@ -58,23 +91,51 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleRelease
+          ./gradlew --no-daemon --console=plain :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
 
       - name: Check the signature
+        env:
+          RELEASE_CERT_SHA256: ${{ vars.RELEASE_CERT_SHA256 }}
         run: |
           APK=app/build/outputs/apk/release/app-release.apk
           BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
           "$BT/apksigner" verify --print-certs "$APK"
           cp "$APK" "poi-capture-$TAG.apk"
           sha256sum "poi-capture-$TAG.apk" > "poi-capture-$TAG.apk.sha256"
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          jarsigner -verify "$AAB" > /dev/null || { echo "::error::the .aab signature does not verify"; exit 1; }
+          # the .aab must carry the same certificate as the APK (and as RELEASE_CERT_SHA256, when that variable is set)
+          APK_SHA=$("$BT/apksigner" verify --print-certs "$APK" | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)
+          AAB_SHA=$(keytool -printcert -jarfile "$AAB" | sed -n 's/.*SHA256: //p' | head -1 | tr -d ': ' | tr 'A-F' 'a-f')
+          echo "certificate SHA-256: apk $APK_SHA, aab $AAB_SHA"
+          if [ -z "$APK_SHA" ] || [ "$APK_SHA" != "$AAB_SHA" ]; then echo "::error::the .aab and the APK are not signed with the same certificate"; exit 1; fi
+          PIN=$(printf '%s' "$RELEASE_CERT_SHA256" | tr -d ': ' | tr 'A-F' 'a-f')
+          if [ -n "$PIN" ] && [ "$PIN" != "$APK_SHA" ]; then echo "::error::the release certificate is not the pinned one"; exit 1; fi
+          cp "$AAB" "quet-pho-$TAG.aab"
+          sha256sum "quet-pho-$TAG.aab" > "quet-pho-$TAG.aab.sha256"
           rm -f "$RUNNER_TEMP/release.jks"
 
       - name: Publish
         run: |
-          FILES="poi-capture-$TAG.apk poi-capture-$TAG.apk.sha256"
+          FILES="poi-capture-$TAG.apk poi-capture-$TAG.apk.sha256 quet-pho-$TAG.aab quet-pho-$TAG.aab.sha256 play-notes-$TAG.txt"
+          { echo "Release notes for the Play Console (also play-notes-$TAG.txt):"; echo; echo '```'; cat "play-notes-$TAG.txt"; echo '```'; } > body.md
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" $FILES --clobber
+            gh release edit "$TAG" --notes-file body.md
           else
-            gh release create "$TAG" $FILES --verify-tag --title "POI Capture $TAG" --generate-notes
+            gh release create "$TAG" $FILES --verify-tag --title "Quét Phố $TAG" --notes-file body.md --generate-notes
           fi
           gh release view "$TAG" --json assets -q '.assets[] | "\(.name) \(.size)"'
+
+      - name: Upload to Google Play
+        env:
+          PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          TRACK: ${{ github.event.inputs.play_track || 'internal' }}
+        run: |
+          if [ -z "$PLAY_SERVICE_ACCOUNT_JSON" ]; then echo "PLAY_SERVICE_ACCOUNT_JSON is not set: not uploaded to Google Play"; exit 0; fi
+          if [ "$TRACK" = "none" ]; then echo "play_track = none: not uploaded"; exit 0; fi
+          python3 -m pip install --quiet --disable-pip-version-check google-auth==2.38.0 google-api-python-client==2.160.0
+          V="${TAG#v}"
+          # beyond internal testing: a draft that a person rolls out in the Play Console
+          STATUS=completed; [ "$TRACK" = "internal" ] || STATUS=draft
+          python3 tools/play_upload.py "quet-pho-$TAG.aab" --package vn.vmaps.quetpho --track "$TRACK" --status "$STATUS" --notes "release-notes/vi/$V.txt" --name "$V"

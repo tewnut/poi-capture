@@ -1,8 +1,11 @@
 // Publish: the confirmed places as GeoJSON, CSV and an OpenStreetMap (.osm) file; the task list as GeoJSON.
 // Only what the photos showed or the reviewer confirmed is written: never the Google block or Google's pin
-// (Google's terms; docs/pipeline.md).
-import type { Dataset, Place, Review, FieldKey, RemovalReview } from './types'
-import { FIELD_KEYS } from './types'
+// (Google's terms; docs/pipeline.md). KML, GPX, Shapefile, Excel and the all-formats zip are in exports.ts.
+import type { Dataset, Place, Review, FieldKey, RemovalReview, Task } from './types'
+import { FIELD_KEYS, layerOf } from './types'
+import { exportNames } from './photos'
+import { overRoad, postOf, trafficSignValue } from './signPosts'
+import { buildingAddr, isIndoorPlace, levelNames, normLevel, osmLevel } from './indoor'
 
 export type Published = {
   dataset: Dataset
@@ -26,17 +29,24 @@ export function record(x: Published) {
   for (const k of FIELD_KEYS) v[k] = value(place, review, k)
   // fields whose value is still Google's (filled from Google and not edited by the reviewer)
   const fromGoogle = FIELD_KEYS.filter((k) => v[k] && place.fields[k]?.source === 'google' && review.fields[k]?.state !== 'edited')
+  const layer = layerOf(place)
   return {
     id: place.id,
+    layer,
     name: v.name || place.name,
     category: review.category || place.category || null,
+    ...(layer === 'sign' ? { signCode: v.signCode } : {}),
+    ...(layer === 'sign' && postOf(place) ? { signPost: postOf(place), signOrder: place.sign?.order ?? null } : {}),
     status: place.status,
     phone: v.phone, houseNumber: v.houseNumber, street: v.street, openingHours: v.openingHours, website: v.website,
+    // indoor walks (docs/indoor.md): the reviewed level and unit, and the building the shop is in
+    level: normLevel(v.level), unit: v.unit, building: isIndoorPlace(place) ? place.building?.name || dataset.building?.name || null : null,
     lat: +pin.lat.toFixed(7), lon: +pin.lon.toFixed(7),
     pinSource: review.pin?.source || (place.pins.agent ? 'agent' : place.pins.algorithm ? 'algorithm' : 'contributor'),
     session: dataset.session.id, sessionName: dataset.session.name || '', captured: dataset.session.startedAt || '',
     reviewer: review.reviewer || '', reviewedAt: review.at || '', comment: review.comment || '',
     fromGoogle: fromGoogle.join(' '),
+    photos: exportNames(place, review).join(' '),   // files in the photo export (cover first)
   }
 }
 
@@ -58,8 +68,9 @@ export function geojson(places: Published[], removed: Removed[]) {
   return JSON.stringify({ type: 'FeatureCollection', features: feats }, null, 1)
 }
 
-const CSV_COLS = ['id', 'change', 'name', 'category', 'status', 'phone', 'houseNumber', 'street', 'openingHours', 'website',
-  'fromGoogle', 'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment'] as const
+export const CSV_COLS = ['id', 'change', 'name', 'category', 'layer', 'signCode', 'signPost', 'signOrder', 'status', 'phone', 'houseNumber', 'street',
+  'level', 'unit', 'building', 'openingHours', 'website',
+  'fromGoogle', 'lat', 'lon', 'pinSource', 'session', 'sessionName', 'captured', 'reviewer', 'reviewedAt', 'comment', 'photos'] as const
 
 /** A CSV cell. Text starting with = + - @ (or a tab / return) is prefixed with ' so spreadsheets do not run it
  *  as a formula (names and fields come from photos and imports). Numbers are left as numbers. */
@@ -109,42 +120,131 @@ export function osmHours(v: string | null): string | null {
   return `Mo-Su ${t(m[1], m[2])}-${t(m[3], m[4])}`
 }
 
+/** A house number with unread digits ("1…", "…01", "19..."): never published as an address. */
+export const partlyRead = (n: unknown) => typeof n === 'string' && /…|\.\.\./.test(n)
+
+/** OSM tags of a house number: only the address, and only with a confirmed, fully read number. */
+function addressTags(r: Record<string, any>): Record<string, string> | null {
+  if (!r.houseNumber || partlyRead(r.houseNumber)) return null
+  const tags: Record<string, string> = { 'addr:housenumber': r.houseNumber }
+  if (r.street) tags['addr:street'] = r.street.split(',')[0].trim()
+  return tags
+}
+
+/** OSM tags of a traffic sign (or of the signs of one pole, top first): only with a confirmed code.
+ *  direction = the way the sign faces, against the traffic it is for (Key:traffic_sign: met riding north, it faces
+ *  south, direction=180): facingDeg (the travel bearing of the drivers who see it) + 180. */
+function signTags(codes: string[], p: Place): Record<string, string> | null {
+  const value = trafficSignValue(codes)
+  if (!value) return null
+  const tags: Record<string, string> = { traffic_sign: value }
+  const f = p.sign?.facingDeg
+  if (typeof f === 'number' && Number.isFinite(f)) tags.direction = String((((Math.round(f) + 180) % 360) + 360) % 360)
+  return tags
+}
+
+/** A shop inside a building (Simple Indoor Tagging): level=* and addr:unit=* as reviewed; the address is the
+ *  building's own (its OSM addr:* tags), never a street or house number from the phone or the photos. */
+export function indoorTags(r: Record<string, any>, x: Published): Record<string, string> {
+  const tags: Record<string, string> = {}
+  if (r.level) {
+    const n = osmLevel(r.level, levelNames(x.dataset))
+    if (n != null) tags.level = String(n)
+    tags['level:ref'] = String(r.level)   // the building's own name for it ("1", "B1", "G")
+  }
+  if (r.unit) tags['addr:unit'] = String(r.unit).trim()
+  const a = buildingAddr(x.dataset.building)
+  if (!Object.keys(a).length && x.place.building?.addr) Object.assign(a, buildingAddr({ addr: x.place.building.addr }))
+  for (const [k, v] of Object.entries(a)) if (v && !['unit', 'floor', 'door', 'flats'].includes(k)) tags[`addr:${k}`] = v
+  return tags
+}
+
 /** New nodes (negative ids) for JOSM: open it, check against what is already mapped, then upload by hand. */
 export function osm(places: Published[]) {
   const lines = ['<?xml version="1.0" encoding="UTF-8"?>',
     '<osm version="0.6" generator="poi-capture-reviewer" upload="never">',
     '  <!-- New places confirmed in POI Capture Reviewer. Check against existing OSM data in JOSM before uploading;',
     '       follow the OSM import / organised editing guidelines. Removals are in the GeoJSON / CSV export. -->']
-  places.forEach((x, i) => {
+  let n = 0
+  const node = (r: Record<string, any>, tags: Record<string, string>) => {
+    tags.check_date = (r.reviewedAt || r.captured || '').slice(0, 10)
+    lines.push(`  <node id="-${++n}" lat="${r.lat}" lon="${r.lon}" version="0">`)
+    for (const [k, v] of Object.entries(tags)) if (v) lines.push(`    <tag k="${esc(k)}" v="${esc(v)}"/>`)
+    lines.push('  </node>')
+  }
+  // the signs of one pole (not a gantry: its boards hang over their own lanes, one node each): ONE node, at the
+  // top sign's position, traffic_sign listing their confirmed codes top first (signPosts.ts)
+  const poles = new Map<string, { r: Record<string, any>; x: Published }[]>()
+  const poleOf = (x: Published) => (postOf(x.place) && !overRoad(x.place) ? `${x.dataset.id}|${postOf(x.place)}` : null)
+  for (const x of places) {
+    const k = poleOf(x)
+    if (k) poles.set(k, [...(poles.get(k) || []), { r: record(x), x }])
+  }
+  for (const x of places) {
     const r: Record<string, any> = { ...record(x) }
     // OpenStreetMap does not accept data copied from Google: those fields stay out of the .osm file
     for (const k of (r.fromGoogle as string).split(' ').filter(Boolean)) r[k] = null
+    // addresses and signs are nodes of their own, without the shop tags; left out when the number / code is missing
+    if (r.layer !== 'place') {
+      const pole = r.layer === 'sign' ? poleOf(x) : null
+      if (pole) {
+        const signs = poles.get(pole)!
+        if (!signs.length) continue                       // written with the first of its pole
+        poles.set(pole, [])
+        signs.sort((a, b) => (a.r.signOrder ?? Infinity) - (b.r.signOrder ?? Infinity))
+        const coded = signs.filter((s) => (s.r.signCode || '').trim())
+        const tags = coded.length ? signTags(coded.map((s) => s.r.signCode), coded[0].x.place) : null
+        if (tags) node(coded[0].r, tags)
+        continue
+      }
+      const tags = r.layer === 'address' ? addressTags(r) : signTags([r.signCode || ''], x.place)
+      if (tags) node(r, tags)
+      continue
+    }
     const tags: Record<string, string> = { name: r.name, ...(OSM_TAGS[r.category || ''] || {}) }
     if (r.phone) tags.phone = r.phone.split(/[,;]\s*/).map((p: string) => p.replace(/^0/, '+84 ').replace(/\s+/g, ' ')).join(';')
-    if (r.houseNumber) tags['addr:housenumber'] = r.houseNumber
-    if (r.street) tags['addr:street'] = r.street.split(',')[0].trim()
+    if (isIndoorPlace(x.place)) Object.assign(tags, indoorTags(r, x))
+    else {
+      if (r.houseNumber && !partlyRead(r.houseNumber)) tags['addr:housenumber'] = r.houseNumber
+      if (r.street) tags['addr:street'] = r.street.split(',')[0].trim()
+    }
     const oh = osmHours(r.openingHours)
     if (oh) tags.opening_hours = oh
     if (r.website && /\./.test(r.website) && !/\s/.test(r.website)) tags.website = r.website.startsWith('http') ? r.website : `https://${r.website}`
     if (x.place.status !== 'open') tags.disused = 'yes'
-    tags.check_date = (r.reviewedAt || r.captured || '').slice(0, 10)
-    lines.push(`  <node id="-${i + 1}" lat="${r.lat}" lon="${r.lon}" version="0">`)
-    for (const [k, v] of Object.entries(tags)) if (v) lines.push(`    <tag k="${esc(k)}" v="${esc(v)}"/>`)
-    lines.push('  </node>')
-  })
+    node(r, tags)
+  }
   lines.push('</osm>')
   return lines.join('\n') + '\n'
 }
 
-export function tasksGeojson(ds: Dataset[]) {
-  const feats = ds.flatMap((d) => d.tasks.map((t, i) => ({
-    type: 'Feature', geometry: { type: 'Point', coordinates: [t.lon, t.lat] },
-    properties: { id: `${d.session.id}-task-${i}`, type: t.type, name: t.name, why: t.why, place: t.place, session: d.session.id },
-  })))
-  return JSON.stringify({ type: 'FeatureCollection', features: feats }, null, 1)
+/** The work left to do on site, as GeoJSON the phone app imports (schema poi-tasks/1, docs/pipeline.md):
+ *  the agent's visits, removal checks not yet settled here (removals the reviewer confirmed or dismissed are left
+ *  out; one sent to "check on site" goes in), and places the reviewer marked "visit". */
+export function tasksGeojson(ds: Dataset[], reviews: Record<string, Review> = {}, removals: Record<string, RemovalReview> = {},
+  createdBy = '') {
+  const feats: any[] = []
+  const add = (id: string, type: Task['type'], name: string, lat: number, lon: number, why: string, place: string | null, session: string) =>
+    feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lon, lat] }, properties: { id, type, name, why, place, session } })
+  for (const d of ds) {
+    d.tasks.forEach((t, i) => {
+      const r = removals[`${d.id}|${i}`]?.decision || 'todo'
+      if (t.type !== 'visit' && (r === 'confirmed' || r === 'dismissed')) return
+      if (t.type === 'removal' && r !== 'verify') return     // the reviewer has not sent it on site
+      add(`${d.session.id}-task-${i}`, t.type === 'removal' ? 'verify_removal' : t.type, t.name, t.lat, t.lon, t.why, t.place, d.session.id)
+    })
+    for (const p of d.places) {
+      const r = reviews[`${d.id}|${p.id}`]
+      if (r?.decision !== 'visit' || feats.some((f) => f.properties.session === d.session.id && f.properties.place === p.id)) continue
+      const pin = r.pin || p.pins.agent || p.pins.contributor || p.pins.algorithm
+      if (!pin) continue
+      add(`${d.session.id}-visit-${p.id}`, 'visit', r.fields.name?.value || p.name, pin.lat, pin.lon, r.comment || 'Reviewer: check on site', p.id, d.session.id)
+    }
+  }
+  return JSON.stringify({ type: 'FeatureCollection', schema: 'poi-tasks/1', createdAt: new Date().toISOString(), createdBy, features: feats }, null, 1)
 }
 
-export function download(name: string, body: string, type: string) {
+export function download(name: string, body: BlobPart, type: string) {
   const a = document.createElement('a')
   a.href = URL.createObjectURL(new Blob([body], { type }))
   a.download = name

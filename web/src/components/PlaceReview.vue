@@ -1,11 +1,21 @@
 <script setup lang="ts">
 // One place: photos, what was read (each field with the photo it came from), the three pins, the decision.
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Photo from './Photo.vue'
-import { reviewOf, putReview, gstat, photoUrl } from '../store'
+import CropEditor from './CropEditor.vue'
+import { state, rkey, reviewOf, putReview, gstat, photoUrl, putPhoto, delPhoto, cropPhoto, seqFlags, dupes } from '../store'
+import { placeHints } from '../hints'
+import { duplicateComment, type Dupe } from '../dupes'
+import { to } from '../router'
+import { keptPhotos, removedPhotos } from '../photos'
+import { confirmFields, pendingSuggestions, suggestionKind, missingStreet } from '../fields'
 import { t } from '../i18n'
-import type { Dataset, Place, Review, FieldKey, PinSource } from '../types'
-import { FIELD_KEYS } from '../types'
+import type { Dataset, Place, Review, FieldKey, PinSource, PhotoEdits, CropRect } from '../types'
+import { FIELD_KEYS, layerOf } from '../types'
+import { signSvg } from '../signArt'
+import { overRoad, postOf, postSigns } from '../signPosts'
+import { isIndoorPlace } from '../indoor'
+import { HIDDEN_BY_FILTERS } from '../sessionList'
 
 const props = defineProps<{ ds: Dataset; place: Place }>()
 const emit = defineEmits<{ close: []; next: [] }>()
@@ -13,9 +23,16 @@ const emit = defineEmits<{ close: []; next: [] }>()
 /** A plain copy to edit (stored reviews are reactive proxies, which structuredClone refuses). */
 const clone = (x: Review): Review => JSON.parse(JSON.stringify(x))
 const r = ref<Review>(clone(reviewOf(props.ds.id, props.place)))
-watch(() => [props.ds.id, props.place.id], () => { r.value = clone(reviewOf(props.ds.id, props.place)); big.value = 0 })
+watch(() => [props.ds.id, props.place.id], () => { r.value = clone(reviewOf(props.ds.id, props.place)); big.value = 0; openMarks.value = null })
+/** Not checked out by this reviewer: shown as saved, nothing can be changed (store.ts putReview ignores it too). */
+const ro = computed(() => !state.editable.has(props.ds.id))
+// read-only: follow the saved review (another reviewer's, loaded from the server)
+watch(() => state.reviews[rkey(props.ds.id, props.place.id)], () => { if (ro.value) r.value = clone(reviewOf(props.ds.id, props.place)) })
 const big = ref(0)
-const photos = computed(() => [...props.place.photos].sort((a, b) => Number(!!b.cover) - Number(!!a.cover)))
+/** The field whose source dots are spelled out (tap on the dots; the same words are on hover). */
+const openMarks = ref<FieldKey | null>(null)
+const photos = computed(() => keptPhotos(props.place, r.value))
+const removed = computed(() => removedPhotos(props.place, r.value))
 const first = computed(() => props.place.pins.algorithm || props.place.pins.contributor)
 const firstLabel = computed<PinSource>(() => (props.place.pins.algorithm ? 'algorithm' : 'contributor'))
 const google = computed(() => props.place.google || null)
@@ -33,7 +50,7 @@ const chips = computed(() => {
   if (first.value) c.push({ key: firstLabel.value, label: t(firstLabel.value === 'algorithm' ? 'chipAlgo' : 'chipContributor'), color: 'green', can: true })
   if (props.place.pins.agent) c.push({ key: 'agent', label: t('chipAgent'), color: 'purple', can: true })
   c.push({ key: 'manual', label: t('chipPin'), color: 'orange', can: false })
-  if (props.place.pins.google || google.value) c.push({ key: 'google', label: t('chipGoogle'), color: 'blue', can: false })
+  if (layerOf(props.place) === 'place' && (props.place.pins.google || google.value)) c.push({ key: 'google', label: t('chipGoogle'), color: 'blue', can: false })
   return c
 })
 function pick(k: View) {
@@ -47,17 +64,118 @@ const firstName = computed(() => t(firstLabel.value))
 const full = ref(false)
 function step(d: number) { big.value = (big.value + d + photos.value.length) % photos.value.length }
 async function newTab() {
-  const u = await photoUrl(props.ds.id, photos.value[big.value]?.file)
+  const u = await photoUrl(props.ds.id, photos.value[big.value]?.show)
   if (u) window.open(u, '_blank', 'noopener')
 }
+// photo edits: remove / restore, add, crop, cover. Imported photos are never changed (types.ts PhotoEdits).
+const edits = (): PhotoEdits => (r.value.photos ||= {})
+const busy = ref('')
+async function removePhoto() {
+  if (ro.value) return
+  const p = photos.value[big.value]
+  if (!p) return
+  const e = edits()
+  const crop = e.crops?.[p.file]
+  if (p.added) {                          // the reviewer's own photo: gone for good
+    e.added = (e.added || []).filter((f) => f !== p.file)
+    await delPhoto(props.ds.id, p.file)
+    if (crop) { await delPhoto(props.ds.id, crop.file); delete e.crops![p.file] }
+  } else {
+    e.removed = [...(e.removed || []), p.file]
+  }
+  if (e.cover === p.file) delete e.cover
+  big.value = Math.max(0, Math.min(big.value, photos.value.length - 1))
+  if (!photos.value.length) full.value = false
+  await save()
+}
+async function restore(file: string) {
+  if (ro.value) return
+  const e = edits()
+  e.removed = (e.removed || []).filter((f) => f !== file)
+  await save()
+}
+async function makeCover() {
+  if (ro.value) return
+  const p = photos.value[big.value]
+  if (!p) return
+  edits().cover = p.file
+  big.value = 0
+  await save()
+}
+const picker = ref<HTMLInputElement>()
+const IMG = /^image\/(jpeg|png|webp)$/
+async function addPhotos(list: FileList | File[] | null | undefined) {
+  if (ro.value) return
+  const files = [...(list || [])].filter((f) => IMG.test(f.type))
+  if (!files.length) return
+  busy.value = t('adding')
+  try {
+    const e = edits()
+    for (const [k, f] of files.entries()) {
+      const ext = f.type === 'image/png' ? 'png' : f.type === 'image/webp' ? 'webp' : 'jpg'
+      const path = `added/${props.place.id}/${Date.now().toString(36)}-${k}.${ext}`
+      await putPhoto(props.ds.id, path, new Blob([f], { type: f.type }))
+      e.added = [...(e.added || []), path]
+    }
+    await save()
+    big.value = photos.value.length - 1
+  } finally { busy.value = '' }
+}
+function onPick(ev: Event) {
+  const i = ev.target as HTMLInputElement
+  addPhotos(i.files).finally(() => (i.value = ''))
+}
+const dropOver = ref(false)
+function onDrop(ev: DragEvent) {
+  dropOver.value = false
+  addPhotos(ev.dataTransfer?.files)
+}
+/** Paste a screenshot or copied image anywhere in the panel (not while typing in a field). */
+function onPaste(ev: ClipboardEvent) {
+  const fs = [...(ev.clipboardData?.files || [])]
+  if (fs.length && !(ev.target as HTMLElement)?.closest?.('input, textarea')) { ev.preventDefault(); addPhotos(fs) }
+}
+const cropping = ref<{ file: string; url: string; rect: CropRect | null } | null>(null)
+async function startCrop() {
+  if (ro.value) return
+  const p = photos.value[big.value]
+  if (!p) return
+  const url = await photoUrl(props.ds.id, p.file)    // always crop from the original
+  if (url) cropping.value = { file: p.file, url, rect: r.value.photos?.crops?.[p.file]?.rect || null }
+}
+async function saveCrop(rect: CropRect | null) {
+  const c = cropping.value
+  cropping.value = null
+  if (!c) return
+  const e = edits()
+  const old = e.crops?.[c.file]
+  busy.value = t('cropping')
+  try {
+    if (rect && !(rect[0] <= 0.005 && rect[1] <= 0.005 && rect[2] >= 0.99 && rect[3] >= 0.99)) {
+      const path = `crop/${props.place.id}/${Date.now().toString(36)}.jpg`
+      await putPhoto(props.ds.id, path, await cropPhoto(props.ds.id, c.file, rect))
+      e.crops = { ...(e.crops || {}), [c.file]: { rect, file: path } }
+    } else if (e.crops) {
+      delete e.crops[c.file]
+    }
+    if (old) await delPhoto(props.ds.id, old.file)
+    await save()
+  } finally { busy.value = '' }
+}
+const edited = computed(() => {
+  const e = r.value.photos
+  return !!e && !!(e.removed?.length || e.added?.length || Object.keys(e.crops || {}).length || e.cover)
+})
+
 function onKey(e: KeyboardEvent) {
+  if (cropping.value) { if (e.key === 'Escape') cropping.value = null; return }
   if (!full.value) return
   if (e.key === 'Escape') full.value = false
   if (e.key === 'ArrowRight') step(1)
   if (e.key === 'ArrowLeft') step(-1)
 }
-onMounted(() => window.addEventListener('keydown', onKey))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+onMounted(() => { window.addEventListener('keydown', onKey); window.addEventListener('paste', onPaste) })
+onBeforeUnmount(() => { window.removeEventListener('keydown', onKey); window.removeEventListener('paste', onPaste) })
 
 function distM(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
   const x = (a.lon - b.lon) * 111320 * Math.cos((a.lat * Math.PI) / 180), y = (a.lat - b.lat) * 110540
@@ -68,6 +186,7 @@ function fieldState(k: FieldKey) { return r.value.fields[k]?.state }
 function readValue(k: FieldKey) { return props.place.fields[k]?.value ?? '' }
 function shown(k: FieldKey) { return r.value.fields[k]?.value ?? readValue(k) }
 function setField(k: FieldKey, state: 'ok' | 'edited' | 'rejected', value?: string) {
+  if (ro.value) return
   r.value.fields[k] = { state, value: value ?? shown(k) }
   save()
 }
@@ -76,18 +195,18 @@ function edit(k: FieldKey, e: Event) {
   setField(k, v === readValue(k) ? 'ok' : 'edited', v)
 }
 function usePin(src: PinSource) {
+  if (ro.value) return
   const p = src === 'agent' ? props.place.pins.agent : first.value
   if (p) { r.value.pin = { lat: p.lat, lon: p.lon, source: src }; save() }
 }
-async function save() { await putReview(props.ds.id, props.place, r.value) }
+async function save() { if (!ro.value) await putReview(props.ds.id, props.place, r.value) }
 
-/** Confirm the place: every read field not decided yet counts as checked unless the reading was unsure. */
+/** Confirm the place: the fields not decided yet are accepted as fields.ts says (clear readings, Google and website
+ *  values); suggestions (unsure readings, the ride's road) stay open, shown, until the reviewer accepts them. */
 async function decide(d: Review['decision']) {
+  if (ro.value) return
   if (d === 'confirmed') {
-    for (const k of FIELD_KEYS) {
-      const f = props.place.fields[k]
-      if (f && !r.value.fields[k] && f.sure !== 'low') r.value.fields[k] = { state: 'ok', value: f.value }
-    }
+    r.value.fields = confirmFields(props.place, r.value)
     if (!r.value.pin) usePin(pinSource.value)
   }
   r.value.decision = d
@@ -96,6 +215,48 @@ async function decide(d: Review['decision']) {
 }
 defineExpose({ setPin: async (lat: number, lon: number) => { r.value.pin = { lat, lon, source: 'manual' }; await save() } })
 const G_LABEL = { found: 'gFound', new: 'gNew', todo: 'gTodo' } as const
+// an address or a sign (docs/sweep-targets.md) has its own fields and none of a shop's (Google, website, hours)
+const layer = computed(() => layerOf(props.place))
+const LAYER_KEYS: Record<'address' | 'sign', FieldKey[]> = { address: ['houseNumber', 'street', 'other'], sign: ['signCode', 'name', 'signText', 'other'] }
+// a shop inside a building (indoor walk): level and unit always, no street or house number unless read
+const indoorPlace = computed(() => layer.value === 'place' && isIndoorPlace(props.place))
+const keys = computed<FieldKey[]>(() => layer.value === 'place'
+  ? FIELD_KEYS.filter((k) => k !== 'signCode' && (props.place.fields[k] || r.value.fields[k]
+    || (indoorPlace.value ? ['phone', 'openingHours', 'level', 'unit'] : ['phone', 'houseNumber', 'street', 'openingHours']).includes(k)))
+  : LAYER_KEYS[layer.value])
+function fieldLabel(k: FieldKey) {
+  if (layer.value === 'sign' && k === 'name') return t('field.signName')
+  if (k === 'other' && layer.value !== 'place') return t(layer.value === 'sign' ? 'field.extraPlate' : 'field.alley')
+  return t('field.' + k)
+}
+/** A sign's group, side and facing; an address's shop: shown, not edited. */
+const layerInfo = computed(() => {
+  const p = props.place, out: string[] = []
+  const word = (key: string, v?: string | null) => { if (v) { const w = t(key + v); out.push(w === key + v ? v : w) } }
+  if (layer.value === 'sign') {
+    word('signGroup_', p.sign?.group)
+    word('signSide_', p.sign?.side)
+    if (typeof p.sign?.facingDeg === 'number') out.push(t('signFacing', { deg: Math.round(p.sign.facingDeg) }))
+    if (p.sign?.lane != null) out.push(t('postLane', { lane: p.sign.lane }))
+    if (onPost.value.length > 1)
+      out.push(t('postPos_' + postKind.value, { id: postOf(p), n: onPost.value.indexOf(p) + 1, of: onPost.value.length }))
+  }
+  if (layer.value === 'address' && p.placeRef) out.push(t('placeRef', { name: p.placeRef }))
+  if (indoorPlace.value) {
+    const b = p.building?.name || props.ds.building?.name
+    if (b) out.push(t('inBuilding', { name: b }) + (p.building?.address ? ` (${p.building.address})` : ''))
+    const e = p.directory
+    if (e) out.push(t('onDirectory', { what: [e.name, e.unit].filter(Boolean).join(' ') }))
+  }
+  return out.join(' · ')
+})
+const pending = computed(() => pendingSuggestions(props.place, r.value))
+const noStreet = computed(() => missingStreet(props.place, r.value))
+/** A suggestion not decided yet: 'low' (unsure reading) or 'ride' (the road the photos were taken on). */
+function suggestion(k: FieldKey) { return fieldState(k) ? null : suggestionKind(props.place.fields[k]) }
+function rowClass(k: FieldKey) {
+  return [fieldState(k), suggestion(k) ? 'suggest' : '', k === 'street' && noStreet.value ? 'missing' : '']
+}
 
 /** Where a field's value came from and how it compares, as small dots (the words on hover). */
 function marks(k: FieldKey) {
@@ -110,55 +271,145 @@ function marks(k: FieldKey) {
   if (f.google === 'differs') out.push({ cls: 'warn', tip: `Google: ${f.googleValue || ''}` })
   if (f.website === 'match') out.push({ cls: 'ok', tip: t('matchesWebsite') })
   if (f.website === 'differs') out.push({ cls: 'warn', tip: `Website: ${f.websiteValue || ''}` })
+  if (f.source === 'ride') out.push({ cls: 'r', tip: t('fromRide') })
+  if (f.source === 'walk') out.push({ cls: 'r', tip: t('fromWalk') })
+  if (f.note === 'from the directory board') out.push({ cls: 'ok', tip: t('fromDirectory') })
+  if (f.ride === 'differs') out.push({ cls: 'warn', tip: t('rideDiffers', { v: f.rideValue || '' }) })
   return out
 }
+
+// hints (hints.ts): confidence, a house number's source / partly read / out of order; the same place on another ride
+const hints = computed(() => placeHints(props.place, r.value, { seq: seqFlags.value.get(props.place.id) }))
+const sameOn = computed<Dupe[]>(() => dupes.value.get(props.place.id) || [])
+/** The rides the session list's filters hide (App.vue): a duplicate there still opens (the link goes to it
+ *  directly), and says it is hidden, so the reviewer is not surprised not to find it on the list. */
+const hiddenRides = inject(HIDDEN_BY_FILTERS, computed(() => new Set<string>()))
+const DECISION = { todo: 'decTodo', confirmed: 'decConfirmed', rejected: 'decRejected', visit: 'decVisit' } as const
+/** Reject this one as a duplicate of [d]: the review has no reason field, so the comment says which one it duplicates. */
+async function rejectAsDupe(d: Dupe) {
+  if (ro.value) return
+  r.value.comment = duplicateComment(d, r.value.comment)
+  await decide('rejected')
+}
+/** A value read on the photos: not one filled from Google / the website, nor the ride's road. */
+const fromPhoto = (k: FieldKey) => { const s = props.place.fields[k]?.source; return !!props.place.fields[k] && (!s || !['google', 'website', 'ride', 'walk'].includes(s)) }
+
+// the other signs on the same post (signPosts.ts): a pole shares one position, a gantry one place along the road
+const onPost = computed(() => (layer.value === 'sign' ? postSigns(props.ds.places, props.place) : [props.place]))
+const postKind = computed(() => (overRoad(props.place) ? 'gantry' : 'pole'))
+const postMates = computed(() => onPost.value.filter((p) => p.id !== props.place.id).map((p) => {
+  const rv = reviewOf(props.ds.id, p)
+  const code = rv.fields.signCode?.value || p.fields.signCode?.value || p.sign?.code || ''
+  return { p, code, art: signSvg(code, rv.fields.signText?.value || p.fields.signText?.value), n: onPost.value.indexOf(p) + 1,
+    decision: rv.decision }
+}))
+
+const signCodeNow = computed(() => r.value.fields.signCode?.value || props.place.fields.signCode?.value || props.place.sign?.code || '')
+const signArt = computed(() => signSvg(signCodeNow.value, r.value.fields.signText?.value || props.place.fields.signText?.value))
 </script>
 
 <template>
   <div class="review">
     <header>
-      <div>
+      <!-- a sign: drawn from its code (follows the reviewer's correction of the code) -->
+      <div v-if="layer === 'sign'" class="signart" :title="signCodeNow" v-html="signArt" />
+      <div class="headtext">
         <h2>{{ place.name }}</h2>
         <div class="muted">
-          <input class="cat" :value="r.category ?? place.category ?? ''" :placeholder="t('category')" @change="r.category = ($event.target as HTMLInputElement).value; save()" />
+          <span v-if="layer !== 'place'" class="chip">{{ t('layerOne_' + layer) }}</span>
+          <input v-else class="cat" :disabled="ro" :value="r.category ?? place.category ?? ''" :placeholder="t('category')" @change="r.category = ($event.target as HTMLInputElement).value; save()" />
           · <span :class="['chip', place.status !== 'open' ? 'bad' : '']">{{ t('status_' + place.status) }}</span>
-          <span v-if="place.confidence === 'low'" class="chip warn">{{ t('namePartly') }}</span>
-          <span :class="['chip', 'g-' + gstat(place)]">{{ t(G_LABEL[gstat(place)]) }}</span>
+          <span v-for="h in hints" :key="h.key" :class="['chip', 'hint', h.cls]" :title="h.title">{{ h.text }}</span>
+          <span v-if="noStreet" class="chip warn">{{ t('noStreet') }}</span>
+          <span v-if="layer === 'place'" :class="['chip', 'g-' + gstat(place)]">{{ t(G_LABEL[gstat(place)]) }}</span>
         </div>
+        <div v-if="layerInfo" class="muted small">{{ layerInfo }}</div>
       </div>
-      <button class="ghost" :title="t('close')" @click="emit('close')">✕</button>
+      <button class="ghost closex" :title="t('close')" :aria-label="t('close')" @click="emit('close')">✕</button>
     </header>
 
-    <div v-if="!photos.length" class="nophotos muted">{{ t('noPhotoKept') }}</div>
-    <div v-else class="photos">
-      <div class="frame">
-        <Photo class="big" :ds="ds.id" :path="photos[big]?.file" :alt="place.name" @click="full = true" />
-        <div class="tools">
-          <button :title="t('fullScreen')" @click="full = true">⤢</button>
-          <button :title="t('newTab')" @click="newTab">↗</button>
+    <div :class="['photobox', { over: dropOver }]" @dragover.prevent.stop="dropOver = true" @dragleave="dropOver = false" @drop.prevent.stop="onDrop">
+      <div v-if="!photos.length" class="nophotos muted">{{ t('noPhotoKept') }}</div>
+      <div v-else class="photos">
+        <div class="frame">
+          <Photo class="big" :ds="ds.id" :path="photos[big]?.show" :alt="place.name" @click="full = true" />
+          <div class="tools">
+            <button v-if="!ro" :title="t('cropT')" :aria-label="t('cropT')" @click="startCrop">✂</button>
+            <button v-if="!ro && !photos[big]?.cover" :title="t('makeCover')" :aria-label="t('makeCover')" @click="makeCover">★</button>
+            <button v-if="!ro" :title="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" :aria-label="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" @click="removePhoto">🗑</button>
+            <button :title="t('fullScreen')" :aria-label="t('fullScreen')" @click="full = true">⤢</button>
+            <button :title="t('newTab')" :aria-label="t('newTab')" @click="newTab">↗</button>
+          </div>
+        </div>
+        <div class="why muted">
+          <span v-if="photos[big]?.cover && photos.length > 1" class="tag">{{ t('cover') }}</span>
+          <span v-if="photos[big]?.added" class="tag">{{ t('addedByYou') }}</span>
+          <span v-if="photos[big]?.cropped" class="tag">{{ t('croppedTag') }}</span>
+          <template v-if="photos[big]?.index != null">#{{ photos[big]?.index }}</template>
+          <template v-if="photos[big]?.why"> · {{ photos[big]?.why }}</template>
         </div>
       </div>
-      <div v-if="photos[big]?.why" class="why muted">#{{ photos[big]?.index }} · {{ photos[big]?.why }}</div>
-      <div v-if="photos.length > 1" class="thumbs">
-        <button v-for="(p, i) in photos" :key="p.file" :class="{ on: i === big }" @click="big = i"><Photo :ds="ds.id" :path="p.file" /></button>
+      <div class="thumbs" data-strip>
+        <template v-if="photos.length > 1">
+          <button v-for="(p, i) in photos" :key="p.file" :class="{ on: i === big }" @click="big = i"><Photo :ds="ds.id" :path="p.show" /></button>
+        </template>
+        <button v-if="!ro" class="addph" :title="t('addPhotosT')" :disabled="!!busy" @click="picker?.click()">{{ busy || '+ ' + t('addPhotos') }}</button>
+        <input ref="picker" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden @change="onPick" />
       </div>
+      <div v-if="removed.length" class="removed muted">
+        {{ t('removedN', { n: removed.length }) }}
+        <button v-for="p in removed" :key="p.file" :title="t('restore')" :disabled="ro" @click="restore(p.file)"><Photo :ds="ds.id" :path="p.file" /><span>↺</span></button>
+      </div>
+      <div v-if="edited" class="muted small">{{ t('photoEditsNote') }}</div>
     </div>
     <p v-if="place.note" class="note">{{ place.note }}</p>
 
+    <section v-if="postMates.length" class="postmates">
+      <h3>{{ t('postH_' + postKind) }}</h3>
+      <p class="muted small">{{ t('postHint_' + postKind) }}</p>
+      <RouterLink v-for="m in postMates" :key="m.p.id" class="mate" :to="to.place(ds.id, m.p.id)">
+        <span class="mn">{{ m.n }}</span>
+        <span class="mart" :title="m.code" v-html="m.art" />
+        <span class="mtext">{{ m.p.name }} <span class="muted small">· {{ m.code }}<template v-if="m.p.sign?.lane != null"> · {{ t('postLane', { lane: m.p.sign.lane }) }}</template>
+          · {{ t(DECISION[m.decision]) }}</span></span>
+      </RouterLink>
+    </section>
+
+    <section v-if="sameOn.length" class="dupes">
+      <h3>{{ t('dupesH') }}</h3>
+      <p class="muted small">{{ t('dupesHint') }}</p>
+      <div v-for="d in sameOn" :key="d.ds.id + '|' + d.place.id" class="dupe">
+        <div class="dtext">
+          <b>{{ d.place.name }}</b>
+          <div class="muted small">{{ d.ds.session.name || d.ds.id }} · {{ d.distM }} m · {{ t('dupeWhy_' + d.why) }}
+            · {{ t('dupeThere', { d: t(DECISION[reviewOf(d.ds.id, d.place).decision]) }) }}
+            <span v-if="hiddenRides.has(d.ds.id)" class="dhidden" :title="t('dupeHiddenTitle')">{{ t('dupeHidden') }}</span></div>
+        </div>
+        <RouterLink class="button secondary small" :to="to.place(d.ds.id, d.place.id)">{{ t('dupeOpen') }}</RouterLink>
+        <button v-if="!ro && r.decision !== 'rejected'" class="secondary small" :title="t('rejectDupeTitle')" @click="rejectAsDupe(d)">{{ t('rejectDupe') }}</button>
+      </div>
+    </section>
+
     <h3>{{ t('whatPhotosSay') }}</h3>
     <table class="fields">
-      <tr v-for="k in FIELD_KEYS.filter((k) => place.fields[k] || r.fields[k] || ['phone', 'houseNumber', 'openingHours'].includes(k))" :key="k" :class="fieldState(k)">
-        <th>{{ t('field.' + k) }}
-          <span v-for="m in marks(k)" :key="m.cls" :class="['mark', m.cls]" :title="m.tip"></span>
-          <div v-if="place.fields[k] && !place.fields[k]?.source" class="src">{{ t('photoN', { n: place.fields[k]?.photo ?? '?' }) }}<span v-if="place.fields[k]?.sure && place.fields[k]?.sure !== 'high'"> · {{ t('sure_' + place.fields[k]?.sure) }}</span></div>
+      <tr v-for="k in keys" :key="k" :class="rowClass(k)">
+        <th>{{ fieldLabel(k) }}
+          <button v-if="marks(k).length" type="button" class="marks" :aria-expanded="openMarks === k" :aria-label="t('marksT')"
+            @click="openMarks = openMarks === k ? null : k"><span v-for="(m, i) in marks(k)" :key="i" :class="['mark', m.cls]" :title="m.tip"></span></button>
+          <ul v-if="openMarks === k" class="marktips"><li v-for="(m, i) in marks(k)" :key="i"><span :class="['mark', m.cls]"></span>{{ m.tip }}</li></ul>
+          <div v-if="fromPhoto(k)" class="src">{{ t('photoN', { n: place.fields[k]?.photo ?? '?' }) }}<span v-if="place.fields[k]?.sure && place.fields[k]?.sure !== 'high'"> · {{ t('sure_' + place.fields[k]?.sure) }}</span></div>
+          <div v-if="suggestion(k)" class="sugg">{{ t(suggestion(k) === 'ride' ? 'suggestRide' : 'suggestLow') }}</div>
         </th>
-        <td><input :value="shown(k)" :placeholder="place.fields[k] ? '' : t('notOnPhotos')" @change="edit(k, $event)" /></td>
+        <td><input :disabled="ro" :value="shown(k)" :placeholder="place.fields[k] ? '' : k === 'street' ? t('streetMissing') : t('notOnPhotos')" @change="edit(k, $event)" /></td>
         <td class="acts">
-          <button :class="['ok', { on: fieldState(k) === 'ok' || fieldState(k) === 'edited' }]" :title="t('correct')" :disabled="!shown(k)" @click="setField(k, 'ok')">✓</button>
-          <button :class="['no', { on: fieldState(k) === 'rejected' }]" :title="t('wrongLeaveOut')" :disabled="!shown(k)" @click="setField(k, 'rejected')">✕</button>
+          <button :class="['ok', { on: fieldState(k) === 'ok' || fieldState(k) === 'edited' }]" :title="t('correct')" :disabled="ro || !shown(k)" @click="setField(k, 'ok')">✓</button>
+          <button :class="['no', { on: fieldState(k) === 'rejected' }]" :title="t('wrongLeaveOut')" :disabled="ro || !shown(k)" @click="setField(k, 'rejected')">✕</button>
         </td>
       </tr>
     </table>
+    <p v-if="pending.length" :class="['pending', { after: r.decision === 'confirmed' }]">
+      {{ t(r.decision === 'confirmed' ? 'pendingAfterConfirm' : 'pendingBeforeConfirm', { f: pending.map(fieldLabel).join(', ') }) }}
+    </p>
 
     <h3>{{ t('position') }}</h3>
     <div class="chips">
@@ -197,22 +448,28 @@ function marks(k: FieldKey) {
       </template>
     </div>
 
-    <textarea :value="r.comment || ''" :placeholder="t('comment')" @change="r.comment = ($event.target as HTMLTextAreaElement).value; save()"></textarea>
+    <textarea :disabled="ro" :value="r.comment || ''" :placeholder="t('comment')" @change="r.comment = ($event.target as HTMLTextAreaElement).value; save()"></textarea>
 
     <div v-if="full" class="viewer" @click.self="full = false">
-      <Photo class="vimg" :ds="ds.id" :path="photos[big]?.file" :alt="place.name" />
+      <Photo class="vimg" :ds="ds.id" :path="photos[big]?.show" :alt="place.name" />
       <div class="vbar">
         <span>{{ big + 1 }} / {{ photos.length }}<template v-if="photos[big]?.index != null"> · {{ t('photoN', { n: photos[big]?.index }) }}</template><template v-if="photos[big]?.why"> · {{ photos[big]?.why }}</template></span>
         <span>
-          <button v-if="photos.length > 1" :title="t('prev')" @click="step(-1)">‹</button>
-          <button v-if="photos.length > 1" :title="t('next')" @click="step(1)">›</button>
-          <button :title="t('newTab')" @click="newTab">↗</button>
-          <button :title="t('closeEsc')" @click="full = false">✕</button>
+          <button v-if="photos.length > 1" :title="t('prev')" :aria-label="t('prev')" @click="step(-1)">‹</button>
+          <button v-if="photos.length > 1" :title="t('next')" :aria-label="t('next')" @click="step(1)">›</button>
+          <button v-if="!ro" :title="t('cropT')" :aria-label="t('cropT')" @click="startCrop">✂</button>
+          <button v-if="!ro && !photos[big]?.cover" :title="t('makeCover')" :aria-label="t('makeCover')" @click="makeCover">★</button>
+          <button v-if="!ro" :title="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" :aria-label="photos[big]?.added ? t('deleteAdded') : t('removePhoto')" @click="removePhoto">🗑</button>
+          <button :title="t('newTab')" :aria-label="t('newTab')" @click="newTab">↗</button>
+          <button :title="t('closeEsc')" :aria-label="t('closeEsc')" @click="full = false">✕</button>
         </span>
       </div>
     </div>
 
-    <footer>
+    <CropEditor v-if="cropping" :url="cropping.url" :rect="cropping.rect" @save="saveCrop" @cancel="cropping = null" />
+
+    <footer v-if="ro" class="rofoot muted small">{{ t('readOnlyHint') }}</footer>
+    <footer v-else>
       <button class="primary" @click="decide('confirmed')">{{ r.decision === 'confirmed' ? t('confirmedBtn') : t('confirm') }}</button>
       <button class="secondary" @click="decide('visit')">{{ r.decision === 'visit' ? t('visitQueued') : t('needsVisit') }}</button>
       <button class="danger" @click="decide('rejected')">{{ r.decision === 'rejected' ? t('rejectedF') : t('reject') }}</button>
@@ -224,6 +481,9 @@ function marks(k: FieldKey) {
 <style scoped>
 .review { display: flex; flex-direction: column; gap: 10px; }
 header { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.headtext { flex: 1; min-width: 0; }
+.signart { flex: none; width: 64px; height: 64px; filter: drop-shadow(0 1px 3px rgba(0,0,0,.3)); }
+.signart :deep(svg) { display: block; width: 100%; height: 100%; }
 h2 { margin: 0; font-size: 19px; letter-spacing: -0.2px; }
 h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
 .cat { border: 0; border-bottom: 1px dashed var(--line); font: inherit; color: var(--muted); width: 140px; background: transparent; }
@@ -234,11 +494,27 @@ h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing
 .thumbs button { padding: 0; border: 2px solid transparent; border-radius: 6px; background: none; cursor: pointer; }
 .thumbs button.on { border-color: var(--accent); }
 .thumbs img { height: 54px; width: 80px; object-fit: cover; border-radius: 4px; display: block; }
+.thumbs .addph { height: 58px; min-width: 84px; padding: 0 10px; border: 1.5px dashed var(--line); border-radius: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.thumbs .addph:hover { border-color: var(--accent); color: var(--accent); }
+.photobox { border-radius: 12px; outline: 2px dashed transparent; outline-offset: 3px; }
+.photobox.over { outline-color: var(--accent); }
+.tag { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 8px; background: #eef0f2; color: #333; font-weight: 600; margin-right: 4px; }
+.removed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; margin-top: 6px; }
+.removed button { position: relative; padding: 0; border: 0; background: none; cursor: pointer; opacity: .55; }
+.removed button:hover { opacity: 1; }
+.removed img { height: 36px; width: 54px; object-fit: cover; border-radius: 4px; display: block; filter: grayscale(1); }
+.removed span { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-weight: 700; text-shadow: 0 0 3px #000; }
+.small { font-size: 12px; }
 .note { margin: 0; background: #fff8e6; border-radius: 8px; padding: 6px 9px; font-size: 13px; }
 .fields { width: 100%; border-collapse: collapse; }
 .fields th { text-align: left; font-weight: 600; font-size: 13px; width: 112px; vertical-align: top; padding: 6px 6px 6px 0; }
 .fields .src { font-weight: 400; font-size: 11px; color: var(--muted); }
 .mark { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 4px; vertical-align: 1px; cursor: help; }
+.marks { border: 0; background: none; padding: 0 2px; margin: 0; cursor: pointer; line-height: 1; border-radius: 6px; }
+.marks:focus-visible { outline: 2px solid var(--accent); }
+.marktips { list-style: none; margin: 4px 0 0; padding: 6px 8px; background: var(--canvas); border-radius: 8px; font-weight: 400; font-size: 12px;
+  display: grid; gap: 3px; overflow-wrap: anywhere; }
+.marktips .mark { margin: 0 6px 0 0; }
 .mark.g { background: #1659c7; } .mark.w { background: #7c3aed; } .mark.ok { background: var(--accent); }
 .mark.warn { background: #f59f00; }
 .fields td { padding: 4px 0; vertical-align: top; }
@@ -248,16 +524,23 @@ h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing
 .acts { width: 70px; text-align: right; white-space: nowrap; }
 .acts button { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; margin-left: 3px; }
 .acts .ok.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.fields tr.suggest input { border-style: dashed; border-color: #f59f00; background: #fffaf0; }
+.fields tr.suggest .acts .ok { border-color: #f59f00; color: #8a5a00; }
+.fields tr.missing input { border-color: #e8590c; }
+.fields .sugg { font-weight: 400; font-size: 11px; color: #8a5a00; }
+.mark.r { background: #8a5a00; }
+.pending { margin: 0; font-size: 12px; color: #8a5a00; background: #fff8e6; border-radius: 8px; padding: 5px 9px; }
+.pending.after { color: #9b1c1c; background: #fdecea; }
 .acts .no.on { background: #d6336c; color: #fff; border-color: #d6336c; }
 .acts button:disabled { opacity: .35; cursor: default; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .pchip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line);
   background: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
 .pchip .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
-.pchip.green .dot { background: #1f7a52; } .pchip.purple .dot { background: #7c3aed; }
+.pchip.green .dot { background: #3d6b00; } .pchip.purple .dot { background: #7c3aed; }
 .pchip.orange .dot { background: #f59f00; } .pchip.blue .dot { background: #1659c7; border-radius: 2px; }
 .pchip.view { border-color: var(--ink); }
-.pchip.final { background: #f1faf5; border-color: var(--accent); color: #1b5e3c; }
+.pchip.final { background: #f3fbe0; border-color: var(--accent); color: #2c4f00; }
 .pchip.blue.view { background: #f5f8ff; }
 .tick { font-size: 11px; }
 .pinfo { font-size: 13px; line-height: 1.5; background: var(--canvas); border-radius: 10px; padding: 8px 10px; }
@@ -274,7 +557,60 @@ h3 { margin: 8px 0 0; font-size: 13px; text-transform: uppercase; letter-spacing
 .vbar span:last-child { display: flex; gap: 6px; }
 textarea { width: 100%; min-height: 54px; border: 1px solid var(--line); border-radius: 10px; padding: 8px; font: inherit; resize: vertical; }
 footer { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; bottom: 0; background: var(--card); padding: 8px 0 2px; }
-.chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #e7f6ec; color: #1b5e3c; font-weight: 600; margin-left: 2px; }
+.chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #e7f6ec; color: #2c4f00; font-weight: 600; margin-left: 2px; }
 .chip.bad { background: #fde8ef; color: #9b1c47; } .chip.warn { background: #fdecea; color: #9b1c1c; }
+.dupes { display: grid; gap: 6px; background: #f5f8ff; border-radius: 10px; padding: 8px 10px; }
+.postmates { display: grid; gap: 4px; background: #f6f8f3; border-radius: 10px; padding: 8px 10px; }
+.postmates h3, .postmates p { margin: 0; }
+.mate { display: flex; gap: 8px; align-items: center; color: inherit; text-decoration: none; padding: 2px 0; }
+.mate:hover .mtext { text-decoration: underline; }
+.mate .mn { flex: none; width: 16px; text-align: right; font-weight: 700; color: #6b7280; }
+.mate .mart { flex: none; width: 28px; height: 28px; }
+.mate .mart :deep(svg) { display: block; width: 100%; height: 100%; }
+.mate .mtext { flex: 1; min-width: 0; }
+.dupes h3 { margin: 0; }
+.dupes p { margin: 0; }
+.dupe { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dupe .dtext { flex: 1; min-width: 160px; }
+.dupe .dhidden { font-style: italic; }
+.dupe a.button { padding: 4px 10px; font-size: 13px; }
 .chip.g-found { background: #e8f0fe; color: #123f8c; } .chip.g-new { background: #fff0e6; color: #a23b05; } .chip.g-todo { background: #eef0f2; color: #555; }
+
+/* touch: 44 px targets (buttons, field checks, thumbnails, position chips) */
+@media (pointer: coarse) {
+  .acts { width: 98px; }
+  .acts button { width: 44px; height: 44px; font-size: 16px; }
+  .tools button, .vbar button { width: 44px; height: 44px; font-size: 18px; }
+  .thumbs button { min-height: 44px; }
+  .thumbs .addph { height: 58px; min-width: 96px; }
+  .removed button { min-width: 54px; min-height: 44px; }
+  .removed img { height: 44px; }
+  .pchip { min-height: 44px; padding: 6px 14px; }
+  .marks { min-width: 44px; min-height: 44px; padding: 6px; margin: -12px 0; vertical-align: middle; }
+  .mark { width: 10px; height: 10px; }
+  footer button { min-height: 44px; }
+  .closex { min-width: 44px; min-height: 44px; }
+  .fields input, textarea, .cat { font-size: 16px; }   /* no zoom-in on focus (iOS) */
+}
+/* tablet (701-1099 px, style.css): the panel bar has back, so no close button */
+@media (max-width: 1099px) { .closex { display: none; } }
+/* big screens: a taller photo */
+@media (min-width: 1600px) and (min-height: 900px) { .photos .big { max-height: 380px; } }
+/* phone (<= 700 px, style.css): field name above its value; the photo strip scrolls sideways */
+@media (max-width: 700px) {
+  .fields, .fields tbody { display: block; }
+  .fields tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+  .fields th { grid-column: 1 / -1; width: auto; padding: 4px 0 2px; }
+  .fields td { padding: 2px 0; }
+  .acts { width: auto; }
+  .thumbs { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: 4px; scrollbar-width: thin; }
+  .thumbs > * { flex: none; }
+  .photos .big { max-height: 46vh; }
+  .cat { width: 120px; }
+  footer { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  footer button { flex: 1 1 auto; }
+  .vbar { flex-wrap: wrap; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .vbar span:last-child { flex-wrap: wrap; }
+  .viewer { padding-top: env(safe-area-inset-top); }
+}
 </style>

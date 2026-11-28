@@ -1,25 +1,30 @@
 <script setup lang="ts">
-// Captured -> Agent processed -> Human reviewed as connected dots (the name on hover), with the review progress.
+// Captured -> Agent processed -> Human reviewed -> Exported as connected dots (the name on hover), with the review progress.
+// A ride still waiting on the server (no dataset yet) is at the first stage: ds = null.
 import { computed } from 'vue'
 import { STAGES, stageOf } from '../store'
 import { t } from '../i18n'
 import type { Dataset } from '../types'
 
-const props = defineProps<{ ds: Dataset }>()
-const st = computed(() => stageOf(props.ds))
+const props = defineProps<{ ds: Dataset | null }>()
+const st = computed(() => (props.ds ? stageOf(props.ds) : { stage: 'captured' as const, done: 0, total: 0 }))
 const at = computed(() => STAGES.findIndex((s) => s.key === st.value.stage))
 const pct = computed(() => (st.value.total ? Math.round((100 * st.value.done) / st.value.total) : 100))
-const NAME = { captured: 'stageCaptured', processed: 'stageProcessed', reviewed: 'stageReviewed' } as const
+const NAME = { captured: 'stageCaptured', processed: 'stageProcessed', reviewed: 'stageReviewed', exported: 'stageExported' } as const
+/** Dots before this one are full, this one is "now": a reviewed ride waits for its export, an exported one is through. */
+const reached = computed(() => (st.value.stage === 'reviewed' || st.value.stage === 'exported' ? at.value + 1 : at.value))
 </script>
 
 <template>
   <div class="stagebar">
     <ol :aria-label="t(NAME[st.stage])">
-      <li v-for="(s, i) in STAGES" :key="s.key" :class="{ done: i < at || st.stage === 'reviewed', now: i === at && st.stage !== 'reviewed' }"
+      <li v-for="(s, i) in STAGES" :key="s.key" :class="{ done: i < reached, now: i === reached }"
         :data-tip="t(NAME[s.key])" :title="t(NAME[s.key])"><i></i></li>
     </ol>
     <div class="bar" v-if="st.stage !== 'captured'"><div :style="{ width: pct + '%' }"></div></div>
     <span class="muted">{{ st.stage === 'captured' ? t('notProcessed') : t('reviewedOf', { done: st.done, total: st.total }) }}</span>
+    <!-- no hover on touch screens: the stage's name is written out -->
+    <span class="stname">{{ t(NAME[st.stage]) }}</span>
   </div>
 </template>
 
@@ -38,4 +43,10 @@ li:hover::after { content: attr(data-tip); position: absolute; bottom: 150%; lef
 .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; min-width: 40px; }
 .bar div { height: 100%; background: var(--accent); }
 .muted { white-space: nowrap; }
+.stname { display: none; }
+@media (hover: none) {
+  .stagebar { flex-wrap: wrap; row-gap: 2px; }
+  .stname { display: block; flex-basis: 100%; color: var(--muted); font-weight: 600; }
+}
+@media (max-width: 700px) { .muted { white-space: normal; } }
 </style>

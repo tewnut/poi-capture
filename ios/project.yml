@@ -3,14 +3,14 @@
 # The shared Kotlin logic (../shared) is built into Shared.framework by Gradle before each build (JDK 17+ needed).
 name: PoiCapture
 options:
-  bundleIdPrefix: io.github.tewnut
+  bundleIdPrefix: vn.vmaps
   developmentLanguage: en
   deploymentTarget:
     iOS: "16.0"
   createIntermediateGroups: true
 settings:
   base:
-    MARKETING_VERSION: "0.14.0"
+    MARKETING_VERSION: "0.22.4"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     ENABLE_USER_SCRIPT_SANDBOXING: NO          # the Gradle step writes ../shared/build
@@ -23,11 +23,11 @@ targets:
       - path: PoiCapture
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.tewnut.poicapture
-        PRODUCT_NAME: POI Capture
+        PRODUCT_BUNDLE_IDENTIFIER: vn.vmaps.quetpho
+        PRODUCT_NAME: Quet Pho
         TARGETED_DEVICE_FAMILY: "1"
         GENERATE_INFOPLIST_FILE: YES
-        INFOPLIST_KEY_CFBundleDisplayName: POI Capture
+        INFOPLIST_KEY_CFBundleDisplayName: Quét Phố
         INFOPLIST_KEY_NSCameraUsageDescription: "Take photos of shopfronts and signs."
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Know where each photo was taken and which street you are on."
         INFOPLIST_KEY_NSMotionUsageDescription: "Know which way the camera looks when a photo is taken."
@@ -35,6 +35,10 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
         INFOPLIST_KEY_UIRequiredDeviceCapabilities: "gps location-services still-camera"
         INFOPLIST_KEY_CFBundleLocalizations: "en vi"
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: "NO"  # only HTTPS: no export-compliance question per build
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon        # Assets.xcassets (the store icon, 1024 px, no alpha)
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: KGK45GQM68                       # Tasco Joint Stock Company (public: in every signed app)
         FRAMEWORK_SEARCH_PATHS: "$(SRCROOT)/../shared/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)"
         OTHER_LDFLAGS: "$(inherited) -framework Shared"
     preBuildScripts:

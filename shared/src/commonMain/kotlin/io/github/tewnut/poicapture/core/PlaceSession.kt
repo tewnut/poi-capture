@@ -140,7 +140,7 @@ object PlaceSession {
         return json.encodeToString(JsonObject.serializer(), m)
     }
 
-    /** "{street} [yymmdd]" for a Place capture session (see SessionNaming). */
-    fun name(photos: List<PlacePhoto>, yymmdd: String?, fallback: String): String =
-        SessionNaming.name(photos.mapNotNull { it.roadName }, yymmdd, fallback)
+    /** "{street} {stamp}" for a Place capture session (see SessionNaming). */
+    fun name(photos: List<PlacePhoto>, stamp: String?, fallback: String): String =
+        SessionNaming.name(photos.mapNotNull { it.roadName }, stamp, fallback)
 }

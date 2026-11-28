@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name" translatable="false">POI Capture</string>
+    <string name="app_name" translatable="false">Quét Phố</string>
 
     <!-- Navigation -->
     <string name="nav_settings">Settings</string>
@@ -75,21 +75,22 @@
     <!-- ==== Onboarding, new session ==== -->
     <!-- Onboarding (first run) -->
     <string name="onboarding_back">← Back</string>
+    <string name="onboarding_close">✕ Close</string>
     <string name="onboarding_continue">Continue</string>
-    <string name="onboarding_welcome_lead">Record shops and places along the street and put them on the map.</string>
+    <string name="onboarding_welcome_lead">Put shops, house numbers and road signs on the map.</string>
     <string name="onboarding_welcome_button">Set up</string>
     <string name="onboarding_welcome_time">One-time setup, about a minute.</string>
     <string name="onboarding_sweep_title">Street sweep</string>
-    <string name="onboarding_sweep_text">Ride along the street with the phone on a mount, or let a passenger hold it: the app photographs the shopfronts by itself.</string>
+    <string name="onboarding_sweep_text">Ride along the street; the app takes the photos.</string>
     <string name="onboarding_place_title">Place capture</string>
-    <string name="onboarding_place_text">Stop at each shop: photograph the front, the sign, the inside, then pin it on the right building.</string>
+    <string name="onboarding_place_text">Stop at each shop and photograph it.</string>
     <string name="onboarding_position_title">Pinned to the building</string>
-    <string name="onboarding_position_text">The app works out where the shopfront is from GPS and the camera direction. If it\'s off, drag it on the map.</string>
+    <string name="onboarding_position_text">From GPS and the camera direction; drag it if it is off.</string>
     <string name="onboarding_offline_title">No network needed while recording</string>
-    <string name="onboarding_offline_text">Photos stay on the phone until you send the file (Zalo, Drive, email…) or save it.</string>
+    <string name="onboarding_offline_text">Rides upload by themselves when there is a network.</string>
 
     <string name="onboarding_email_title">Contributor ID</string>
-    <string name="onboarding_email_lead">If your team gave you a contributor ID, enter it here. It goes with each session you send, so your work is credited to you.</string>
+    <string name="onboarding_email_lead">Optional; so your work is credited to you.</string>
     <string name="onboarding_email_label">Contributor ID (optional)</string>
     <string name="onboarding_email_placeholder">e.g. HCM-024</string>
     <string name="onboarding_email_invalid">That doesn\'t look like an email, e.g. name@gmail.com</string>
@@ -98,13 +99,13 @@
     <string name="onboarding_name_help">Shown on your sessions. Leave empty to use the part of your email before @.</string>
 
     <string name="onboarding_perm_camera">Camera</string>
-    <string name="onboarding_perm_camera_why">Take photos and video of shopfronts.</string>
+    <string name="onboarding_perm_camera_why">Photograph shopfronts and signs.</string>
     <string name="onboarding_perm_location">Precise location</string>
-    <string name="onboarding_perm_location_why">Know where each photo was taken and which street you\'re on.</string>
+    <string name="onboarding_perm_location_why">Know where each photo was taken.</string>
     <string name="onboarding_perm_notifications">Notifications</string>
-    <string name="onboarding_perm_notifications_why">Show that recording is on while the screen is off.</string>
+    <string name="onboarding_perm_notifications_why">Show the recording with the screen off.</string>
     <string name="onboarding_perms_title">Permissions</string>
-    <string name="onboarding_perms_lead">The app only uses these while you\'re recording.</string>
+    <string name="onboarding_perms_lead">Used only while recording.</string>
     <string name="onboarding_perms_grant">Allow</string>
     <string name="onboarding_perm_missing">Not yet</string>
     <string name="onboarding_and">%1$s and %2$s</string>
@@ -112,13 +113,13 @@
     <string name="onboarding_open_settings">Open app settings</string>
 
     <string name="onboarding_roads_title">Road data</string>
-    <string name="onboarding_roads_lead">Road data for your province / city lets the app know street names even offline.</string>
+    <string name="onboarding_roads_lead">To know street names even offline.</string>
     <string name="onboarding_roads_loading">Loading the list of provinces / cities…</string>
     <string name="onboarding_roads_error">Couldn\'t load the list: %1$s</string>
     <string name="onboarding_retry">Retry</string>
     <string name="onboarding_roads_here">You\'re in %1$s</string>
     <string name="onboarding_roads_installed">Road data ready, you can record.</string>
-    <string name="onboarding_roads_downloading">Downloading now (also on mobile data). It continues in the background, you can go on.</string>
+    <string name="onboarding_roads_downloading">Downloading; you can go on.</string>
     <string name="onboarding_roads_waiting">Waiting for your location to find your province / city… or pick one below.</string>
     <string name="onboarding_roads_no_pack">No pack covers where you are: pick one below.</string>
     <string name="onboarding_roads_need">Download road data to continue</string>
@@ -128,12 +129,12 @@
     </plurals>
     <string name="onboarding_roads_others">Other provinces / cities</string>
     <string name="onboarding_roads_all">Provinces / cities</string>
-    <string name="onboarding_roads_credit">Road data © OpenStreetMap contributors (ODbL), via Geofabrik. Manage packs in Settings.</string>
+    <string name="onboarding_roads_credit">Road data © OpenStreetMap contributors (ODbL).</string>
 
     <string name="onboarding_ready_title">Ready</string>
     <string name="onboarding_ready_button">Start recording</string>
-    <string name="onboarding_mount_title">Two ways to sweep a street</string>
-    <string name="onboarding_mount_text">Clamp the phone firmly, best in landscape, back camera facing the buildings. The app measures the camera direction during the first few accelerations and brakes.</string>
+    <string name="onboarding_mount_title">Ways to sweep a street</string>
+    <string name="onboarding_mount_text">Clamp it firmly, back camera facing the buildings.</string>
     <string name="onboarding_summary_name">Contributor ID: %1$s</string>
     <string name="onboarding_summary_perms_ok">Camera and location allowed</string>
     <string name="onboarding_summary_perms_missing">Missing permission: %1$s</string>
@@ -141,7 +142,7 @@
     <string name="onboarding_summary_roads">Road data: %1$s</string>
     <string name="onboarding_summary_roads_online">Road data: fetched online while recording</string>
     <string name="onboarding_summary_roads_pending">A pack you picked can be used once it has downloaded.</string>
-    <string name="onboarding_ready_after">When done, open “Sessions” to review on the map and send (Zalo, Drive, email…).</string>
+    <string name="onboarding_ready_after">Review your rides in “Rides”.</string>
 
     <!-- New (setup) screen -->
     <string name="setup_need_permissions">Camera and precise location are needed. Open Settings → Permissions to turn them on.</string>
@@ -192,7 +193,7 @@
     <string name="capture_paused">Ⅱ Paused</string>
     <string name="capture_side_right">SHOOTING RIGHT →</string>
     <string name="capture_side_left">← SHOOTING LEFT</string>
-    <string name="capture_end_title">End this session?</string>
+    <string name="capture_end_title">End this ride?</string>
     <plurals name="capture_end_videos">
         <item quantity="one">%1$d video clip recorded.</item>
         <item quantity="other">%1$d video clips recorded.</item>
@@ -201,8 +202,13 @@
         <item quantity="one">%1$d photo taken.</item>
         <item quantity="other">%1$d photos taken.</item>
     </plurals>
-    <string name="capture_end_body">The session stays on the phone; check the photo locations and send it from “Sessions”.</string>
+    <string name="capture_end_body">The ride stays on the phone; review it in “Rides”.</string>
     <string name="capture_end_save">End and save</string>
+    <string name="capture_discard">Discard</string>
+    <string name="capture_discard_title">Discard this ride?</string>
+    <string name="capture_discard_body">They are deleted from the phone and never sent. This cannot be undone.</string>
+    <string name="capture_discard_confirm">Discard ride</string>
+    <string name="cancel_back">Back</string>
     <string name="capture_keep_going">Keep recording</string>
     <string name="capture_gps_good">● GPS ±%1$s m</string>
     <string name="capture_gps_weak">● Weak GPS ±%1$s m</string>
@@ -253,7 +259,7 @@
     <string name="service_gps_permission">GPS: precise location not allowed</string>
     <string name="service_hot">Phone is overheating: shade it or take a break</string>
     <string name="service_missed_shot">Camera can\'t keep up: slow down so no shopfront is missed</string>
-    <string name="service_turn_landscape">Turn the phone sideways: in portrait half of each photo is road and sky</string>
+    <string name="service_turn_landscape">↻ Turn the phone sideways</string>
     <string name="service_mount_front">Camera is facing FORWARD: turn it to the buildings you\'re recording</string>
     <string name="service_mount_back">Camera is facing BACKWARD: turn it to the buildings you\'re recording</string>
     <string name="service_camera_failed">Couldn\'t open the camera: %1$s</string>
@@ -281,7 +287,7 @@
     </plurals>
     <string name="sessions_local_only">Data stays on this phone until you send it. %1$s free.</string>
     <string name="sessions_loading">Reading your sessions…</string>
-    <string name="sessions_empty">No sessions yet</string>
+    <string name="sessions_empty">No rides yet</string>
     <string name="sessions_delete_title">Delete this session?</string>
     <string name="sessions_delete_sent">This session was sent. Its photos and videos on this phone will be deleted.</string>
     <string name="sessions_delete_unsent">This session was NOT sent or saved. Its photos and videos will be lost for good.</string>
@@ -323,6 +329,16 @@
     <string name="sessions_interrupted">interrupted (can still be sent)</string>
     <string name="sessions_send">Send</string>
     <string name="sessions_send_again">Send again</string>
+    <string name="sessions_send_server">Send to server</string>
+    <string name="sessions_share_file">Share zip with another app</string>
+    <string name="sessions_sending">Sending %1$d%% · %2$s of %3$s</string>
+    <string name="sessions_preparing">Preparing to send…</string>
+    <string name="sessions_on_server">On the server · %1$s</string>
+    <string name="sessions_send_now">Send now</string>
+    <string name="sessions_badge_sending">Sending %d%%</string>
+    <string name="sessions_setup_title">Add your access key</string>
+    <string name="sessions_setup_text">To send rides to the server, scan the QR code or type the access key from your admin (Settings → Upload server). Or share the zip with another app.</string>
+    <string name="sessions_setup_open">Open settings</string>
     <string name="sessions_map">Map</string>
     <string name="sessions_duration_s">%1$d s</string>
     <string name="sessions_duration_min">%1$d min</string>
@@ -381,22 +397,6 @@
     <string name="packs_waiting_wifi">Waiting for Wi-Fi…</string>
     <string name="packs_download_failed">Download failed: %1$s</string>
 
-    <!-- Photo kinds of Place capture (PhotoRolesCard) -->
-    <string name="roles_intro">The buttons for picking the photo kind at a place, in shooting order. ★ = cover photo. After a photo of a kind marked ↻, the app moves on to the next kind that has no photo yet.</string>
-    <string name="roles_move_up">Move up</string>
-    <string name="roles_move_down">Move down</string>
-    <string name="roles_make_cover">Make cover photo ★</string>
-    <string name="roles_advance_off">Don\'t move on after this photo</string>
-    <string name="roles_advance_on">Move on after 1 photo ↻</string>
-    <string name="roles_remove">Remove this kind</string>
-    <string name="roles_add">+ Add photo kind</string>
-    <string name="roles_reset">Restore defaults</string>
-    <string name="roles_add_title">Add photo kind</string>
-    <string name="roles_add_name">Button name, e.g. Parking</string>
-    <string name="roles_add_hint">Hint while shooting (optional)</string>
-    <string name="roles_add_code">Photos of this kind are exported with the code “%1$s”.</string>
-    <string name="roles_add_confirm">Add</string>
-    <string name="roles_cancel">Cancel</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -406,24 +406,14 @@
     <string name="settings_email_bad">That doesn\'t look like an email, e.g. name@gmail.com</string>
     <string name="settings_display_name">Display name (optional)</string>
     <string name="settings_road_data">Offline road data</string>
-    <string name="settings_advanced_hide">▾ Hide advanced settings</string>
-    <string name="settings_advanced_show">▸ Advanced settings (mount angle, photo kinds)</string>
-    <string name="settings_mount_title">Mount angle (manual)</string>
-    <string name="settings_mount_hint">For a phone on a mount only. The app measures where the camera points by itself when you speed up or brake a few times; set it here only if the app says it couldn\'t: how many degrees the camera is turned toward the front or the back.</string>
-    <string name="settings_mount_forward">turned toward the front</string>
-    <string name="settings_mount_backward">turned toward the back</string>
-    <string name="settings_mount_square">square to the road</string>
-    <string name="settings_roles_title">Photo kinds in Place capture</string>
-    <string name="settings_roles_ask">Ask the kind of each photo (front, sign…)</string>
-    <string name="settings_roles_hint">Not needed: the system tells fronts, signs and insides apart by itself. Only turn on if your team asks.</string>
     <string name="settings_replay_onboarding">Show the intro again</string>
 
     <!-- access gate: GPS is a must -->
     <string name="gate_title">GPS is needed</string>
     <string name="gate_lead">Every photo needs a precise GPS position, so the app opens once all of these are on.</string>
-    <string name="gate_precise_why">In Android\'s dialog choose “Precise”, not “Approximate”, and “While using the app”.</string>
+    <string name="gate_precise_why">Choose “Precise” and “While using the app”.</string>
     <string name="gate_location_on">Phone location (GPS)</string>
-    <string name="gate_location_on_why">Turn on Location in the quick settings or in Settings → Location.</string>
+    <string name="gate_location_on_why">Turn on Location in quick settings.</string>
     <string name="gate_denied">Still missing? Open the app\'s settings → Permissions, allow Camera, and for Location pick “Allow only while using the app” with “Use precise location” on.</string>
     <plurals name="sessionmap_no_gps">
         <item quantity="one">%1$d photo has no GPS position and isn\'t on the map</item>
@@ -445,11 +435,11 @@
     <string name="capture_gps_lost_resume">The session starts by itself as soon as the GPS is found.</string>
     <!-- navigation: home = sessions -->
     <string name="nav_back">Back</string>
-    <string name="sessions_empty_text">Ride along a street or stop at a few shops. Your recordings show up here, ready to send.</string>
+    <string name="sessions_empty_text">The rides you record show up here.</string>
     <string name="sessionmap_counter">%1$d / %2$d</string>
     <!-- device check: what the phone must have -->
     <string name="device_title">This phone can\'t record</string>
-    <string name="device_lead">POI Capture needs these to put each photo in the right place, and this phone doesn\'t have them:</string>
+    <string name="device_lead">Quét Phố needs these to put each photo in the right place, and this phone doesn\'t have them:</string>
     <string name="device_need_gps">GPS receiver</string>
     <string name="device_need_gps_why">The position of every photo.</string>
     <string name="device_need_gyro">Gyroscope</string>
@@ -477,6 +467,10 @@
     <string name="setup_plan_auto_short">≤ %1$s m apart · ≤ %2$d km/h</string>
     <string name="setup_plan_short">≤ %1$d km/h</string>
     <string name="setup_need_gps">Waiting for GPS…</string>
+    <string name="setup_360_choose">Choose the 360 camera first</string>
+    <string name="setup_360_pair">Pair the Ricoh Theta first</string>
+    <string name="setup_360_connect">Connect the Ricoh Theta</string>
+    <string name="setup_360_connecting">Connecting the Ricoh Theta…</string>
     <string name="setup_need_email">Add your email to start</string>
     <string name="setup_info_title">How it works</string>
     <string name="setup_info_gps_title">GPS</string>
@@ -490,7 +484,7 @@
     <string name="capture_too_dark_title">Too dark for street sweep</string>
     <string name="capture_too_dark_text">Riding needs a shutter of 1/500 s or faster to keep signs readable, and there is not enough light for it. Use Place capture: stop at each shop and hold still.</string>
     <string name="capture_too_dark_back">Back</string>
-    <string name="sessions_title">POI Captures</string>
+    <string name="sessions_title">Rides</string>
     <string name="home_new_session">New Capture</string>
     <string name="session_no_street">No street name</string>
     <string name="sessionmap_moved">Place set by hand</string>
@@ -512,23 +506,19 @@
     <string name="sessionmap_place_no_name">No name yet</string>
     <string name="sessionmap_edit_texts">Edit name and texts</string>
     <string name="sessionmap_save">Save</string>
-    <string name="onboarding_id_help">Optional. You can add or change it later in Settings.</string>
+    <string name="onboarding_id_help">You can change it in Settings.</string>
     <string name="onboarding_id_card_title">No email or name needed</string>
     <string name="onboarding_id_card_text">Only the ID is sent with your sessions. No ID? Leave it empty.</string>
     <string name="onboarding_id_skip">Skip for now</string>
     <string name="onboarding_summary_no_id">No contributor ID</string>
     <string name="onboarding_summary_no_id_sub">Optional: add it in Settings if your team gives you one.</string>
-    <string name="onboarding_hand_text">A passenger holds the phone sideways and aims at the shopfronts, on either side. Each photo gets its own direction; photos wait while the phone swings or points at the road.</string>
+    <string name="onboarding_hand_text">A passenger holds it sideways, aimed at the buildings.</string>
     <string name="setup_hand_info">A passenger holds the phone sideways and aims at the shopfronts, on either side of the street. Each photo gets its own direction from the gyroscope and compass, so turning is fine; auto photos wait while the phone swings fast or points at the road.</string>
     <string name="setup_info_both">Both</string>
-    <string name="settings_advanced">Advanced</string>
-    <string name="settings_advanced_sub">Mount angle, photo kinds</string>
     <string name="settings_replay_sub">Language, permissions, road data and the two ways to sweep</string>
     <string name="capture_gps_lost_banner">GPS lost: photos keep the last position. Step outside to refresh it.</string>
     <string name="capture_gps_wait_title">Waiting for GPS</string>
     <string name="guide_intro">Photograph more than the front: the agent reads every photo and fills in the place from it.</string>
-    <string name="guide_next">Next: %1$s</string>
-    <string name="guide_done">Enough for this place. More angles are welcome, or tap Next place.</string>
     <string name="guide_front_title">Front</string>
     <string name="guide_front_text">The whole shop, straight on, with its sign</string>
     <string name="guide_sign_title">Sign</string>
@@ -542,4 +532,385 @@
     <string name="poi_unsure">The GPS was not sure here: photos of this place were far apart. Check the pin and drag it to the door (Satellite helps).</string>
     <string name="poi_unsure_indoor">Taken mostly without good GPS (inside or under a roof): the pin is carried from the last good fix by your steps. Check it and drag it to the door.</string>
     <string name="settings_installed">Installed %1$s</string>
+    <!-- tasks from the reviewer -->
+    <string name="settings_tasks">Tasks from the reviewer</string>
+    <string name="tasks_title">Tasks</string>
+    <string name="tasks_intro">Places the reviewer wants checked on site. Export them from Quét Phố Reviewer (Tasks → Export), send the file to this phone (Zalo, Drive…) and import it here. They show on the New session map.</string>
+    <string name="tasks_none">No tasks on this phone.</string>
+    <string name="tasks_counts">%1$d to do · %2$d done or skipped</string>
+    <string name="tasks_import">Import tasks file</string>
+    <string name="tasks_import_short">Import</string>
+    <string name="tasks_clear">Remove all</string>
+    <string name="tasks_clear_title">Remove all tasks?</string>
+    <string name="tasks_clear_text">The task list leaves this phone. Your sessions and photos stay.</string>
+    <string name="tasks_bad_file">This is not a tasks file. In Quét Phố Reviewer, open Tasks and press Export.</string>
+    <string name="tasks_sheet_hint">A Place capture finished within %1$d m of a task completes it.</string>
+    <string name="tasks_type_visit">Visit</string>
+    <string name="tasks_type_check">Is it gone?</string>
+    <string name="tasks_how_visit">Start a Place capture there: photograph the sign, the hours and the business plate.</string>
+    <string name="tasks_how_check">Start a Place capture there. If the place is gone, photograph what is there now and set the status to Closed.</string>
+    <string name="tasks_state_done">done</string>
+    <string name="tasks_state_skipped">skipped</string>
+    <string name="tasks_go">Directions</string>
+    <string name="tasks_done">Done</string>
+    <string name="tasks_skip">Skip</string>
+    <string name="tasks_reopen">To do again</string>
+    <string name="tasks_hide_done">Hide done</string>
+    <string name="setup_tasks_chip">%1$d tasks</string>
+    <plurals name="tasks_imported">
+        <item quantity="one">%1$d task to do</item>
+        <item quantity="other">%1$d tasks to do</item>
+    </plurals>
+    <plurals name="tasks_show_done">
+        <item quantity="one">Show %1$d done or skipped</item>
+        <item quantity="other">Show %1$d done or skipped</item>
+    </plurals>
+    <!-- Upload server (tus): Settings, onboarding, session cards -->
+    <string name="upload_title">Upload server</string>
+    <string name="upload_sub">Send sessions to your team\'s server (tus)</string>
+    <string name="upload_scan">Scan setup QR</string>
+    <string name="upload_scan_done">Set up as “%1$s”</string>
+    <string name="upload_scan_done_unnamed">Set up from the QR code</string>
+    <string name="upload_scan_not_setup">This is not a setup QR code: it has no http:// or https:// server address.</string>
+    <string name="upload_scan_no_token">This QR code has no access token. Ask the project lead for a new setup QR code.</string>
+    <string name="upload_scan_unavailable">The QR scanner is not ready yet: Google Play services is still downloading it. Try again in a minute.</string>
+    <string name="upload_scan_failed">Could not open the QR scanner: %s</string>
+    <string name="upload_test_me">Connected as %1$s · can: %2$s</string>
+    <string name="upload_test_not_server">This address answers, but not as a Quét Phố server</string>
+    <string name="upload_scope_upload">Send rides</string>
+    <string name="upload_scope_read">View &amp; download</string>
+    <string name="upload_scope_process">Process rides</string>
+    <string name="upload_scope_delete">Delete uploads</string>
+    <string name="upload_scope_admin">Admin</string>
+    <string name="upload_test_no_upload">This token cannot send rides: ask the admin for one with Send rides</string>
+    <string name="upload_url_label">Server address</string>
+    <string name="upload_url_invalid">Enter an address starting with http:// or https://</string>
+    <string name="upload_http_warning">http:// sends the photos and the token unencrypted: use https:// outside a test network.</string>
+    <string name="upload_token_label">Access token (optional)</string>
+    <string name="upload_token_label_required">Access token (required)</string>
+    <string name="upload_token_help">Stored encrypted on the phone, never in exports.</string>
+    <string name="upload_default_needs_token">An access key is needed to upload.</string>
+    <string name="upload_token_show">Show</string>
+    <string name="upload_token_hide">Hide</string>
+    <string name="upload_test">Test connection</string>
+    <string name="upload_testing">Checking…</string>
+    <string name="upload_test_token">The server refused the token (HTTP %d)</string>
+    <string name="upload_test_http">The server answered HTTP %d</string>
+    <string name="upload_test_failed">Could not reach the server: %s</string>
+    <string name="upload_auto">Upload each session when it ends</string>
+    <string name="upload_wifi">Only on Wi-Fi</string>
+    <string name="upload_remove_after">Remove from the phone once on the server</string>
+    <plurals name="sessions_removed_after_upload">
+        <item quantity="one">%1$d ride is on the server and was removed from the phone (%2$s freed).</item>
+        <item quantity="other">%1$d rides are on the server and were removed from the phone (%2$s freed).</item>
+    </plurals>
+    <string name="upload_never_recording">Never uploads while recording; an interrupted upload resumes.</string>
+    <string name="upload_status_none">Not uploaded</string>
+    <string name="upload_status_waiting">Waiting to upload</string>
+    <string name="upload_status_wifi">Waiting for Wi-Fi to upload</string>
+    <string name="upload_status_uploading">Uploading %d%%</string>
+    <string name="upload_status_done">Uploaded %s</string>
+    <string name="upload_status_failed">Upload failed: %s</string>
+    <string name="upload_status_retrying">Upload interrupted, will try again: %s</string>
+    <string name="upload_auth_failed">Access key expired or revoked</string>
+    <string name="upload_no_space">Not enough space on the phone to prepare the upload. Free some space, then try again.</string>
+    <string name="upload_action">Upload</string>
+    <string name="upload_now">Upload now</string>
+    <string name="upload_retry">Retry</string>
+    <string name="onboarding_upload_later">You can change this later in Settings.</string>
+    <string name="onboarding_key_title">Codes from your team</string>
+    <string name="onboarding_key_lead">Scan the QR code from your admin. Rides then upload by themselves.</string>
+    <string name="onboarding_key_skip">Skip and start</string>
+    <string name="upload_server_at">Server: %s</string>
+    <string name="upload_server_change">Change</string>
+    <string name="setup_target_title">What is this ride for?</string>
+    <string name="setup_target_shops">Shops</string>
+    <string name="setup_target_shops_sub">Camera sideways at the shopfronts. As before.</string>
+    <string name="setup_target_addresses">Shops + house numbers</string>
+    <string name="setup_target_addresses_sub">Camera sideways, phone in landscape. Twice as many photos, larger, ride slower.</string>
+    <string name="setup_target_signs">Traffic signs</string>
+    <string name="setup_target_signs_sub">Camera facing FORWARD, along the road. A photo every 8 m.</string>
+    <string name="setup_target_signs_hint">Turn the phone to look ahead, over the handlebars, before you start.</string>
+    <string name="setup_target_shops_info">Shop signs with their phone, hours and address. The camera faces the shopfronts.</string>
+    <string name="setup_target_addresses_info">Everything a shops ride gets, plus every house-number plate, shop or not. Plates are small, so the app takes about twice as many photos at the largest size and asks you to ride slower (20 km/h). Hold the phone in landscape: each plate then stays on more photos.</string>
+    <string name="setup_target_signs_info">Every traffic sign: its type, extra plate and where it stands. The camera must look ahead along the road; the app takes a photo every 8 m and warns if the phone is turned sideways.</string>
+    <string name="service_mount_side_signs">Camera is facing SIDEWAYS: for traffic signs, turn it to look ahead along the road</string>
+    <plurals name="capture_plates_seen">
+        <item quantity="one">🔢 House number found on %d photo</item>
+        <item quantity="other">🔢 House numbers found on %d photos</item>
+    </plurals>
+    <plurals name="capture_signs_seen">
+        <item quantity="one">🚸 Sign found on %d photo</item>
+        <item quantity="other">🚸 Signs found on %d photos</item>
+    </plurals>
+    <!-- New session: three quick choices, short labels (the (i) button explains them) -->
+    <string name="setup_kind_label">Mode</string>
+    <string name="setup_sweep_short">Sweep</string>
+    <string name="setup_place_short">Places</string>
+    <string name="setup_target_label">Target</string>
+    <string name="setup_target_shops_short">Shops</string>
+    <string name="setup_target_addresses_short">Addresses</string>
+    <string name="setup_target_signs_short">Signs</string>
+    <string name="setup_holding_mount_short">Mounted</string>
+    <string name="capture_end_stat_photos">photos</string>
+    <string name="capture_end_stat_videos">clips</string>
+    <string name="capture_end_stat_distance">ridden</string>
+    <string name="capture_end_stat_places">places</string>
+    <string name="capture_end_stat_signs">photos with signs</string>
+    <string name="capture_end_stat_numbers">photos with numbers</string>
+    <string name="capture_end_stat_minutes">minutes</string>
+    <string name="capture_sign_boost">🚸 Sign ahead · more photos</string>
+    <!-- indoor mode ("Trong nhà", docs/indoor.md) -->
+    <string name="setup_indoor_short">Indoor</string>
+    <string name="setup_indoor_title">Indoor (malls, markets)</string>
+    <string name="setup_indoor_info">On foot through a mall, market or other big building, phone in your hand: photos are taken by themselves as you walk past the shops. Indoors there is no usable GPS, so the position comes from your steps: long-press the map (or ⌖ then tap) wherever you know where you are, set the floor when you change level, and photograph the directory boards.</string>
+    <string name="setup_indoor_hint">On foot, phone in hand, shops only. Long-press the map whenever you know where you are.</string>
+    <string name="setup_building_label">Building</string>
+    <string name="setup_building_loading">Looking for the building…</string>
+    <string name="setup_building_none_found">No building found nearby</string>
+    <string name="setup_building_offline">Could not load (network error)</string>
+    <string name="setup_building_walk_without">Walking without a building</string>
+    <string name="setup_building_find">Find the building</string>
+    <string name="setup_building_none">No building</string>
+    <string name="setup_building_unnamed">Unnamed building</string>
+    <string name="setup_building_levels">%1$d floors</string>
+    <string name="setup_building_underground">%1$d below ground</string>
+    <string name="setup_building_shops">%1$d shops mapped</string>
+    <string name="setup_building_tap">Wrong building? Tap the right one on the map.</string>
+    <string name="capture_indoor_level">Level</string>
+    <string name="capture_indoor_level_name">Level %1$s</string>
+    <string name="capture_indoor_since_anchor">%1$d m walked since the last fix</string>
+    <string name="capture_indoor_not_anchored">Where are you? Long-press the map at your spot</string>
+    <string name="capture_indoor_no_barometer">No barometer: set the level yourself</string>
+    <string name="capture_aim_low_indoor">Camera points at the floor: raise it to the shops</string>
+    <string name="capture_floor_up">Up to level %1$s?</string>
+    <string name="capture_floor_down">Down to level %1$s?</string>
+    <string name="capture_floor_yes">Yes</string>
+    <string name="capture_floor_no">No</string>
+    <string name="capture_directory">Directory</string>
+    <string name="capture_here_title">I am here</string>
+    <string name="capture_here_text">Your position goes back to this point. Which level are you on?</string>
+    <string name="capture_here_add_direction">Then tap the way I am walking</string>
+    <string name="capture_here_confirm">Confirm</string>
+    <string name="capture_here_cancel">Cancel</string>
+    <string name="capture_here_pick">Tap the map where you are</string>
+    <string name="capture_here_direction">Tap the map ahead of you, the way you walk</string>
+    <string name="capture_here_skip">Skip</string>
+    <!-- indoor 0.22: building lookup, floor plans (docs/indoor.md §4, §7) -->
+    <string name="setup_building_waiting_fix">Waiting for your position…</string>
+    <string name="setup_building_retry">Try again</string>
+    <string name="setup_building_search">Search by name</string>
+    <string name="setup_building_pick_map">Pick on the map</string>
+    <string name="setup_building_tap_now">Tap the building on the map</string>
+    <string name="setup_building_search_hint">Mall, market, building…</string>
+    <string name="setup_building_search_go">Search</string>
+    <string name="setup_building_search_nothing">Nothing by that name within 30 km</string>
+    <string name="setup_building_search_point">Point only: the building there is looked up</string>
+    <string name="setup_building_search_no_position">No position yet: move the map to the area first</string>
+    <string name="capture_plan">Floor plan</string>
+    <string name="capture_here_unit">Your position goes to unit %1$s. Which level are you on?</string>
+    <string name="plan_prompt_title">Photograph the floor plan of level %1$s</string>
+    <string name="plan_prompt_text">The “You are here” board: it becomes the map of this floor</string>
+    <string name="plan_shoot">Photograph</string>
+    <string name="plan_later">Later</string>
+    <string name="plan_scan_failed_title">The scanner did not work</string>
+    <string name="plan_scan_failed_text">Use the photo just taken and set the board’s 4 corners yourself?</string>
+    <string name="plan_use_photo">Set the corners</string>
+    <string name="plan_skip">Skip</string>
+    <string name="plan_corners_title">Drag the 4 corners onto the board’s corners</string>
+    <string name="plan_whole_photo">Whole photo</string>
+    <string name="plan_straighten">Straighten</string>
+    <string name="plan_dot_title">Tap the “You are here” dot on the plan</string>
+    <string name="plan_no_dot">No dot</string>
+    <string name="plan_next">Next</string>
+    <string name="plan_place_hint">Fit the plan on the building: one finger moves it, two fingers turn and scale it</string>
+    <string name="plan_place_no_footprint">No building outline: pin 2 points (plan, then map), or move it with your fingers</string>
+    <string name="plan_points">Pin 2 points</string>
+    <string name="plan_points_stop">Move by hand</string>
+    <string name="plan_points_plan">Point %1$d: tap a spot on the plan</string>
+    <string name="plan_points_map">Now tap where that spot really is on the map</string>
+    <string name="plan_reset">Reset</string>
+    <string name="plan_done">Done</string>
+    <string name="onboarding_signs_text">The camera looks straight ahead.</string>
+    <!-- Camera 360 ride (docs/camera360.md) -->
+    <string name="setup_camera360_choice">360°</string>
+    <string name="setup_camera360_short">Camera 360</string>
+    <string name="setup_camera360_hint">The phone records GPS only, no photos.</string>
+    <string name="setup_camera360_info">A 360° camera films, the phone records GPS. After Start, hold the QR code up to the camera for 2–3 s.</string>
+    <string name="c360_sync_hint">Hold this code up to the 360 camera for 2–3 s</string>
+    <string name="c360_sync_done">Done</string>
+    <string name="c360_resync">Sync again</string>
+    <string name="c360_gps_wait">Waiting for GPS…</string>
+    <string name="c360_speed">km/h</string>
+    <string name="c360_screen_off">You can turn the screen off.</string>
+    <string name="c360_discard_body">The ride is deleted from the phone and not sent.</string>
+    <!-- Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4) -->
+    <string name="theta_name">Ricoh Theta</string>
+    <string name="theta_hint">Camera on, Wi-Fi on. Serial: under the camera.</string>
+    <string name="theta_serial">Serial or Wi-Fi name</string>
+    <string name="theta_password">Password</string>
+    <string name="theta_serial_needed">Enter the serial</string>
+    <string name="theta_connect">Connect</string>
+    <string name="theta_reconnect">Reconnect</string>
+    <string name="theta_connecting">Connecting…</string>
+    <string name="theta_connected">%1$s connected</string>
+    <string name="theta_battery">battery %1$d%%</string>
+    <string name="theta_not_connected">Not connected</string>
+    <string name="theta_lost">Camera Wi-Fi lost</string>
+    <string name="theta_failed">Cannot connect: %1$s</string>
+    <string name="theta_failed_wifi">Couldn\'t join the camera\'s Wi-Fi: is it on, nearby, and is the password right?</string>
+    <string name="theta_every">Photo every</string>
+    <string name="theta_shots">Photos</string>
+    <string name="theta_skipped">Skipped</string>
+    <string name="theta_failed_count">Failed</string>
+    <string name="theta_last_error">Error: %1$s</string>
+    <string name="guide360_title">Recording with a 360 camera</string>
+    <string name="guide360_gopro">GoPro MAX</string>
+    <string name="guide360_theta">Ricoh Theta</string>
+    <string name="guide360_open">How to record</string>
+    <string-array name="guide360_gopro_lines">
+        <item># Before (once)</item>
+        <item>Connect the GoPro Quik app once to set the camera clock.</item>
+        <item>Turn GPS on: Preferences → Regional → GPS: On.</item>
+        <item>A fast memory card (V30), 128 GB or more.</item>
+        <item>Mode: 360 Video, 5.6K 30 fps.</item>
+        <item># Mounting</item>
+        <item>On a pole, 30–50 cm above the helmet.</item>
+        <item>Upright: one lens forward, one backward.</item>
+        <item>Firmly, no wobble.</item>
+        <item># Each ride</item>
+        <item>Turn the camera on; wait until the GPS icon stops blinking.</item>
+        <item>On the phone: Camera 360 → Start.</item>
+        <item>Start recording on the GoPro.</item>
+        <item>Hold the phone QR code to the camera for 2–3 seconds.</item>
+        <item>Ride at 20–30 km/h; slow down near signs.</item>
+        <item>End: show the QR code again, then stop recording.</item>
+        <item># Back at the office</item>
+        <item>Copy the .360 files from the card.</item>
+        <item>Export them as 360 video in GoPro Player.</item>
+        <item>Send the exported files with the ride for processing.</item>
+        <item># Tips</item>
+        <item>Wipe the lenses before each ride.</item>
+        <item>Take a break every 20–30 minutes so the camera does not overheat.</item>
+        <item>Ride both directions when you can: better positions.</item>
+    </string-array>
+    <string-array name="guide360_theta_lines">
+        <item># Each ride</item>
+        <item>Turn on the camera and its Wi-Fi.</item>
+        <item>Camera 360 → Camera control: Ricoh Theta.</item>
+        <item>Enter the serial (under the camera).</item>
+        <item>Tap Connect, pick the THETA network.</item>
+        <item>Start: the phone takes the photos and writes its GPS into each.</item>
+        <item>End → Save.</item>
+        <item># Back at the office</item>
+        <item>Copy DCIM/100RICOH over USB.</item>
+        <item>Send the photos with the ride for processing.</item>
+        <item># Notes</item>
+        <item>A Theta needs a few seconds per photo: ride slower or pick 12–20 m.</item>
+        <item>Theta X: turn its Wi-Fi on in the camera menu.</item>
+    </string-array>
+    <string name="setup_camera_label">Camera</string>
+    <string name="setup_camera_phone">Phone</string>
+    <string name="gps_wait_sky">Go into the open, away from tall buildings, for GPS</string>
+    <string name="setup_change">Change</string>
+    <string name="setup_collapse">Collapse</string>
+    <string name="summary_title">Ride saved</string>
+    <string name="summary_upload_no_token">No access key yet: upload from Settings</string>
+    <string name="summary_upload_wifi">Waiting for Wi-Fi</string>
+    <string name="summary_upload_waiting">Waiting to send</string>
+    <string name="summary_upload_sending">Sending… %1$d%%</string>
+    <string name="summary_upload_sent">Sent ✓</string>
+    <string name="summary_upload_failed">Send failed: %1$s</string>
+    <string name="summary_upload_not_sent">Not sent</string>
+    <string name="summary_done">Done</string>
+    <string name="summary_theta_shots">360 photos</string>
+    <string name="summary_theta_skipped">skipped</string>
+    <string name="summary_theta_failed">failed</string>
+    <string name="summary_open_settings">Open Settings</string>
+    <string name="c360_end_no_sync">No sync code was filmed for 3 s: the video cannot be placed on the track. Tap Sync again first.</string>
+    <!-- Camera 360 settings page, New ride line, serial reader, onboarding step -->
+    <string name="c360_title">Camera 360</string>
+    <string name="c360_your_camera">Your camera</string>
+    <string name="c360_model_none">None</string>
+    <string name="c360_model_gopro">GoPro MAX</string>
+    <string name="c360_model_insta">Insta360</string>
+    <string name="c360_model_theta">Ricoh Theta</string>
+    <string name="c360_model_other">Other</string>
+    <string name="c360_model_other_name">Other camera</string>
+    <string name="c360_none_hint">Pick one to record streets in 360°.</string>
+    <string name="c360_sync_note">Rides use the sync QR: after Start, show it to the camera.</string>
+    <string name="c360_theta_title">Pair the Theta</string>
+    <string name="c360_gopro_qr_title">Clock and GPS by QR</string>
+    <string name="c360_gopro_qr_sub">Needs GoPro Labs. Sets the clock, GPS on, 360 5.6K 30.</string>
+    <string name="c360_gopro_qr_show">Show the QR</string>
+    <string name="c360_gopro_qr_hint">Install GoPro Labs, then hold the code up to the GoPro</string>
+    <string name="c360_gopro_labs_link">Install GoPro Labs: gopro.github.io/labs</string>
+    <string name="c360_line_none">No camera chosen</string>
+    <string name="c360_choose">Choose camera</string>
+    <string name="c360_line_sync">%1$s · sync by QR</string>
+    <string name="c360_state_connected">connected</string>
+    <string name="c360_state_off">not connected</string>
+    <string name="c360_state_connecting">connecting…</string>
+    <string name="c360_state_lost">Wi-Fi lost</string>
+    <string name="c360_state_failed">can\'t connect</string>
+    <string name="c360_every">every %1$d m</string>
+    <string name="c360_paired">paired</string>
+    <string name="c360_not_paired">not paired</string>
+    <string name="serial_scan_open">Read serial</string>
+    <string name="serial_scan_hint">Point at the sticker under the camera</string>
+    <string name="serial_scan_searching">Looking for the serial…</string>
+    <string name="serial_scan_found">Serial: %1$s</string>
+    <string name="serial_scan_use">Use it</string>
+    <string name="serial_scan_cancel">Cancel</string>
+    <string name="serial_scan_need_camera">Camera permission needed</string>
+    <string name="onboarding_cam360_lead">Do you use a 360 camera?</string>
+    <string name="onboarding_cam360_no">No</string>
+    <string name="onboarding_cam360_no_sub">Phone camera only</string>
+    <string name="onboarding_cam360_yes">Yes</string>
+    <string name="onboarding_cam360_yes_sub">GoPro MAX, Insta360, Ricoh Theta…</string>
+    <!-- Camera 360: camera check (Ricoh Theta steps, manual tick list for the others) -->
+    <string name="check_title">Camera check</string>
+    <string name="check_sub">Takes 1 test photo, then deletes it</string>
+    <string name="check_run">Run check</string>
+    <string name="check_again">Check again</string>
+    <string name="check_cancel">Cancel</string>
+    <string name="check_ride_on">A ride is using the camera</string>
+    <string name="check_today">Checked today ✓</string>
+    <string name="check_line_today">checked today ✓</string>
+    <string name="check_line_not">not checked</string>
+    <string name="check_step_wifi">Connect to the camera\'s Wi-Fi</string>
+    <string name="check_step_camera">The right Ricoh camera</string>
+    <string name="check_step_clock">Camera clock set from the phone</string>
+    <string name="check_step_gps">GPS position sent to the camera</string>
+    <string name="check_step_shot">Take 1 test photo</string>
+    <string name="check_step_thumb">Download the photo to the phone</string>
+    <string name="check_step_exif">Photo has GPS coordinates</string>
+    <string name="check_step_delete">Delete the test photo from the camera</string>
+    <string name="check_power_info">Camera on/off: with its power button (not possible over Wi-Fi)</string>
+    <string name="check_serial">serial %1$s</string>
+    <string name="check_accuracy">±%1$d m</string>
+    <string name="check_shot_speed">%1$s s/photo → keeps up with every %2$d m up to ~%3$d km/h</string>
+    <string name="check_exif_off">%1$d m off</string>
+    <string name="check_fix_serial">Enter the serial above</string>
+    <string name="check_fix_not_ricoh">Not a Ricoh camera: check the Wi-Fi name</string>
+    <string name="check_fix_wrong_serial">Serial does not match: check the number under the camera</string>
+    <string name="check_fix_no_answer">The camera does not answer: turn it off and on again</string>
+    <string name="check_fix_clock">Theta X: in the camera\'s menu, set Date/time to Auto</string>
+    <string name="check_fix_no_gps">Needs GPS: go out in the open</string>
+    <string name="check_fix_gps_refused">The camera refused the position. The PC still places photos from the phone\'s track</string>
+    <string name="check_fix_shot">No photo: check the memory card, battery and photo mode</string>
+    <string name="check_fix_download">Could not download the photo: try again</string>
+    <string name="check_fix_exif_no_gps">No coordinates in the photo. Fine: the PC places photos from the phone\'s track</string>
+    <string name="check_fix_exif_far">Coordinates in the photo are far off. Fine: the PC places photos from the phone\'s track</string>
+    <string name="check_fix_delete">Delete the test photo by hand</string>
+    <string name="check_fix_error">Error</string>
+    <string name="check_manual_title">Before you ride</string>
+    <string name="check_manual_sub">Tick each day</string>
+    <string name="check_item_labs">GoPro Labs installed</string>
+    <string name="check_item_setup_qr">Camera scanned the setup QR (beep + confirmation on screen)</string>
+    <string name="check_item_gps">Camera GPS on</string>
+    <string name="check_item_clock">Camera clock right / will scan the sync QR at the start</string>
+    <string name="check_item_gps_any">GPS (if any) on</string>
+    <string name="check_item_card">Memory card has free space</string>
+    <string name="check_item_battery">Battery full</string>
 </resources>

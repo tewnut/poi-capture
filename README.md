@@ -1,6 +1,11 @@
-<img src="docs/logo.svg" width="96" alt="POI Capture logo">
+<img src="docs/logo.svg" width="96" alt="Quét Phố logo">
 
-# POI Capture (Android)
+# Quét Phố (Android)
+
+Formerly POI Capture. The store id (Android applicationId, iOS bundle id) is `vn.vmaps.quetpho` from 0.22.1; the
+0.22.0 and older builds were `io.github.tewnut.poicapture`, a different app on the phone (upload its rides before
+switching). Internal names (the code's package `io.github.tewnut.poicapture`, server `poi-capture-cloud`, web
+`poi-capture-reviewer`, the `POI Capture/<version>` client header) are unchanged.
 
 An Android app for field contributors who put shops and other places on a map. Ride along a street with the phone
 mounted (the app photographs the row of buildings by itself), or stop at each place and photograph it. Every photo
@@ -156,7 +161,9 @@ Or open the folder in Android Studio and set the Gradle JDK to a 17/21 JDK. Requ
 
 ## Release
 
-Bump `versionCode` / `versionName` in `app/build.gradle.kts`, commit, then push a matching tag:
+Bump `versionCode` / `versionName` in `app/build.gradle.kts`, write the Vietnamese release notes in
+`release-notes/vi/<versionName>.txt` (at most 500 characters, [release-notes/README.md](release-notes/README.md)),
+commit, then push a matching tag:
 
 ```
 git tag v1.2.3
@@ -165,7 +172,13 @@ git push origin main v1.2.3
 
 [.github/workflows/release.yml](.github/workflows/release.yml) runs the unit tests, builds the release APK, signs it
 with the release key from the repository secrets (`RELEASE_KEYSTORE_B64`, `RELEASE_KEYSTORE_PASSWORD`,
-`RELEASE_KEY_ALIAS`), checks the signature and attaches `poi-capture-vX.Y.Z.apk` (+ `.sha256`) to the release. Keep the
+`RELEASE_KEY_ALIAS`), checks the signature and attaches `poi-capture-vX.Y.Z.apk` and `quet-pho-vX.Y.Z.aab` (the Play Console upload, + their
+`.sha256`) and `play-notes-vX.Y.Z.txt` (the notes as `<vi>…</vi>`, also shown on the release page) to the release; a
+tag without its notes file fails before the build. With the repository secret `PLAY_SERVICE_ACCOUNT_JSON` (a Google
+Cloud service account's JSON key, with the Google Play Android Developer API enabled and release rights on the app in
+the Play Console) the .aab and its notes are then uploaded to Google Play's **internal** testing track
+([tools/play_upload.py](tools/play_upload.py)); promote to production in the Play Console, or run the workflow by hand
+with `play_track = production`. Keep the
 keystore backed up outside the repository: an APK signed with another key cannot update the installed app. A local
 signed build works the same way with `RELEASE_KEYSTORE_FILE` set to the keystore path.
 

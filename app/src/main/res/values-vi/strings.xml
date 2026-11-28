@@ -71,36 +71,37 @@
     <!-- ==== Onboarding, new session ==== -->
     <!-- Onboarding (first run) -->
     <string name="onboarding_back">← Quay lại</string>
+    <string name="onboarding_close">✕ Đóng</string>
     <string name="onboarding_continue">Tiếp tục</string>
-    <string name="onboarding_welcome_lead">Ghi lại cửa hàng, quán xá trên phố để đưa lên bản đồ.</string>
+    <string name="onboarding_welcome_lead">Đưa cửa hàng, số nhà và biển báo lên bản đồ.</string>
     <string name="onboarding_welcome_button">Bắt đầu thiết lập</string>
     <string name="onboarding_welcome_time">Thiết lập một lần, khoảng 1 phút.</string>
     <string name="onboarding_sweep_title">Quét đường</string>
-    <string name="onboarding_sweep_text">Chạy xe dọc phố với điện thoại gắn trên xe, hoặc người ngồi sau cầm: app tự chụp dãy cửa hàng.</string>
+    <string name="onboarding_sweep_text">Chạy dọc phố, app tự chụp.</string>
     <string name="onboarding_place_title">Chụp địa điểm</string>
-    <string name="onboarding_place_text">Dừng ở từng cửa hàng: chụp mặt tiền, biển hiệu, bên trong, rồi ghim lên đúng tòa nhà.</string>
+    <string name="onboarding_place_text">Dừng ở từng cửa hàng và chụp.</string>
     <string name="onboarding_position_title">Vị trí đặt vào tòa nhà</string>
-    <string name="onboarding_position_text">App tính vị trí mặt tiền từ GPS và hướng camera. Sai chỗ nào, kéo lại trên bản đồ.</string>
+    <string name="onboarding_position_text">Tính từ GPS và hướng camera; kéo lại nếu lệch.</string>
     <string name="onboarding_offline_title">Không cần mạng khi ghi</string>
-    <string name="onboarding_offline_text">Ảnh lưu trên máy cho đến khi bạn gửi file (Zalo, Drive, email…) hoặc lưu lại.</string>
+    <string name="onboarding_offline_text">Chuyến đi tự tải lên khi có mạng.</string>
 
     <string name="onboarding_email_title">Mã cộng tác viên</string>
-    <string name="onboarding_email_lead">Nếu nhóm đã cấp cho bạn mã cộng tác viên, hãy nhập ở đây. Mã đi kèm mỗi phiên bạn gửi để ghi công cho bạn.</string>
+    <string name="onboarding_email_lead">Không bắt buộc; để ghi công cho bạn.</string>
     <string name="onboarding_email_label">Mã cộng tác viên (không bắt buộc)</string>
     <string name="onboarding_email_placeholder">VD: HCM-024</string>
     <string name="onboarding_email_invalid">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
     <string name="onboarding_name_label">Tên hiển thị (không bắt buộc)</string>
     <string name="onboarding_name_placeholder">Nguyễn Văn A</string>
-    <string name="onboarding_name_help">Hiện trên các phiên ghi. Để trống thì dùng phần trước @ của email.</string>
+    <string name="onboarding_name_help">Hiện trên các chuyến đi. Để trống thì dùng phần trước @ của email.</string>
 
     <string name="onboarding_perm_camera">Camera</string>
-    <string name="onboarding_perm_camera_why">Chụp ảnh và quay video mặt tiền.</string>
+    <string name="onboarding_perm_camera_why">Chụp mặt tiền và biển báo.</string>
     <string name="onboarding_perm_location">Vị trí chính xác</string>
-    <string name="onboarding_perm_location_why">Biết mỗi ảnh chụp ở đâu và bạn đang ở đường nào.</string>
+    <string name="onboarding_perm_location_why">Biết mỗi ảnh chụp ở đâu.</string>
     <string name="onboarding_perm_notifications">Thông báo</string>
-    <string name="onboarding_perm_notifications_why">Hiện trạng thái đang ghi khi màn hình tắt.</string>
+    <string name="onboarding_perm_notifications_why">Báo đang ghi khi tắt màn hình.</string>
     <string name="onboarding_perms_title">Cho phép app dùng</string>
-    <string name="onboarding_perms_lead">App chỉ dùng những quyền này khi bạn đang ghi.</string>
+    <string name="onboarding_perms_lead">Chỉ dùng khi đang ghi.</string>
     <string name="onboarding_perms_grant">Cấp quyền</string>
     <string name="onboarding_perm_missing">Chưa cấp</string>
     <string name="onboarding_and">%1$s và %2$s</string>
@@ -108,13 +109,13 @@
     <string name="onboarding_open_settings">Mở Cài đặt của app</string>
 
     <string name="onboarding_roads_title">Dữ liệu đường</string>
-    <string name="onboarding_roads_lead">Dữ liệu đường của tỉnh / thành bạn đang ở giúp app nhận tên đường ngay cả khi mất mạng.</string>
+    <string name="onboarding_roads_lead">Để nhận tên đường cả khi mất mạng.</string>
     <string name="onboarding_roads_loading">Đang tải danh sách tỉnh / thành…</string>
     <string name="onboarding_roads_error">Không tải được danh sách: %1$s</string>
     <string name="onboarding_retry">Thử lại</string>
     <string name="onboarding_roads_here">Bạn đang ở %1$s</string>
     <string name="onboarding_roads_installed">Đã có dữ liệu đường, sẵn sàng ghi.</string>
-    <string name="onboarding_roads_downloading">Đang tự tải (cả khi dùng 4G). Gói tải tiếp ở nền, bạn có thể đi tiếp.</string>
+    <string name="onboarding_roads_downloading">Đang tải, bạn có thể đi tiếp.</string>
     <string name="onboarding_roads_waiting">Đang chờ vị trí để biết bạn ở tỉnh / thành nào… hoặc chọn bên dưới.</string>
     <string name="onboarding_roads_no_pack">Vị trí hiện tại không thuộc tỉnh / thành nào có gói: chọn bên dưới.</string>
     <string name="onboarding_roads_need">Tải dữ liệu đường để tiếp tục</string>
@@ -123,12 +124,12 @@
     </plurals>
     <string name="onboarding_roads_others">Tỉnh / thành khác</string>
     <string name="onboarding_roads_all">Các tỉnh / thành</string>
-    <string name="onboarding_roads_credit">Dữ liệu đường © OpenStreetMap contributors (ODbL), qua Geofabrik. Quản lý gói ở Cài đặt.</string>
+    <string name="onboarding_roads_credit">Dữ liệu đường © OpenStreetMap contributors (ODbL).</string>
 
     <string name="onboarding_ready_title">Sẵn sàng!</string>
     <string name="onboarding_ready_button">Bắt đầu ghi</string>
-    <string name="onboarding_mount_title">Hai cách quét đường</string>
-    <string name="onboarding_mount_text">Kẹp chắc điện thoại, tốt nhất nằm ngang, camera sau nhìn sang dãy nhà. App tự đo hướng camera trong vài lần tăng tốc / phanh đầu tiên.</string>
+    <string name="onboarding_mount_title">Các cách quét đường</string>
+    <string name="onboarding_mount_text">Kẹp chắc, camera sau nhìn sang dãy nhà.</string>
     <string name="onboarding_summary_name">Mã cộng tác viên: %1$s</string>
     <string name="onboarding_summary_perms_ok">Đã cấp quyền camera và vị trí</string>
     <string name="onboarding_summary_perms_missing">Còn thiếu quyền %1$s</string>
@@ -136,7 +137,7 @@
     <string name="onboarding_summary_roads">Dữ liệu đường: %1$s</string>
     <string name="onboarding_summary_roads_online">Dữ liệu đường: lấy qua mạng khi ghi</string>
     <string name="onboarding_summary_roads_pending">Gói đang tải (nếu bạn đã chọn) sẽ dùng được khi tải xong.</string>
-    <string name="onboarding_ready_after">Ghi xong, vào “Đã ghi” để xem lại trên bản đồ và gửi (Zalo, Drive, email…).</string>
+    <string name="onboarding_ready_after">Xem lại chuyến đi trong “Chuyến quét”.</string>
 
     <!-- New (setup) screen -->
     <string name="setup_need_permissions">Cần quyền camera và vị trí chính xác. Mở Cài đặt → Quyền để bật.</string>
@@ -169,7 +170,7 @@
     <string name="setup_mode_manual_hint">Chụp bằng nút âm lượng hoặc nút bấm Bluetooth trên tay lái, không cần chạm màn hình · chạy tối đa %1$d km/h</string>
     <string name="setup_mount_hint">Gắn máy chắc (nằm ngang thấy rộng hơn), camera nhìn sang dãy nhà cần ghi. App tự đo hướng camera và nhận bên (phải/trái) khi bạn chạy. Bấm ★ Đánh dấu khi đi qua cửa hàng đáng chú ý.</string>
     <string name="setup_enter_email">Nhập email</string>
-    <string name="setup_session_running">Đang có một phiên ghi chưa kết thúc.</string>
+    <string name="setup_session_running">Đang có một chuyến đi chưa kết thúc.</string>
     <string name="setup_start">Bắt đầu</string>
 
     <!-- ==== Capture screen, place sheet, capture service ==== -->
@@ -181,21 +182,26 @@
     <string name="capture_shoot">Chụp</string>
     <string name="capture_next_place">Địa điểm tiếp theo</string>
     <string name="capture_pin_status">Ghim, tình trạng…</string>
-    <string name="capture_pause">Dừng</string>
-    <string name="capture_resume">Tiếp</string>
+    <string name="capture_pause">Tạm dừng</string>
+    <string name="capture_resume">Ghi tiếp</string>
     <string name="capture_recording">● Đang ghi</string>
     <string name="capture_paused">Ⅱ Tạm dừng</string>
     <string name="capture_side_right">GHI BÊN PHẢI →</string>
     <string name="capture_side_left">← GHI BÊN TRÁI</string>
-    <string name="capture_end_title">Kết thúc phiên ghi?</string>
+    <string name="capture_end_title">Kết thúc chuyến đi?</string>
     <plurals name="capture_end_videos">
         <item quantity="other">Đã ghi %1$d đoạn video.</item>
     </plurals>
     <plurals name="capture_end_photos">
         <item quantity="other">Đã ghi %1$d ảnh.</item>
     </plurals>
-    <string name="capture_end_body">Phiên được lưu trong máy, bạn xem lại vị trí ảnh và gửi ở mục “Đã ghi”.</string>
+    <string name="capture_end_body">Chuyến đi được lưu trong máy; xem lại trong “Chuyến quét”.</string>
     <string name="capture_end_save">Kết thúc và lưu</string>
+    <string name="capture_discard">Bỏ chuyến</string>
+    <string name="capture_discard_title">Bỏ chuyến đi này?</string>
+    <string name="capture_discard_body">Chúng sẽ bị xoá khỏi điện thoại và không được gửi đi. Không thể hoàn tác.</string>
+    <string name="capture_discard_confirm">Bỏ chuyến</string>
+    <string name="cancel_back">Quay lại</string>
     <string name="capture_keep_going">Ghi tiếp</string>
     <string name="capture_gps_good">● GPS ±%1$s m</string>
     <string name="capture_gps_weak">● GPS yếu ±%1$s m</string>
@@ -245,7 +251,7 @@
     <string name="service_gps_permission">GPS: chưa cấp quyền vị trí chính xác</string>
     <string name="service_hot">Máy đang nóng: che nắng hoặc nghỉ một lúc</string>
     <string name="service_missed_shot">Máy chụp không kịp: chạy chậm lại để không bỏ sót mặt tiền</string>
-    <string name="service_turn_landscape">Xoay ngang điện thoại: để dọc thì nửa ảnh là mặt đường và bầu trời</string>
+    <string name="service_turn_landscape">↻ Xoay ngang điện thoại</string>
     <string name="service_mount_front">Camera đang nhìn về phía TRƯỚC: xoay camera sang dãy nhà cần ghi</string>
     <string name="service_mount_back">Camera đang nhìn về phía SAU: xoay camera sang dãy nhà cần ghi</string>
     <string name="service_camera_failed">Không mở được camera: %1$s</string>
@@ -265,23 +271,23 @@
     <string name="sessions_send_chooser">Gửi %1$s</string>
     <string name="sessions_packed">Đã đóng gói %1$s. Chọn Zalo, Drive, email… để gửi.</string>
     <string name="sessions_pack_failed">Không đóng gói được: %1$s</string>
-    <string name="sessions_none_unsent">Không có phiên nào chờ gửi.</string>
+    <string name="sessions_none_unsent">Không có chuyến đi nào chờ gửi.</string>
     <plurals name="sessions_unsent">
-        <item quantity="other">%1$d phiên chưa gửi · %2$s · %3$s</item>
+        <item quantity="other">%1$d chuyến đi chưa gửi · %2$s · %3$s</item>
     </plurals>
     <string name="sessions_local_only">Dữ liệu chỉ nằm trong máy tới khi bạn gửi. Còn trống %1$s.</string>
-    <string name="sessions_loading">Đang đọc các phiên đã ghi…</string>
-    <string name="sessions_empty">Chưa có phiên ghi nào</string>
-    <string name="sessions_delete_title">Xoá phiên này?</string>
-    <string name="sessions_delete_sent">Phiên đã được gửi. Ảnh và video trong máy sẽ bị xoá.</string>
-    <string name="sessions_delete_unsent">Phiên CHƯA được gửi hay lưu. Ảnh và video sẽ mất hẳn.</string>
+    <string name="sessions_loading">Đang đọc các chuyến đi đã ghi…</string>
+    <string name="sessions_empty">Chưa có chuyến đi nào</string>
+    <string name="sessions_delete_title">Xoá chuyến đi này?</string>
+    <string name="sessions_delete_sent">Chuyến đi đã được gửi. Ảnh và video trong máy sẽ bị xoá.</string>
+    <string name="sessions_delete_unsent">Chuyến đi CHƯA được gửi hay lưu. Ảnh và video sẽ mất hẳn.</string>
     <string name="sessions_deleting">Đang xoá…</string>
-    <string name="sessions_deleted">Đã xoá phiên.</string>
+    <string name="sessions_deleted">Đã xoá chuyến đi.</string>
     <string name="sessions_delete">Xoá</string>
     <string name="sessions_keep">Không</string>
     <string name="sessions_more">Thêm</string>
     <string name="sessions_save_zip">Lưu file zip vào máy</string>
-    <string name="sessions_delete_session">Xoá phiên</string>
+    <string name="sessions_delete_session">Xoá chuyến đi</string>
     <string name="sessions_badge_recording">Đang ghi</string>
     <string name="sessions_badge_empty">Trống</string>
     <string name="sessions_badge_sent">Đã gửi</string>
@@ -309,6 +315,16 @@
     <string name="sessions_interrupted">bị gián đoạn (vẫn gửi được)</string>
     <string name="sessions_send">Gửi</string>
     <string name="sessions_send_again">Gửi lại</string>
+    <string name="sessions_send_server">Gửi lên máy chủ</string>
+    <string name="sessions_share_file">Chia sẻ tệp zip qua ứng dụng khác</string>
+    <string name="sessions_sending">Đang gửi %1$d%% · %2$s / %3$s</string>
+    <string name="sessions_preparing">Đang chuẩn bị gửi…</string>
+    <string name="sessions_on_server">Đã lên máy chủ · %1$s</string>
+    <string name="sessions_send_now">Gửi ngay</string>
+    <string name="sessions_badge_sending">Đang gửi %d%%</string>
+    <string name="sessions_setup_title">Thêm mã truy cập</string>
+    <string name="sessions_setup_text">Để gửi chuyến đi lên máy chủ, hãy quét mã QR hoặc nhập mã truy cập quản trị viên đưa cho bạn (Cài đặt → Máy chủ tải lên). Hoặc chia sẻ tệp zip qua ứng dụng khác.</string>
+    <string name="sessions_setup_open">Mở cài đặt</string>
     <string name="sessions_map">Bản đồ</string>
     <string name="sessions_duration_s">%1$d giây</string>
     <string name="sessions_duration_min">%1$d phút</string>
@@ -316,7 +332,7 @@
 
     <!-- Photo map (ui/SessionMap.kt) -->
     <string name="sessionmap_no_photos_live">Chưa có ảnh. Ảnh sẽ hiện trên bản đồ ngay khi chụp.</string>
-    <string name="sessionmap_no_photos">Phiên này không có ảnh.</string>
+    <string name="sessionmap_no_photos">Chuyến đi này không có ảnh.</string>
     <string name="sessionmap_photo_desc">Ảnh %1$d</string>
     <string name="sessionmap_photo_thumb_desc">Ảnh %1$d, chạm để xem lớn</string>
     <string name="sessionmap_no_road">Chưa nhận ra đường</string>
@@ -366,49 +382,23 @@
     <string name="packs_waiting_wifi">Đang chờ Wi-Fi…</string>
     <string name="packs_download_failed">Tải lỗi: %1$s</string>
 
-    <!-- Photo kinds of Place capture (PhotoRolesCard) -->
-    <string name="roles_intro">Các nút chọn loại ảnh khi chụp một địa điểm, theo thứ tự chụp. ★ = ảnh bìa. Sau ảnh của loại có dấu ↻, app tự chuyển sang loại tiếp theo chưa có ảnh.</string>
-    <string name="roles_move_up">Lên trên</string>
-    <string name="roles_move_down">Xuống dưới</string>
-    <string name="roles_make_cover">Đặt làm ảnh bìa ★</string>
-    <string name="roles_advance_off">Không tự chuyển sau ảnh này</string>
-    <string name="roles_advance_on">Tự chuyển sau 1 ảnh ↻</string>
-    <string name="roles_remove">Bỏ loại này</string>
-    <string name="roles_add">+ Thêm loại ảnh</string>
-    <string name="roles_reset">Khôi phục mặc định</string>
-    <string name="roles_add_title">Thêm loại ảnh</string>
-    <string name="roles_add_name">Tên nút, ví dụ: Bãi đỗ xe</string>
-    <string name="roles_add_hint">Gợi ý khi chụp (không bắt buộc)</string>
-    <string name="roles_add_code">Ảnh loại này được xuất với mã “%1$s”.</string>
-    <string name="roles_add_confirm">Thêm</string>
-    <string name="roles_cancel">Huỷ</string>
 
     <!-- Settings -->
     <string name="settings_title">Cài đặt</string>
     <string name="settings_contributor">Mã cộng tác viên</string>
     <string name="settings_email">Email</string>
-    <string name="settings_email_ok">Không bắt buộc. Mã do nhóm cấp, đi kèm mỗi phiên bạn gửi.</string>
+    <string name="settings_email_ok">Không bắt buộc. Mã do nhóm cấp, đi kèm mỗi chuyến đi bạn gửi.</string>
     <string name="settings_email_bad">Email chưa đúng dạng, ví dụ ten@gmail.com</string>
     <string name="settings_display_name">Tên hiển thị (không bắt buộc)</string>
     <string name="settings_road_data">Dữ liệu đường offline</string>
-    <string name="settings_advanced_hide">▾ Ẩn cài đặt nâng cao</string>
-    <string name="settings_advanced_show">▸ Cài đặt nâng cao (góc giá đỡ, loại ảnh)</string>
-    <string name="settings_mount_title">Góc chếch giá đỡ (chỉnh tay)</string>
-    <string name="settings_mount_hint">Chỉ dùng khi gắn máy trên xe. App tự đo hướng camera khi bạn tăng tốc / phanh vài lần; chỉ chỉnh ở đây nếu app báo chưa đo được: camera chếch về phía trước hay phía sau bao nhiêu độ.</string>
-    <string name="settings_mount_forward">chếch về phía trước</string>
-    <string name="settings_mount_backward">chếch về phía sau</string>
-    <string name="settings_mount_square">vuông góc với đường</string>
-    <string name="settings_roles_title">Chọn loại ảnh khi chụp địa điểm</string>
-    <string name="settings_roles_ask">Hỏi loại của từng ảnh (mặt tiền, biển hiệu…)</string>
-    <string name="settings_roles_hint">Không cần: hệ thống tự nhận ra ảnh nào là mặt tiền, biển hiệu, bên trong. Chỉ bật khi nhóm yêu cầu.</string>
     <string name="settings_replay_onboarding">Xem lại phần giới thiệu</string>
 
     <!-- access gate: GPS is a must -->
     <string name="gate_title">Cần có GPS</string>
     <string name="gate_lead">Mỗi ảnh cần vị trí GPS chính xác, nên app chỉ mở khi đã bật đủ các mục dưới đây.</string>
-    <string name="gate_precise_why">Trong hộp thoại của Android, chọn “Chính xác” (không chọn “Gần đúng”) và “Trong khi dùng ứng dụng”.</string>
+    <string name="gate_precise_why">Chọn “Chính xác” và “Trong khi dùng ứng dụng”.</string>
     <string name="gate_location_on">Vị trí của điện thoại (GPS)</string>
-    <string name="gate_location_on_why">Bật Vị trí trong bảng cài đặt nhanh hoặc Cài đặt → Vị trí.</string>
+    <string name="gate_location_on_why">Bật Vị trí trong cài đặt nhanh.</string>
     <string name="gate_denied">Vẫn chưa được? Mở Cài đặt của app → Quyền, cho phép Camera, và với Vị trí chọn “Chỉ cho phép khi dùng ứng dụng” và bật “Sử dụng vị trí chính xác”.</string>
     <plurals name="sessionmap_no_gps">
         <item quantity="other">%1$d ảnh không có vị trí GPS nên không hiện trên bản đồ</item>
@@ -422,18 +412,18 @@
     <string name="onboarding_language_phone_text">Ngôn ngữ của điện thoại: hiện là %1$s</string>
     <!-- capture: GPS lost -->
     <string name="capture_gps_lost_title">Đang chờ GPS</string>
-    <string name="capture_gps_lost_text">Phiên bắt đầu khi máy bắt được vệ tinh. Sau đó, nếu mất GPS (trong nhà, dưới mái hiên) chỉ hiện cảnh báo: ảnh dùng vị trí cuối cùng.</string>
+    <string name="capture_gps_lost_text">Chuyến đi bắt đầu khi máy bắt được vệ tinh. Sau đó, nếu mất GPS (trong nhà, dưới mái hiên) chỉ hiện cảnh báo: ảnh dùng vị trí cuối cùng.</string>
     <string name="capture_gps_lost_sky">Ra chỗ thoáng, xa nhà cao tầng, cây và mái che.</string>
     <string name="capture_gps_lost_location">Giữ Vị trí của điện thoại bật, với vị trí chính xác cho app này.</string>
     <string name="capture_gps_lost_settings">Cài đặt vị trí</string>
-    <string name="capture_gps_lost_resume">Phiên tự bắt đầu ngay khi bắt được GPS.</string>
+    <string name="capture_gps_lost_resume">Chuyến đi tự bắt đầu ngay khi bắt được GPS.</string>
     <!-- navigation: home = sessions -->
     <string name="nav_back">Quay lại</string>
-    <string name="sessions_empty_text">Chạy dọc một con phố hoặc dừng ở vài cửa hàng. Các phiên ghi sẽ hiện ở đây, sẵn sàng để gửi.</string>
+    <string name="sessions_empty_text">Các chuyến đi bạn ghi sẽ hiện ở đây.</string>
     <string name="sessionmap_counter">%1$d / %2$d</string>
     <!-- device check: what the phone must have -->
     <string name="device_title">Điện thoại này không ghi được</string>
-    <string name="device_lead">POI Capture cần những thứ sau để đặt mỗi ảnh đúng chỗ, và máy này không có:</string>
+    <string name="device_lead">Quét Phố cần những thứ sau để đặt mỗi ảnh đúng chỗ, và máy này không có:</string>
     <string name="device_need_gps">Bộ thu GPS</string>
     <string name="device_need_gps_why">Vị trí của mỗi ảnh.</string>
     <string name="device_need_gyro">Con quay hồi chuyển (gyroscope)</string>
@@ -461,10 +451,14 @@
     <string name="setup_plan_auto_short">≤ %1$s m/ảnh · ≤ %2$d km/h</string>
     <string name="setup_plan_short">≤ %1$d km/h</string>
     <string name="setup_need_gps">Đang chờ GPS…</string>
+    <string name="setup_360_choose">Chọn camera 360 trước</string>
+    <string name="setup_360_pair">Ghép Ricoh Theta trước</string>
+    <string name="setup_360_connect">Kết nối Ricoh Theta</string>
+    <string name="setup_360_connecting">Đang kết nối Ricoh Theta…</string>
     <string name="setup_need_email">Nhập email để bắt đầu</string>
     <string name="setup_info_title">Cách dùng</string>
     <string name="setup_info_gps_title">GPS</string>
-    <string name="setup_info_gps">Nút Bắt đầu mở khi máy bắt được vệ tinh trong 5 giây gần nhất: hãy bắt đầu ngoài trời thoáng. Sau đó phiên vẫn tiếp tục nếu mất GPS (trong nhà, dưới mái hiên): ảnh dùng vị trí cuối cùng và được đánh dấu cho bước xử lý. Vị trí từ Wi-Fi không bao giờ dùng cho ảnh.</string>
+    <string name="setup_info_gps">Nút Bắt đầu mở khi máy bắt được vệ tinh trong 5 giây gần nhất: hãy bắt đầu ngoài trời thoáng. Sau đó chuyến đi vẫn tiếp tục nếu mất GPS (trong nhà, dưới mái hiên): ảnh dùng vị trí cuối cùng và được đánh dấu cho bước xử lý. Vị trí từ Wi-Fi không bao giờ dùng cho ảnh.</string>
     <string name="sessionmap_warn_far">Xa hơn %1$d m so với chỗ chụp</string>
     <string name="sessionmap_warn_road">Đang nằm trên đường, không phải trên nhà</string>
     <string name="sessionmap_warn_across">Ở bên kia đường so với hướng camera</string>
@@ -474,7 +468,7 @@
     <string name="capture_too_dark_title">Quá tối để quét đường</string>
     <string name="capture_too_dark_text">Khi chạy xe cần tốc độ chụp 1/500 giây hoặc nhanh hơn để đọc được biển hiệu, và trời không đủ sáng. Hãy dùng Chụp địa điểm: dừng ở từng cửa hàng và giữ yên máy.</string>
     <string name="capture_too_dark_back">Quay lại</string>
-    <string name="sessions_title">Ghi POI</string>
+    <string name="sessions_title">Chuyến quét</string>
     <string name="home_new_session">Ghi mới</string>
     <string name="session_no_street">Chưa rõ tên đường</string>
     <string name="sessionmap_moved">Đã đặt vị trí</string>
@@ -495,23 +489,19 @@
     <string name="sessionmap_place_no_name">Chưa có tên</string>
     <string name="sessionmap_edit_texts">Sửa tên và chữ</string>
     <string name="sessionmap_save">Lưu</string>
-    <string name="onboarding_id_help">Không bắt buộc. Có thể thêm hoặc đổi sau trong Cài đặt.</string>
+    <string name="onboarding_id_help">Có thể đổi trong Cài đặt.</string>
     <string name="onboarding_id_card_title">Không cần email hay tên</string>
-    <string name="onboarding_id_card_text">Chỉ mã này được gửi kèm các phiên. Chưa có mã? Để trống.</string>
+    <string name="onboarding_id_card_text">Chỉ mã này được gửi kèm các chuyến đi. Chưa có mã? Để trống.</string>
     <string name="onboarding_id_skip">Bỏ qua</string>
     <string name="onboarding_summary_no_id">Chưa có mã cộng tác viên</string>
     <string name="onboarding_summary_no_id_sub">Không bắt buộc: thêm trong Cài đặt khi nhóm cấp mã.</string>
-    <string name="onboarding_hand_text">Người ngồi sau cầm ngang điện thoại, hướng vào dãy cửa hàng, bên nào cũng được. Mỗi ảnh có hướng riêng; ảnh sẽ chờ khi máy đang lia hoặc chĩa xuống đường.</string>
+    <string name="onboarding_hand_text">Người ngồi sau cầm ngang, hướng vào dãy nhà.</string>
     <string name="setup_hand_info">Người ngồi sau cầm ngang điện thoại, hướng vào dãy cửa hàng, bên nào của phố cũng được. Mỗi ảnh có hướng riêng từ con quay và la bàn nên xoay máy không sao; ảnh tự động sẽ chờ khi máy lia nhanh hoặc chĩa xuống đường.</string>
     <string name="setup_info_both">Chung</string>
-    <string name="settings_advanced">Nâng cao</string>
-    <string name="settings_advanced_sub">Góc giá đỡ, loại ảnh</string>
     <string name="settings_replay_sub">Ngôn ngữ, quyền, dữ liệu đường và hai cách quét đường</string>
     <string name="capture_gps_lost_banner">Mất GPS: ảnh dùng vị trí cuối cùng. Ra chỗ thoáng để cập nhật lại.</string>
     <string name="capture_gps_wait_title">Đang chờ GPS</string>
     <string name="guide_intro">Hãy chụp nhiều hơn mặt tiền: agent đọc từng ảnh và điền thông tin địa điểm từ đó.</string>
-    <string name="guide_next">Tiếp theo: %1$s</string>
-    <string name="guide_done">Đã đủ cho địa điểm này. Chụp thêm góc khác cũng tốt, hoặc bấm Địa điểm tiếp.</string>
     <string name="guide_front_title">Mặt tiền</string>
     <string name="guide_front_text">Toàn bộ cửa hàng, chụp thẳng, thấy biển hiệu</string>
     <string name="guide_sign_title">Biển hiệu</string>
@@ -525,4 +515,379 @@
     <string name="poi_unsure">GPS không chắc ở đây: các ảnh của địa điểm này cách xa nhau. Hãy kiểm tra ghim và kéo về đúng cửa (xem Vệ tinh sẽ dễ hơn).</string>
     <string name="poi_unsure_indoor">Phần lớn ảnh chụp khi GPS yếu (trong nhà hoặc dưới mái che): ghim được suy ra từ vị trí tốt cuối cùng theo bước chân của bạn. Hãy kiểm tra và kéo về đúng cửa.</string>
     <string name="settings_installed">Cài đặt lúc %1$s</string>
+    <!-- việc từ người duyệt -->
+    <string name="settings_tasks">Việc từ người duyệt</string>
+    <string name="tasks_title">Việc cần làm</string>
+    <string name="tasks_intro">Những địa điểm người duyệt muốn kiểm tra tại chỗ. Xuất từ Quét Phố Reviewer (Việc cần làm → Xuất), gửi file sang điện thoại (Zalo, Drive…) rồi nhập ở đây. Việc hiện trên bản đồ Chuyến đi mới.</string>
+    <string name="tasks_none">Chưa có việc nào trên điện thoại này.</string>
+    <string name="tasks_counts">%1$d việc cần làm · %2$d đã xong hoặc bỏ qua</string>
+    <string name="tasks_import">Nhập file việc</string>
+    <string name="tasks_import_short">Nhập</string>
+    <string name="tasks_clear">Xoá tất cả</string>
+    <string name="tasks_clear_title">Xoá tất cả việc?</string>
+    <string name="tasks_clear_text">Danh sách việc sẽ bị xoá khỏi điện thoại. Chuyến đi và ảnh của bạn vẫn giữ nguyên.</string>
+    <string name="tasks_bad_file">Đây không phải file việc. Trong Quét Phố Reviewer, mở mục Việc cần làm và bấm Xuất.</string>
+    <string name="tasks_sheet_hint">Chụp địa điểm xong trong vòng %1$d m quanh một việc thì việc đó tự hoàn thành.</string>
+    <string name="tasks_type_visit">Đến chụp</string>
+    <string name="tasks_type_check">Còn hay đã đóng?</string>
+    <string name="tasks_how_visit">Bắt đầu Chụp địa điểm ở đó: chụp biển hiệu, giờ mở cửa và bảng số nhà.</string>
+    <string name="tasks_how_check">Bắt đầu Chụp địa điểm ở đó. Nếu địa điểm không còn, chụp những gì đang có và chọn trạng thái Đã đóng.</string>
+    <string name="tasks_state_done">đã xong</string>
+    <string name="tasks_state_skipped">đã bỏ qua</string>
+    <string name="tasks_go">Chỉ đường</string>
+    <string name="tasks_done">Xong</string>
+    <string name="tasks_skip">Bỏ qua</string>
+    <string name="tasks_reopen">Làm lại</string>
+    <string name="tasks_hide_done">Ẩn việc đã xong</string>
+    <string name="setup_tasks_chip">%1$d việc</string>
+    <plurals name="tasks_imported">
+        <item quantity="other">%1$d việc cần làm</item>
+    </plurals>
+    <plurals name="tasks_show_done">
+        <item quantity="other">Hiện %1$d việc đã xong hoặc bỏ qua</item>
+    </plurals>
+    <!-- Máy chủ tải lên (tus): Cài đặt, hướng dẫn đầu, thẻ phiên -->
+    <string name="upload_title">Máy chủ tải lên</string>
+    <string name="upload_sub">Gửi chuyến đi lên máy chủ của nhóm (tus)</string>
+    <string name="upload_scan">Quét mã QR thiết lập</string>
+    <string name="upload_scan_done">Đã thiết lập với tên “%1$s”</string>
+    <string name="upload_scan_done_unnamed">Đã thiết lập từ mã QR</string>
+    <string name="upload_scan_not_setup">Đây không phải mã QR thiết lập: không có địa chỉ máy chủ http:// hoặc https://.</string>
+    <string name="upload_scan_no_token">Mã QR này không có mã truy cập. Hỏi trưởng dự án để lấy mã QR thiết lập mới.</string>
+    <string name="upload_scan_unavailable">Trình quét QR chưa sẵn sàng: Dịch vụ Google Play vẫn đang tải xuống. Hãy thử lại sau một phút.</string>
+    <string name="upload_scan_failed">Không mở được trình quét QR: %s</string>
+    <string name="upload_test_me">Đã kết nối với tên %1$s · có quyền: %2$s</string>
+    <string name="upload_test_not_server">Địa chỉ này có phản hồi, nhưng không phải máy chủ Quét Phố</string>
+    <string name="upload_scope_upload">Gửi chuyến đi</string>
+    <string name="upload_scope_read">Xem và tải về</string>
+    <string name="upload_scope_process">Xử lý chuyến đi</string>
+    <string name="upload_scope_delete">Xoá dữ liệu tải lên</string>
+    <string name="upload_scope_admin">Quản trị</string>
+    <string name="upload_test_no_upload">Mã này không gửi được chuyến đi: hãy xin quản trị viên một mã có quyền Gửi chuyến đi</string>
+    <string name="upload_url_label">Địa chỉ máy chủ</string>
+    <string name="upload_url_invalid">Nhập địa chỉ bắt đầu bằng http:// hoặc https://</string>
+    <string name="upload_http_warning">http:// gửi ảnh và mã truy cập không mã hóa: hãy dùng https:// ngoài mạng thử nghiệm.</string>
+    <string name="upload_token_label">Mã truy cập (không bắt buộc)</string>
+    <string name="upload_token_label_required">Mã truy cập (bắt buộc)</string>
+    <string name="upload_token_help">Lưu mã hóa trên máy, không có trong file xuất.</string>
+    <string name="upload_default_needs_token">Cần mã truy cập để tải lên.</string>
+    <string name="upload_token_show">Hiện</string>
+    <string name="upload_token_hide">Ẩn</string>
+    <string name="upload_test">Kiểm tra kết nối</string>
+    <string name="upload_testing">Đang kiểm tra…</string>
+    <string name="upload_test_token">Máy chủ từ chối mã truy cập (HTTP %d)</string>
+    <string name="upload_test_http">Máy chủ trả lời HTTP %d</string>
+    <string name="upload_test_failed">Không kết nối được máy chủ: %s</string>
+    <string name="upload_auto">Tự tải lên mỗi chuyến đi khi kết thúc</string>
+    <string name="upload_wifi">Chỉ khi có Wi-Fi</string>
+    <string name="upload_remove_after">Xoá khỏi điện thoại khi đã lên máy chủ</string>
+    <plurals name="sessions_removed_after_upload">
+        <item quantity="other">%1$d chuyến đi đã lên máy chủ và được xoá khỏi điện thoại (giải phóng %2$s).</item>
+    </plurals>
+    <string name="upload_never_recording">Không tải khi đang ghi; tải dở sẽ tự tiếp tục.</string>
+    <string name="upload_status_none">Chưa tải lên</string>
+    <string name="upload_status_waiting">Đang chờ tải lên</string>
+    <string name="upload_status_wifi">Đang chờ Wi-Fi để tải lên</string>
+    <string name="upload_status_uploading">Đang tải lên %d%%</string>
+    <string name="upload_status_done">Đã tải lên %s</string>
+    <string name="upload_status_failed">Tải lên thất bại: %s</string>
+    <string name="upload_status_retrying">Tải lên bị gián đoạn, sẽ thử lại: %s</string>
+    <string name="upload_auth_failed">Mã truy cập đã hết hạn hoặc bị thu hồi</string>
+    <string name="upload_no_space">Máy không đủ chỗ trống để chuẩn bị gửi. Hãy dọn bớt rồi thử lại.</string>
+    <string name="upload_action">Tải lên</string>
+    <string name="upload_now">Tải lên ngay</string>
+    <string name="upload_retry">Thử lại</string>
+    <string name="onboarding_upload_later">Có thể đổi sau trong Cài đặt.</string>
+    <string name="onboarding_key_title">Mã từ nhóm</string>
+    <string name="onboarding_key_lead">Quét mã QR từ quản trị viên. Chuyến đi sẽ tự tải lên.</string>
+    <string name="onboarding_key_skip">Bỏ qua và bắt đầu</string>
+    <string name="upload_server_at">Máy chủ: %s</string>
+    <string name="upload_server_change">Đổi</string>
+    <string name="setup_target_title">Chuyến này để ghi gì?</string>
+    <string name="setup_target_shops">Cửa hàng</string>
+    <string name="setup_target_shops_sub">Camera nhìn ngang sang dãy cửa hàng. Như trước.</string>
+    <string name="setup_target_addresses">Cửa hàng + số nhà</string>
+    <string name="setup_target_addresses_sub">Camera nhìn ngang, điện thoại xoay ngang. Ảnh gấp đôi, lớn hơn, chạy chậm hơn.</string>
+    <string name="setup_target_signs">Biển báo giao thông</string>
+    <string name="setup_target_signs_sub">Camera nhìn về PHÍA TRƯỚC, dọc con đường. Cứ 8 m một ảnh.</string>
+    <string name="setup_target_signs_hint">Xoay điện thoại nhìn về phía trước, qua tay lái, trước khi bắt đầu.</string>
+    <string name="setup_target_shops_info">Biển hiệu cửa hàng cùng số điện thoại, giờ mở cửa và địa chỉ. Camera nhìn sang dãy cửa hàng.</string>
+    <string name="setup_target_addresses_info">Mọi thứ của chuyến cửa hàng, thêm mọi biển số nhà, dù có cửa hàng hay không. Biển số nhỏ nên ứng dụng chụp khoảng gấp đôi số ảnh, ở cỡ lớn nhất, và nhắc bạn chạy chậm hơn (20 km/h). Cầm điện thoại nằm ngang: mỗi biển số nhà sẽ có mặt trên nhiều ảnh hơn.</string>
+    <string name="setup_target_signs_info">Mọi biển báo giao thông: loại biển, biển phụ và vị trí đặt. Camera phải nhìn về phía trước dọc con đường; ứng dụng chụp mỗi 8 m và cảnh báo khi điện thoại bị xoay ngang.</string>
+    <string name="service_mount_side_signs">Camera đang nhìn NGANG: để ghi biển báo, xoay camera nhìn về phía trước dọc con đường</string>
+    <plurals name="capture_plates_seen">
+        <item quantity="other">🔢 Thấy số nhà trên %d ảnh</item>
+    </plurals>
+    <plurals name="capture_signs_seen">
+        <item quantity="other">🚸 Thấy biển báo trên %d ảnh</item>
+    </plurals>
+    <string name="setup_kind_label">Chế độ</string>
+    <string name="setup_sweep_short">Quét đường</string>
+    <string name="setup_place_short">Chụp điểm</string>
+    <string name="setup_target_label">Đối tượng</string>
+    <string name="setup_target_shops_short">Địa điểm</string>
+    <string name="setup_target_addresses_short">Địa chỉ</string>
+    <string name="setup_target_signs_short">Biển báo</string>
+    <string name="setup_holding_mount_short">Kẹp cố định</string>
+    <string name="capture_end_stat_photos">ảnh</string>
+    <string name="capture_end_stat_videos">đoạn phim</string>
+    <string name="capture_end_stat_distance">đã đi</string>
+    <string name="capture_end_stat_places">địa điểm</string>
+    <string name="capture_end_stat_signs">ảnh có biển</string>
+    <string name="capture_end_stat_numbers">ảnh có số nhà</string>
+    <string name="capture_end_stat_minutes">phút</string>
+    <string name="capture_sign_boost">🚸 Có biển phía trước · chụp dày hơn</string>
+    <!-- chế độ trong nhà (docs/indoor.md) -->
+    <string name="setup_indoor_short">Trong nhà</string>
+    <string name="setup_indoor_title">Trong nhà (trung tâm thương mại, chợ)</string>
+    <string name="setup_indoor_info">Đi bộ trong trung tâm thương mại, chợ hay tòa nhà lớn, cầm máy trên tay: ảnh tự chụp khi bạn đi qua các cửa hàng. Trong nhà không dùng được GPS nên vị trí được tính theo bước chân: chạm giữ bản đồ (hoặc bấm ⌖ rồi chạm) mỗi khi bạn biết mình đang ở đâu, chọn tầng khi lên xuống tầng, và chụp các bảng chỉ dẫn.</string>
+    <string name="setup_indoor_hint">Đi bộ, cầm máy trên tay, chỉ chụp cửa hàng. Chạm giữ bản đồ mỗi khi bạn biết mình đang ở đâu.</string>
+    <string name="setup_building_label">Tòa nhà</string>
+    <string name="setup_building_loading">Đang tìm tòa nhà…</string>
+    <string name="setup_building_none_found">Không tìm thấy tòa nhà nào gần đây</string>
+    <string name="setup_building_offline">Không tải được (lỗi mạng)</string>
+    <string name="setup_building_walk_without">Đi không theo tòa nhà</string>
+    <string name="setup_building_find">Tìm tòa nhà</string>
+    <string name="setup_building_none">Không có tòa nhà</string>
+    <string name="setup_building_unnamed">Tòa nhà chưa có tên</string>
+    <string name="setup_building_levels">%1$d tầng</string>
+    <string name="setup_building_underground">%1$d tầng hầm</string>
+    <string name="setup_building_shops">đã có %1$d cửa hàng trên bản đồ</string>
+    <string name="setup_building_tap">Sai tòa nhà? Chạm vào tòa nhà đúng trên bản đồ.</string>
+    <string name="capture_indoor_level">Tầng</string>
+    <string name="capture_indoor_level_name">Tầng %1$s</string>
+    <string name="capture_indoor_since_anchor">Đã đi %1$d m từ lần định vị cuối</string>
+    <string name="capture_indoor_not_anchored">Bạn đang ở đâu? Chạm giữ bản đồ tại chỗ bạn đứng</string>
+    <string name="capture_indoor_no_barometer">Máy không có cảm biến áp suất: hãy tự chọn tầng</string>
+    <string name="capture_aim_low_indoor">Máy ảnh đang chĩa xuống sàn: nâng lên về phía cửa hàng</string>
+    <string name="capture_floor_up">Lên tầng %1$s?</string>
+    <string name="capture_floor_down">Xuống tầng %1$s?</string>
+    <string name="capture_floor_yes">Đúng</string>
+    <string name="capture_floor_no">Không</string>
+    <string name="capture_directory">Bảng chỉ dẫn</string>
+    <string name="capture_here_title">Tôi ở đây</string>
+    <string name="capture_here_text">Vị trí của bạn sẽ được đặt lại về điểm này. Bạn đang ở tầng nào?</string>
+    <string name="capture_here_add_direction">Sau đó chạm theo hướng tôi đang đi</string>
+    <string name="capture_here_confirm">Xác nhận</string>
+    <string name="capture_here_cancel">Hủy</string>
+    <string name="capture_here_pick">Chạm vào bản đồ tại chỗ bạn đứng</string>
+    <string name="capture_here_direction">Chạm vào bản đồ phía trước, theo hướng bạn đang đi</string>
+    <string name="capture_here_skip">Bỏ qua</string>
+    <!-- indoor 0.22: building lookup, floor plans (docs/indoor.md §4, §7) -->
+    <string name="setup_building_waiting_fix">Đang chờ vị trí…</string>
+    <string name="setup_building_retry">Thử lại</string>
+    <string name="setup_building_search">Tìm theo tên</string>
+    <string name="setup_building_pick_map">Chọn trên bản đồ</string>
+    <string name="setup_building_tap_now">Chạm vào tòa nhà trên bản đồ</string>
+    <string name="setup_building_search_hint">Trung tâm thương mại, chợ, tòa nhà…</string>
+    <string name="setup_building_search_go">Tìm</string>
+    <string name="setup_building_search_nothing">Không có tên này trong vòng 30 km</string>
+    <string name="setup_building_search_point">Chỉ là một điểm: sẽ tìm tòa nhà tại đó</string>
+    <string name="setup_building_search_no_position">Chưa có vị trí: hãy kéo bản đồ đến khu vực trước</string>
+    <string name="capture_plan">Sơ đồ</string>
+    <string name="capture_here_unit">Vị trí của bạn sẽ về gian hàng %1$s. Bạn đang ở tầng nào?</string>
+    <string name="plan_prompt_title">Chụp sơ đồ tầng %1$s</string>
+    <string name="plan_prompt_text">Bảng “Bạn đang ở đây”: sẽ thành bản đồ của tầng này</string>
+    <string name="plan_shoot">Chụp</string>
+    <string name="plan_later">Để sau</string>
+    <string name="plan_scan_failed_title">Không dùng được trình quét</string>
+    <string name="plan_scan_failed_text">Dùng ảnh vừa chụp và tự đặt 4 góc của bảng?</string>
+    <string name="plan_use_photo">Đặt 4 góc</string>
+    <string name="plan_skip">Bỏ qua</string>
+    <string name="plan_corners_title">Kéo 4 góc vào đúng 4 góc của bảng</string>
+    <string name="plan_whole_photo">Cả ảnh</string>
+    <string name="plan_straighten">Làm thẳng</string>
+    <string name="plan_dot_title">Chạm vào chấm “Bạn đang ở đây” trên sơ đồ</string>
+    <string name="plan_no_dot">Không có chấm</string>
+    <string name="plan_next">Tiếp</string>
+    <string name="plan_place_hint">Khớp sơ đồ với tòa nhà: một ngón để kéo, hai ngón để xoay và phóng to thu nhỏ</string>
+    <string name="plan_place_no_footprint">Không có đường viền tòa nhà: ghim 2 điểm (sơ đồ rồi bản đồ), hoặc kéo bằng tay</string>
+    <string name="plan_points">Ghim 2 điểm</string>
+    <string name="plan_points_stop">Kéo bằng tay</string>
+    <string name="plan_points_plan">Điểm %1$d: chạm một chỗ trên sơ đồ</string>
+    <string name="plan_points_map">Giờ chạm vào đúng chỗ đó trên bản đồ</string>
+    <string name="plan_reset">Đặt lại</string>
+    <string name="plan_done">Xong</string>
+    <string name="onboarding_signs_text">Camera nhìn thẳng về phía trước.</string>
+    <!-- Camera 360 (docs/camera360.md) -->
+    <string name="setup_camera360_choice">360°</string>
+    <string name="setup_camera360_short">Camera 360</string>
+    <string name="setup_camera360_hint">Điện thoại chỉ ghi GPS, không chụp ảnh.</string>
+    <string name="setup_camera360_info">Camera 360 quay đường, điện thoại ghi GPS. Sau Bắt đầu, đưa mã QR trước camera 2–3 giây.</string>
+    <string name="c360_sync_hint">Đưa mã này trước camera 360 trong 2–3 giây</string>
+    <string name="c360_sync_done">Xong</string>
+    <string name="c360_resync">Đồng bộ lại</string>
+    <string name="c360_gps_wait">Đang chờ GPS…</string>
+    <string name="c360_speed">km/h</string>
+    <string name="c360_screen_off">Có thể tắt màn hình.</string>
+    <string name="c360_discard_body">Chuyến đi bị xoá khỏi điện thoại, không gửi đi.</string>
+    <!-- Camera 360: điện thoại điều khiển Ricoh Theta (docs/camera360.md §4) -->
+    <string name="theta_name">Ricoh Theta</string>
+    <string name="theta_hint">Bật camera và Wi-Fi. Số serial ở đáy camera.</string>
+    <string name="theta_serial">Số serial hoặc tên Wi-Fi</string>
+    <string name="theta_password">Mật khẩu</string>
+    <string name="theta_serial_needed">Nhập số serial</string>
+    <string name="theta_connect">Kết nối</string>
+    <string name="theta_reconnect">Kết nối lại</string>
+    <string name="theta_connecting">Đang kết nối…</string>
+    <string name="theta_connected">Đã kết nối %1$s</string>
+    <string name="theta_battery">pin %1$d%%</string>
+    <string name="theta_not_connected">Chưa kết nối</string>
+    <string name="theta_lost">Mất Wi-Fi camera</string>
+    <string name="theta_failed">Không kết nối được: %1$s</string>
+    <string name="theta_failed_wifi">Không vào được Wi-Fi của camera: camera đã bật chưa, ở gần chưa, mật khẩu đúng chưa?</string>
+    <string name="theta_every">Chụp mỗi</string>
+    <string name="theta_shots">Ảnh</string>
+    <string name="theta_skipped">Bỏ qua</string>
+    <string name="theta_failed_count">Lỗi</string>
+    <string name="theta_last_error">Lỗi: %1$s</string>
+    <string name="guide360_title">Hướng dẫn quay 360</string>
+    <string name="guide360_gopro">GoPro MAX</string>
+    <string name="guide360_theta">Ricoh Theta</string>
+    <string name="guide360_open">Hướng dẫn quay</string>
+    <string-array name="guide360_gopro_lines">
+        <item># Chuẩn bị (một lần)</item>
+        <item>Kết nối app GoPro Quik một lần để chỉnh giờ cho camera.</item>
+        <item>Bật GPS: Tùy chọn → Khu vực → GPS: Bật.</item>
+        <item>Thẻ nhớ 128 GB trở lên, loại nhanh (V30).</item>
+        <item>Chế độ: Video 360, 5.6K 30 fps.</item>
+        <item># Gắn camera</item>
+        <item>Trên gậy, cao hơn mũ bảo hiểm 30–50 cm.</item>
+        <item>Thẳng đứng: một ống kính nhìn trước, một nhìn sau.</item>
+        <item>Gắn chắc, không rung lắc.</item>
+        <item># Mỗi chuyến</item>
+        <item>Bật camera, chờ biểu tượng GPS ngừng nhấp nháy.</item>
+        <item>Trên điện thoại: Camera 360 → Bắt đầu.</item>
+        <item>Bấm quay trên GoPro.</item>
+        <item>Đưa mã QR trên điện thoại trước camera 2–3 giây.</item>
+        <item>Chạy 20–30 km/h, chậm lại gần biển báo.</item>
+        <item>Kết thúc: đưa mã QR lần nữa, rồi dừng quay.</item>
+        <item># Về văn phòng</item>
+        <item>Chép file .360 từ thẻ nhớ.</item>
+        <item>Xuất video 360 bằng GoPro Player.</item>
+        <item>Gửi file đã xuất cùng chuyến đi để xử lý.</item>
+        <item># Mẹo</item>
+        <item>Lau ống kính trước mỗi chuyến.</item>
+        <item>Nghỉ 20–30 phút một lần để máy không quá nóng.</item>
+        <item>Đi cả hai chiều nếu được: vị trí chính xác hơn.</item>
+    </string-array>
+    <string-array name="guide360_theta_lines">
+        <item># Mỗi chuyến</item>
+        <item>Bật camera và Wi-Fi của camera.</item>
+        <item>Camera 360 → Điều khiển camera: Ricoh Theta.</item>
+        <item>Nhập số serial (dưới đáy camera).</item>
+        <item>Bấm Kết nối, chọn mạng THETA.</item>
+        <item>Bắt đầu: điện thoại tự chụp và gắn GPS vào mỗi ảnh.</item>
+        <item>Kết thúc → Lưu.</item>
+        <item># Về văn phòng</item>
+        <item>Chép thư mục DCIM/100RICOH qua cáp USB.</item>
+        <item>Gửi ảnh cùng chuyến đi để xử lý.</item>
+        <item># Lưu ý</item>
+        <item>Theta cần vài giây cho mỗi ảnh: chạy chậm hoặc chọn 12–20 m.</item>
+        <item>Theta X: bật Wi-Fi trong menu của camera.</item>
+    </string-array>
+    <string name="setup_camera_label">Camera</string>
+    <string name="setup_camera_phone">Điện thoại</string>
+    <string name="gps_wait_sky">Ra chỗ thoáng, xa nhà cao để bắt GPS</string>
+    <string name="setup_change">Đổi</string>
+    <string name="setup_collapse">Thu gọn</string>
+    <string name="summary_title">Đã lưu chuyến đi</string>
+    <string name="summary_upload_no_token">Chưa có mã truy cập: tải lên trong Cài đặt</string>
+    <string name="summary_upload_wifi">Đang chờ Wi-Fi</string>
+    <string name="summary_upload_waiting">Đang chờ gửi</string>
+    <string name="summary_upload_sending">Đang gửi… %1$d%%</string>
+    <string name="summary_upload_sent">Đã gửi ✓</string>
+    <string name="summary_upload_failed">Gửi lỗi: %1$s</string>
+    <string name="summary_upload_not_sent">Chưa gửi</string>
+    <string name="summary_done">Xong</string>
+    <string name="summary_theta_shots">ảnh 360</string>
+    <string name="summary_theta_skipped">bỏ lỡ</string>
+    <string name="summary_theta_failed">lỗi</string>
+    <string name="summary_open_settings">Mở Cài đặt</string>
+    <string name="c360_end_no_sync">Chưa quay mã đồng bộ đủ 3 giây: video không khớp được với đường đi. Hãy bấm Đồng bộ lại trước.</string>
+    <!-- Camera 360 settings page, New ride line, serial reader, onboarding step -->
+    <string name="c360_title">Camera 360</string>
+    <string name="c360_your_camera">Camera của bạn</string>
+    <string name="c360_model_none">Không dùng</string>
+    <string name="c360_model_gopro">GoPro MAX</string>
+    <string name="c360_model_insta">Insta360</string>
+    <string name="c360_model_theta">Ricoh Theta</string>
+    <string name="c360_model_other">Khác</string>
+    <string name="c360_model_other_name">Camera khác</string>
+    <string name="c360_none_hint">Chọn camera để quay đường 360°.</string>
+    <string name="c360_sync_note">Chuyến đi dùng mã QR đồng bộ: sau Bắt đầu, đưa mã trước camera.</string>
+    <string name="c360_theta_title">Ghép Ricoh Theta</string>
+    <string name="c360_gopro_qr_title">Cài giờ và GPS bằng mã QR</string>
+    <string name="c360_gopro_qr_sub">Cần GoPro Labs. Cài giờ, bật GPS, quay 360 5.6K 30.</string>
+    <string name="c360_gopro_qr_show">Hiện mã QR</string>
+    <string name="c360_gopro_qr_hint">Cài GoPro Labs, rồi đưa mã trước camera GoPro</string>
+    <string name="c360_gopro_labs_link">Cài GoPro Labs: gopro.github.io/labs</string>
+    <string name="c360_line_none">Chưa chọn camera</string>
+    <string name="c360_choose">Chọn camera</string>
+    <string name="c360_line_sync">%1$s · đồng bộ bằng mã QR</string>
+    <string name="c360_state_connected">đã kết nối</string>
+    <string name="c360_state_off">chưa kết nối</string>
+    <string name="c360_state_connecting">đang kết nối…</string>
+    <string name="c360_state_lost">mất Wi-Fi</string>
+    <string name="c360_state_failed">không kết nối được</string>
+    <string name="c360_every">mỗi %1$d m</string>
+    <string name="c360_paired">đã ghép</string>
+    <string name="c360_not_paired">chưa ghép</string>
+    <string name="serial_scan_open">Đọc số serial</string>
+    <string name="serial_scan_hint">Hướng vào nhãn dưới đáy camera</string>
+    <string name="serial_scan_searching">Đang tìm số serial…</string>
+    <string name="serial_scan_found">Số serial: %1$s</string>
+    <string name="serial_scan_use">Dùng số này</string>
+    <string name="serial_scan_cancel">Hủy</string>
+    <string name="serial_scan_need_camera">Cần quyền camera</string>
+    <string name="onboarding_cam360_lead">Bạn có dùng camera 360 không?</string>
+    <string name="onboarding_cam360_no">Không</string>
+    <string name="onboarding_cam360_no_sub">Chỉ dùng camera điện thoại</string>
+    <string name="onboarding_cam360_yes">Có</string>
+    <string name="onboarding_cam360_yes_sub">GoPro MAX, Insta360, Ricoh Theta…</string>
+    <!-- Camera 360: kiểm tra camera -->
+    <string name="check_title">Kiểm tra camera</string>
+    <string name="check_sub">Chụp 1 ảnh thử rồi xoá</string>
+    <string name="check_run">Kiểm tra camera</string>
+    <string name="check_again">Kiểm tra lại</string>
+    <string name="check_cancel">Huỷ</string>
+    <string name="check_ride_on">Đang có chuyến đi dùng camera</string>
+    <string name="check_today">Đã kiểm tra hôm nay ✓</string>
+    <string name="check_line_today">đã kiểm tra hôm nay ✓</string>
+    <string name="check_line_not">chưa kiểm tra</string>
+    <string name="check_step_wifi">Kết nối Wi-Fi camera</string>
+    <string name="check_step_camera">Đúng camera Ricoh</string>
+    <string name="check_step_clock">Chỉnh giờ camera theo điện thoại</string>
+    <string name="check_step_gps">Ghi vị trí GPS</string>
+    <string name="check_step_shot">Chụp thử 1 ảnh</string>
+    <string name="check_step_thumb">Tải ảnh về điện thoại</string>
+    <string name="check_step_exif">Ảnh có toạ độ GPS</string>
+    <string name="check_step_delete">Xoá ảnh thử khỏi camera</string>
+    <string name="check_power_info">Bật/tắt camera: bằng nút nguồn (không điều khiển qua Wi-Fi được)</string>
+    <string name="check_serial">serial %1$s</string>
+    <string name="check_accuracy">±%1$d m</string>
+    <string name="check_shot_speed">%1$s s/ảnh → chụp kịp mỗi %2$d m đến ~%3$d km/h</string>
+    <string name="check_exif_off">lệch %1$d m</string>
+    <string name="check_fix_serial">Nhập số serial ở trên</string>
+    <string name="check_fix_not_ricoh">Không phải camera Ricoh: xem lại tên Wi-Fi</string>
+    <string name="check_fix_wrong_serial">Sai số serial: xem số ở đáy camera</string>
+    <string name="check_fix_no_answer">Camera không trả lời: tắt rồi bật lại camera</string>
+    <string name="check_fix_clock">Theta X: trong menu camera, đặt Ngày giờ = Tự động</string>
+    <string name="check_fix_no_gps">Cần GPS: ra chỗ thoáng</string>
+    <string name="check_fix_gps_refused">Camera không nhận vị trí. Máy tính vẫn đặt ảnh theo đường đi của điện thoại</string>
+    <string name="check_fix_shot">Không chụp được: xem thẻ nhớ, pin, chế độ chụp ảnh</string>
+    <string name="check_fix_download">Không tải được ảnh: thử lại</string>
+    <string name="check_fix_exif_no_gps">Ảnh không có toạ độ. Không sao: máy tính đặt ảnh theo đường đi của điện thoại</string>
+    <string name="check_fix_exif_far">Toạ độ trong ảnh lệch xa. Không sao: máy tính đặt ảnh theo đường đi của điện thoại</string>
+    <string name="check_fix_delete">Xoá ảnh thử bằng tay</string>
+    <string name="check_fix_error">Lỗi</string>
+    <string name="check_manual_title">Kiểm tra trước khi đi</string>
+    <string name="check_manual_sub">Đánh dấu mỗi ngày</string>
+    <string name="check_item_labs">Đã cài GoPro Labs</string>
+    <string name="check_item_setup_qr">Camera đã quét mã QR cài đặt (bíp + xác nhận trên màn hình)</string>
+    <string name="check_item_gps">GPS camera đã bật</string>
+    <string name="check_item_clock">Đồng hồ camera đúng / sẽ quét mã QR đồng bộ lúc bắt đầu</string>
+    <string name="check_item_gps_any">GPS (nếu có) bật</string>
+    <string name="check_item_card">Thẻ nhớ còn trống</string>
+    <string name="check_item_battery">Pin đầy</string>
 </resources>

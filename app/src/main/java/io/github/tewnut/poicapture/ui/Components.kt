@@ -61,8 +61,13 @@ import androidx.core.content.ContextCompat
 import io.github.tewnut.poicapture.core.Side
 
 object Palette {
-    val Green = Color(0xFF0B6B4C)
-    val GreenLight = Color(0xFFD7F0E5)
+    // VMAP brand (docs/vmap-trademark.svg): lime gradient #7BCF00 -> #BEFF00 with black. Lime is never text on white:
+    // [Green] is the deep lime that reads on white and carries white text; [Lime] is for fills behind black text.
+    val Green = Color(0xFF3D6B00)
+    val GreenLight = Color(0xFFEEF9D2)
+    val Lime = Color(0xFFBEFF00)
+    val LimeDeep = Color(0xFF7BCF00)
+    val Black = Color(0xFF0A0A0A)
     val Amber = Color(0xFFB54708)
     val AmberLight = Color(0xFFFEF0C7)
     val Red = Color(0xFFD92D20)
@@ -72,9 +77,9 @@ object Palette {
     val Road = Color(0xFF98A2B3)
     val House = Color(0xFFE4E7EC)
     /** screen background: a soft green-grey, so white cards stand out without heavy shadows */
-    val Canvas = Color(0xFFF3F6F4)
+    val Canvas = Color(0xFFF4F6F0)
     /** hairline borders and dividers */
-    val Line = Color(0xFFE3E8E5)
+    val Line = Color(0xFFE4E8DC)
 }
 
 /**
@@ -82,7 +87,9 @@ object Palette {
  * fix older than a minute, maybe from elsewhere): fine to centre a map, not to say which road the contributor is on.
  */
 data class LiveLocation(val lat: Double, val lon: Double, val accuracyM: Float, val simulated: Boolean, val atMs: Long,
-                        val gps: Boolean = true, val stale: Boolean = false, val fixNanos: Long = 0L) {
+                        val gps: Boolean = true, val stale: Boolean = false, val fixNanos: Long = 0L,
+                        /** the location provider ("gps", "fused", "network", "passive"), for the logs */
+                        val provider: String = "") {
     /** A GPS fix at most [GPS_MAX_AGE_MS] old: the same rule as the capture (every photo needs one). */
     fun freshGps(nowNanos: Long = SystemClock.elapsedRealtimeNanos()): Boolean =
         gps && !stale && (nowNanos - fixNanos) / 1_000_000 <= io.github.tewnut.poicapture.capture.GPS_MAX_AGE_MS
@@ -148,7 +155,8 @@ fun rememberLocationState(): LocationState {
             val ageMs = (SystemClock.elapsedRealtimeNanos() - l.elapsedRealtimeNanos) / 1_000_000
             val mock = if (Build.VERSION.SDK_INT >= 31) l.isMock else @Suppress("DEPRECATION") l.isFromMockProvider
             fix = LiveLocation(l.latitude, l.longitude, l.accuracy, mock || isEmulator(), System.currentTimeMillis(),
-                gps = isGps, stale = remembered && ageMs > 60_000, fixNanos = l.elapsedRealtimeNanos)
+                gps = isGps, stale = remembered && ageMs > 60_000, fixNanos = l.elapsedRealtimeNanos,
+                provider = (l.provider ?: "") + if (remembered) "-last" else "")
         }
         val listener = LocationListener { accept(it, remembered = false) }
         val providers = buildList {
@@ -326,4 +334,26 @@ fun ScreenHeader(title: String, onBack: (() -> Unit)? = null, subtitle: String? 
         }
         actions()
     }
+}
+
+/**
+ * True once [waiting] (no usable GPS fix) has lasted [io.github.tewnut.poicapture.core.GpsWait.HINT_AFTER_MS]; back to
+ * false as soon as a fix comes.
+ */
+@Composable
+fun rememberGpsWaitHint(waiting: Boolean): Boolean {
+    var since by remember { mutableStateOf<Long?>(null) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(waiting) {
+        since = if (waiting) System.currentTimeMillis() else null
+        while (waiting) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) }
+    }
+    return io.github.tewnut.poicapture.core.GpsWait.showHint(since, now)
+}
+
+/** "Ra chỗ thoáng, xa nhà cao để bắt GPS": amber, one line. */
+@Composable
+fun GpsSkyHint(modifier: Modifier = Modifier, color: Color = Palette.Amber) {
+    Text(stringResource(R.string.gps_wait_sky), modifier = modifier, color = color, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+        maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
 }

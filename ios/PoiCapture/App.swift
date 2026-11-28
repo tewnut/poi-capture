@@ -4,7 +4,7 @@ import ImageIO
 import Shared
 import SwiftUI
 
-// POI Capture for iPhone: Place capture (stop at each shop, photograph it). Same rules and export as the Android
+// Quét Phố (POI Capture) for iPhone: Place capture (stop at each shop, photograph it). Same rules and export as the Android
 // app: GPS-grade fix at most 5 s old for every photo, sessions named "{street} [yymmdd]", sent as a poi-capture/3 zip.
 
 @main
@@ -58,7 +58,7 @@ struct OnboardingView: View {
                 Button("Continue") { profile.email = email.trimmingCharacters(in: .whitespaces); profile.name = name }
                     .disabled(!Onboarding.shared.isEmail(s: email))
             }
-            .navigationTitle("POI Capture")
+            .navigationTitle("Quét Phố")
         }
     }
 }
@@ -129,7 +129,7 @@ struct HomeView: View {
                     }
                 }
             }
-            .navigationTitle("POI Captures")
+            .navigationTitle("Rides")
             .toolbar { ToolbarItem(placement: .navigationBarTrailing) { NavigationLink { SettingsView() } label: { Image(systemName: "gearshape.fill") } } }
             .safeAreaInset(edge: .bottom) {
                 Button { capturing = newSession() } label: {

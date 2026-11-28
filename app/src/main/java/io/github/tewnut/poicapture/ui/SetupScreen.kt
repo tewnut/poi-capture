@@ -11,12 +11,40 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.GradientDrawable
 import android.location.LocationManager
 import android.os.Build
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.ui.layout.layout
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Velocity
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +59,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -41,6 +70,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -72,6 +102,8 @@ import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.R
 import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.core.CapturePlan
+import io.github.tewnut.poicapture.core.SweepTarget
+import io.github.tewnut.poicapture.core.SetupSummary
 import io.github.tewnut.poicapture.core.Coverage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -86,6 +118,8 @@ import io.github.tewnut.poicapture.core.SessionKind
 import io.github.tewnut.poicapture.core.Side
 import io.github.tewnut.poicapture.core.Vehicle
 import io.github.tewnut.poicapture.core.Way
+import io.github.tewnut.poicapture.core.Building
+import io.github.tewnut.poicapture.core.BuildingQuery
 import io.github.tewnut.poicapture.core.iso
 import io.github.tewnut.poicapture.core.matchRoad
 import io.github.tewnut.poicapture.core.uid
@@ -114,6 +148,11 @@ private fun deviceJson(ctx: Context): JSONObject {
  * checks GPS, picks how to record, and presses Start.
  */
 @OptIn(ExperimentalLayoutApi::class)
+
+/** Indoor walks are hidden from the setup for now (2026-11-27: the step count drops while photographing, the mall's
+ * outline is missed from just outside it; docs/indoor.md). Rides already recorded indoors still open and upload. */
+const val INDOOR_ENABLED = false
+
 @Composable
 fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: () -> Unit) {
     val ctx = LocalContext.current
@@ -138,15 +177,36 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
             CoverLayer(covs.flatMap { Coverage.lines(it) }, covs.flatMap { Coverage.points(it) })
         }
     }
-    var mode by remember { mutableStateOf(Mode.PHOTO_AUTO) }
-    var kind by remember { mutableStateOf(SessionKind.SWEEP) }
+    // work to do on site, from the reviewer (Settings -> Tasks)
+    var tasks by remember { mutableStateOf<List<io.github.tewnut.poicapture.core.FieldTask>>(emptyList()) }
+    var tasksTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(tasksTick) { tasks = withContext(Dispatchers.IO) { CaptureService.tasks(ctx).all() } }
+    var tasksOpen by remember { mutableStateOf(false) }
+    var taskFocus by remember { mutableStateOf<String?>(null) }
+    // the kind of the last ride (Quét đường / Chụp điểm), like the other choices; indoor only while it is enabled
+    var kind by remember { mutableStateOf(Prefs.rideKind(ctx).takeIf { it != SessionKind.INDOOR || INDOOR_ENABLED } ?: SessionKind.SWEEP) }
+    // a street ride with a 360 camera: an option of Quét đường (the ride's kind is camera360, docs/camera360.md)
+    var use360 by remember { mutableStateOf(Prefs.use360(ctx)) }
+    val rideKind = if (kind == SessionKind.SWEEP && use360) SessionKind.CAMERA360 else kind
     var holding by remember { mutableStateOf(Prefs.holding(ctx)) }
-    var recenter by remember { mutableIntStateOf(0) }
+    var target by remember { mutableStateOf(Prefs.target(ctx)) }
+    // Camera 360: the camera chosen in Settings → Camera 360; with a Ricoh Theta the phone controls it (docs/camera360.md §4)
+    var cam360Model by remember { mutableStateOf(Prefs.camera360Model(ctx)) }
+    val thetaOn = cam360Model == io.github.tewnut.poicapture.core.Camera360Model.THETA
+    var thetaEveryM by remember { mutableStateOf(Prefs.thetaEveryM(ctx)) }
+    var cam360Page by remember { mutableStateOf(false) }
+    val thetaLink by io.github.tewnut.poicapture.capture.ThetaLink.state.collectAsState()
+    // leaving the setup without starting a Theta ride lets the camera's Wi-Fi go
+    DisposableEffect(Unit) { onDispose { if (!io.github.tewnut.poicapture.capture.ThetaLink.forRide) io.github.tewnut.poicapture.capture.ThetaLink.release() } }
     var nearWays by remember { mutableStateOf<List<Way>?>(null) }
     var roadStatus by remember { mutableStateOf<Int?>(null) }   // string resource of the road data status, null = fine
     var roadSource by remember { mutableStateOf("") }
     var packSuggestion by remember { mutableStateOf<RoadSource.Entry?>(null) }
     var roadReload by remember { mutableIntStateOf(0) }   // a pack was just installed: look the road up again
+    var askedSteps by remember { mutableStateOf(false) }
+    // the step permission answered (either way): start
+    val startRef = remember { arrayOfNulls<() -> Unit>(1) }
+    val stepsLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { startRef[0]?.invoke() }
 
     // load the road data around the rider (shared cache: the capture service reuses it) to show the current road
     val cell = live?.let { RoadCells.cellOf(LatLon(it.lat, it.lon)) }
@@ -186,145 +246,416 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     } }
     val currentRoad = currentWay?.let { wayLabel(ctx, it) }
     // spacing and speed as the capture will start: from the type of this road (see CapturePlan.facadeForRoad)
-    val plan = CapturePlan.of(CapturePlan.facadeForRoad(currentWay?.highway))
+    val plan = CapturePlan.of(CapturePlan.facadeForRoad(currentWay?.highway), target = target)
 
-    // the same rule as the capture: Start only with a GPS fix from the last 5 s
-    val ready = live != null
+    // ---------- indoor: the building under / nearest to the walker (docs/indoor.md §4) ----------
+    val indoor = kind == SessionKind.INDOOR
+    val anyFix = loc.fix
+    // no fix yet (location just switched on, first seconds): the phone's last known position, however old
+    val lastKnown = remember(loc.status) { lastKnownFix(ctx) }
+    val mapCenter = remember { arrayOfNulls<LatLon>(1) }
+    val lookup = rememberBuildingLookup(ctx, settings.overpassUrl, indoor, anyFix ?: lastKnown)
+    val building = lookup.building
+    val noBuilding = lookup.none
+    var searching by remember { mutableStateOf(false) }
+
+    // the same rule as the capture: Start only    // the same rule as the capture: Start only with a GPS fix from the last 5 s; indoors a position or a building
+    val ready = if (indoor) anyFix != null || building != null else live != null
+    // the choices: open the first time, one line with Đổi once a ride was started (not kept: folded again next time)
+    var expanded by remember { mutableStateOf(!Prefs.startedRide(ctx)) }
+    // searching for 20 s (not blocked by a permission or the location switch: LocationHelp says what to do then)
+    val gpsHint = rememberGpsWaitHint(!indoor && live == null && loc.status == LocStatus.SEARCHING)
 
     androidx.activity.compose.BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
-        var info by remember { mutableStateOf(false) }
-        ScreenHeader(stringResource(R.string.home_new_session), onBack = onBack) {
-            androidx.compose.material3.IconButton(onClick = { info = true }) {
-                androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Outlined.Info, stringResource(R.string.setup_info_title), tint = Palette.Ink)
+    // Thu gọn folds the choices again only once a ride was started; the first time they stay open
+    val canFold = remember { Prefs.startedRide(ctx) }
+
+    // ---------- the sheet over the map (like Google Maps): heights in px, measured ----------
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    var headerH by remember { mutableIntStateOf(0) }    // the top bar, status bar included
+    var fullH by remember { mutableIntStateOf(0) }      // from under the top bar to the bottom (or the keyboard)
+    var choicesH by remember { mutableIntStateOf(0) }   // the choices' natural height
+    var barH by remember { mutableIntStateOf(0) }       // street, GPS, Start, navigation bar included
+    val handleH = with(density) { SHEET_HANDLE.roundToPx() }
+    val measured = fullH > 0 && barH > 0
+    // never lower than the street and Start; at most the choices' own height (or the screen)
+    val minPx = (handleH + barH).toFloat()
+    val maxPx = maxOf(minPx, minOf(fullH, handleH + choicesH + barH).toFloat())
+    val partialPx = (fullH * SHEET_PARTIAL).coerceIn(minPx, maxPx)
+    fun px(a: SheetAnchor) = when (a) { SheetAnchor.MIN -> minPx; SheetAnchor.PARTIAL -> partialPx; SheetAnchor.MAX -> maxPx }
+    var anchor by remember { mutableStateOf(SheetAnchor.MAX) }
+    var sheetH by remember { mutableFloatStateOf(-1f) }   // -1: not measured yet (the sheet fills the screen once)
+    var dragging by remember { mutableStateOf(false) }
+    val anim = remember { arrayOfNulls<Job>(1) }
+    fun animateTo(target: Float) {
+        anim[0]?.cancel()
+        if (sheetH < 0f) { sheetH = target; return }
+        anim[0] = scope.launch {
+            animate(sheetH, target, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) { v, _ -> sheetH = v }
+        }
+    }
+    // a finger moved dy (down > 0): the sheet follows it between its lowest and highest; returns the part used
+    val moveSheet: (Float) -> Float = { dy ->
+        if (sheetH < 0f) 0f else {
+            val before = sheetH
+            val after = (before - dy).coerceIn(minPx, maxPx)
+            if (after != before) { anim[0]?.cancel(); dragging = true; sheetH = after }
+            before - after
+        }
+    }
+    // the finger lifted: the next height in a quick throw's direction, else the nearest
+    val settle: (Float) -> Unit = { v ->
+        dragging = false
+        val fast = with(density) { SHEET_FLING.toPx() }
+        val h = sheetH
+        val order = SheetAnchor.entries.sortedBy { px(it) }
+        val pick = when {
+            v < -fast -> order.firstOrNull { px(it) > h + 1f } ?: order.last()
+            v > fast -> order.lastOrNull { px(it) < h - 1f } ?: order.first()
+            else -> order.minBy { kotlin.math.abs(px(it) - h) }
+        }
+        anchor = pick
+        animateTo(px(pick))
+    }
+    val moveRef = rememberUpdatedState(moveSheet)
+    val settleRef = rememberUpdatedState(settle)
+    // the choices scroll inside the sheet: pulling up grows the sheet first, pulling down at their top lowers it
+    val sheetScroll = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
+                if (source != NestedScrollSource.UserInput || available.y >= 0f) Offset.Zero
+                else Offset(0f, moveRef.value(available.y))
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+                if (source != NestedScrollSource.UserInput || available.y <= 0f) Offset.Zero
+                else Offset(0f, moveRef.value(available.y))
+            override suspend fun onPreFling(available: Velocity): Velocity =
+                if (dragging) { settleRef.value(available.y); available } else Velocity.Zero
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                if (dragging) settleRef.value(0f)
+                return Velocity.Zero
             }
         }
+    }
+    val sheetTarget = px(anchor)
+    // the content changed height (choices opened, a card, the GPS hint): keep the sheet at the same place, re-measured
+    LaunchedEffect(sheetTarget, measured) { if (measured && !dragging) animateTo(sheetTarget) }
+    // Đổi / Thu gọn: the sheet to the choices' height (all of them, or the one line)
+    LaunchedEffect(expanded) { anchor = SheetAnchor.MAX }
+    // no GPS for 20 s: lower a tall sheet so the map and the accuracy circle show next to the hint
+    LaunchedEffect(gpsHint) { if (gpsHint && anchor == SheetAnchor.MAX && maxPx > partialPx + 1f) anchor = SheetAnchor.PARTIAL }
+    // a tap on the map: the sheet down to its content (choices folded), or half the screen the first time
+    val onMapTap: (LatLon) -> Unit = { p ->
+        if (anchor != SheetAnchor.MIN) {
+            if (canFold && expanded) expanded = false
+            else if (anchor == SheetAnchor.MAX && maxPx > partialPx + 1f) anchor = SheetAnchor.PARTIAL
+        }
+        // indoor: a tap picks the building there (the guess was wrong)
+        if (indoor) lookup.at(p, "tap")
+    }
+    val headerDp = with(density) { headerH.toDp() }
+    // the map centres the rider in the part the sheet leaves (the settled height, at most half the screen)
+    val coveredPx = minOf(sheetTarget, fullH * SHEET_PARTIAL).roundToInt()
+    var info by remember { mutableStateOf(false) }
+    val sideInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)
+
+    Box(Modifier.fillMaxSize().background(Palette.Canvas)) {
         if (info) SetupInfo(plan.photoEveryM, plan.maxSpeedKmh) { info = false }
-        // ---------- map ----------
-        Box(Modifier.weight(0.38f).heightIn(min = 150.dp).fillMaxWidth()) {
-            LiveMap(settings.tileUrl, loc.fix, recenter, if (showCoverage) mine else CoverLayer(),
-                Modifier.fillMaxSize().clipToBounds())
+        if (searching) BuildingSearchSheet(settings.overpassUrl,
+            (anyFix ?: lastKnown)?.let { LatLon(it.lat, it.lon) } ?: mapCenter[0],
+            onPick = { h -> searching = false; lookup.pick(h) }, onLog = { lookup.log(it) }, onClose = { searching = false })
+        if (tasksOpen) TasksSheet(loc.fix?.let { LatLon(it.lat, it.lon) }, taskFocus, onChanged = { tasksTick++ }) { tasksOpen = false; taskFocus = null }
+        // ---------- map: the whole screen, behind ----------
+        LiveMap(settings.tileUrl, loc.fix, if (showCoverage) mine else CoverLayer(), tasks,
+            { taskFocus = it; tasksOpen = true }, Modifier.fillMaxSize().clipToBounds(),
+            building = if (indoor && !noBuilding) building else null,
+            onTap = onMapTap, center = mapCenter, insetTop = headerH, insetBottom = coveredPx)
+        // the map's chips, in the part of the map in view (no touch handling of its own: drags reach the map)
+        // (the sheet's height is read while laying out only: a drag must not recompose the screen and redraw the map)
+        Box(Modifier.fillMaxSize().windowInsetsPadding(sideInsets).padding(top = headerDp).layout { m, c ->
+            val h = (c.maxHeight - sheetH.coerceAtLeast(0f).roundToInt()).coerceAtLeast(0)
+            val p = m.measure(c.copy(minHeight = h, maxHeight = h))
+            layout(p.width, c.maxHeight) { p.place(0, 0) }
+        }) {
+            if (indoor && lookup.pickOnMap) Pill(stringResource(R.string.setup_building_tap_now), bg = Palette.Black, fg = Palette.Lime,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp))
+            val openTasks = tasks.count { it.open }
+            if (openTasks > 0) androidx.compose.material3.AssistChip(onClick = { taskFocus = null; tasksOpen = true },
+                label = { Text("📋 " + stringResource(R.string.setup_tasks_chip, openTasks), fontSize = 12.sp) },
+                modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
+                colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(containerColor = Color.White))
             if (mine.lines.isNotEmpty() || mine.points.isNotEmpty()) {
                 androidx.compose.material3.FilterChip(showCoverage, { showCoverage = !showCoverage },
                     { Text(stringResource(R.string.setup_coverage), fontSize = 12.sp) },
                     modifier = Modifier.align(Alignment.BottomStart).padding(12.dp),
                     colors = androidx.compose.material3.FilterChipDefaults.filterChipColors(containerColor = Color.White, selectedContainerColor = Palette.GreenLight))
             }
-            Column(Modifier.align(Alignment.TopStart).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                when (loc.status) {
-                    LocStatus.NO_PERMISSION -> Pill(stringResource(R.string.setup_loc_no_permission), dot = Palette.Red)
-                    LocStatus.APPROXIMATE_ONLY -> Pill(stringResource(R.string.setup_loc_approximate), dot = Palette.Red)
-                    LocStatus.DISABLED -> Pill(stringResource(R.string.setup_loc_disabled), dot = Palette.Red)
-                    LocStatus.SEARCHING -> Pill(when {
-                            loc.satsSeen > 0 -> stringResource(R.string.setup_loc_searching_sats, loc.satsUsed, loc.satsSeen)
-                            loc.approx != null -> stringResource(R.string.setup_loc_network, loc.approx!!.accuracyM.roundToInt())
-                            else -> stringResource(R.string.setup_loc_searching)
-                        }, dot = Color(0xFFFEC84B))
-                    LocStatus.OK -> live!!.let { l ->
-                        if (l.accuracyM <= settings.maxAccuracyM) Pill(stringResource(R.string.setup_gps_good, l.accuracyM.roundToInt()), dot = Color(0xFF47CD89))
-                        else Pill(stringResource(R.string.setup_gps_weak, l.accuracyM.roundToInt()), dot = Color(0xFFFEC84B))
+        }
+        // ---------- top bar, over the map ----------
+        Surface(Modifier.fillMaxWidth().onSizeChanged { headerH = it.height }, color = Palette.Canvas, shadowElevation = 4.dp) {
+            Box(Modifier.statusBarsPadding().windowInsetsPadding(sideInsets)) {
+                ScreenHeader(stringResource(R.string.home_new_session), onBack = onBack) {
+                    androidx.compose.material3.IconButton(onClick = { info = true }) {
+                        androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Outlined.Info, stringResource(R.string.setup_info_title), tint = Palette.Ink)
                     }
                 }
-                if (live?.simulated == true) {
-                    Pill(stringResource(R.string.setup_simulated), bg = Palette.AmberLight, fg = Palette.Amber, size = 12.sp)
-                }
-            }
-            SmallFloatingActionButton(onClick = { recenter++ }, modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
-                containerColor = Color.White) {
-                Icon(Icons.Filled.LocationOn, stringResource(R.string.setup_recenter), tint = Palette.Blue)
             }
         }
 
-        // ---------- what will happen + Start ----------
-        Surface(Modifier.weight(0.62f), shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
-            Column(Modifier.fillMaxSize()) {
-                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 14.dp),
+        // ---------- the sheet: what will happen + Start ----------
+        Box(Modifier.fillMaxSize().padding(top = headerDp).imePadding().windowInsetsPadding(sideInsets).onSizeChanged { fullH = it.height }) {
+            Surface(Modifier.align(Alignment.BottomCenter).fillMaxWidth().layout { m, c ->
+                    // not measured yet: the whole height once, to measure the choices and the bottom part
+                    val h = if (sheetH < 0f) c.maxHeight else sheetH.roundToInt().coerceIn(0, c.maxHeight)
+                    val p = m.measure(c.copy(minHeight = h, maxHeight = h))
+                    layout(p.width, h) { p.place(0, 0) }
+                },
+                shadowElevation = 8.dp, shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
+                Column(Modifier.fillMaxSize().draggable(rememberDraggableState { moveSheet(it) }, Orientation.Vertical,
+                    onDragStopped = { v -> settle(v) })) {
+                    // the handle: drag it (or the street / Start part) to see the map
+                    Box(Modifier.fillMaxWidth().height(SHEET_HANDLE), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(width = 36.dp, height = 4.dp).background(Palette.Muted.copy(alpha = 0.45f), RoundedCornerShape(2.dp)))
+                    }
+                Column(Modifier.weight(1f).nestedScroll(sheetScroll).verticalScroll(rememberScrollState())) {
+                Column(Modifier.fillMaxWidth().onSizeChanged { choicesH = it.height }.padding(start = 16.dp, end = 16.dp, top = 2.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     // only when there is something to do (permission, location off); the map shows the satellites
                     if (loc.status != LocStatus.SEARCHING) LocationHelp(loc)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        KindCard(stringResource(R.string.setup_sweep_title), stringResource(R.string.setup_sweep_sub),
-                            kind == SessionKind.SWEEP, Modifier.weight(1f)) { kind = SessionKind.SWEEP }
-                        KindCard(stringResource(R.string.setup_place_title), stringResource(R.string.setup_place_sub),
-                            kind == SessionKind.POI, Modifier.weight(1f)) { kind = SessionKind.POI }
-                    }
-                    Column {
-                        Hint(stringResource(R.string.setup_you_are_on))
-                        Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
-                            fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink, maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                        // outside every installed pack, but the catalogue has one here: suggest it (computed off the UI thread)
-                        val suggest = packSuggestion
-                        if (suggest != null) {
-                            Hint(stringResource(R.string.setup_pack_suggest), color = Palette.Blue)
-                            PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null; roadReload++ })
+                    // after the first ride the choices fold into one line ("Quét đường · Biển báo · Kẹp cố định") with Đổi;
+                    // the first time they are all open. Folding is only a view: the ride is set up the same way.
+                    if (!expanded) ChoiceSummary(io.github.tewnut.poicapture.core.SetupSummary.parts(kind, target, use360, thetaOn, holding)) { expanded = true }
+                    // opened with Đổi: Thu gọn folds them again
+                    if (expanded && canFold) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { expanded = false }, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp)) {
+                            Text(stringResource(R.string.setup_collapse), fontWeight = FontWeight.Bold)
                         }
                     }
-                    if (kind == SessionKind.SWEEP) {
-                        Text(stringResource(R.string.setup_holding_title), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            KindCard("🛵 " + stringResource(R.string.setup_holding_mount), stringResource(R.string.setup_holding_mount_sub),
-                                holding == io.github.tewnut.poicapture.core.Holding.MOUNT, Modifier.weight(1f)) {
-                                holding = io.github.tewnut.poicapture.core.Holding.MOUNT; Prefs.saveHolding(ctx, holding) }
-                            KindCard("🙋 " + stringResource(R.string.setup_holding_hand), stringResource(R.string.setup_holding_hand_sub),
-                                holding == io.github.tewnut.poicapture.core.Holding.HAND, Modifier.weight(1f)) {
-                                holding = io.github.tewnut.poicapture.core.Holding.HAND; Prefs.saveHolding(ctx, holding) }
-                        }
-                        if (holding == io.github.tewnut.poicapture.core.Holding.HAND) Hint(stringResource(R.string.setup_holding_hand_hint))
-                        Text(stringResource(R.string.setup_mode_short), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(mode == Mode.PHOTO_AUTO, { mode = Mode.PHOTO_AUTO }, { Text(stringResource(R.string.setup_mode_auto)) })
-                            FilterChip(mode == Mode.PHOTO_MANUAL, { mode = Mode.PHOTO_MANUAL }, { Text(stringResource(R.string.setup_mode_manual)) })
-                        }
-                        Hint(if (mode == Mode.PHOTO_AUTO) stringResource(R.string.setup_plan_auto_short, String.format(Locale.ROOT, "%.1f", plan.photoEveryM), plan.maxSpeedKmh)
-                            else stringResource(R.string.setup_plan_short, plan.maxSpeedKmh))
+                    // three quick choices, short labels only: what each means is behind the (i) button
+                    if (expanded) Choice(stringResource(R.string.setup_kind_label), listOfNotNull(
+                        SessionKind.SWEEP to stringResource(R.string.setup_sweep_short),
+                        SessionKind.POI to stringResource(R.string.setup_place_short),
+                        if (INDOOR_ENABLED) SessionKind.INDOOR to stringResource(R.string.setup_indoor_short) else null), kind) { kind = it; Prefs.saveRideKind(ctx, it) }
+                    if (expanded && kind == SessionKind.SWEEP) {
+                        Choice(stringResource(R.string.setup_target_label), listOf(
+                            SweepTarget.SHOPS to "🏪 " + stringResource(R.string.setup_target_shops_short),
+                            SweepTarget.ADDRESSES to "🔢 " + stringResource(R.string.setup_target_addresses_short),
+                            SweepTarget.SIGNS to "🚸 " + stringResource(R.string.setup_target_signs_short)), target) { target = it; Prefs.saveTarget(ctx, it) }
+                        Choice(stringResource(R.string.setup_camera_label), listOf(false to stringResource(R.string.setup_camera_phone),
+                            true to stringResource(R.string.setup_camera360_choice)), use360) { use360 = it; Prefs.saveUse360(ctx, it) }
+                        if (!use360) Choice(stringResource(R.string.setup_holding_title), listOf(
+                            io.github.tewnut.poicapture.core.Holding.MOUNT to stringResource(R.string.setup_holding_mount_short),
+                            io.github.tewnut.poicapture.core.Holding.HAND to stringResource(R.string.setup_holding_hand)), holding) { holding = it; Prefs.saveHolding(ctx, it) }
                     }
+                    // indoor: shops only, in the hand: no target or holding to pick; the building instead of the road
+                    if (indoor) BuildingCard(lookup, onSearch = { searching = true })
+                    // Camera 360: the phone only records where it went (docs/camera360.md §1)
+                    if (expanded && rideKind == SessionKind.CAMERA360) {
+                        Hint(stringResource(R.string.setup_camera360_hint))
+                        // the camera and its state in one line; Đổi / Chọn camera opens Settings → Camera 360 over the sheet
+                        Camera360SetupLine(cam360Model, thetaEveryM) { cam360Page = true }
+                        if (cam360Page) Camera360PageDialog(releaseOnLeave = false, onClose = {
+                            cam360Page = false
+                            cam360Model = Prefs.camera360Model(ctx)
+                            thetaEveryM = Prefs.thetaEveryM(ctx)
+                        })
+                        // how to record, per camera (GoPro MAX / Ricoh Theta): the tab of the chosen control first
+                        var guide by remember { mutableStateOf(false) }
+                        androidx.compose.material3.TextButton(onClick = { guide = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                            Text("📖 " + stringResource(R.string.guide360_open), fontWeight = FontWeight.Bold)
+                        }
+                        if (guide) Camera360Guide(initial = if (thetaOn) 1 else 0) { guide = false }
+                    }
+                    // outside every installed pack, but the catalogue has one here: suggest it (computed off the UI thread)
+                    val suggest = packSuggestion
+                    if (!indoor && suggest != null) Column {
+                        Hint(stringResource(R.string.setup_pack_suggest), color = Palette.Blue)
+                        PackRow(suggest, null, anyNetwork = true, onInstalled = { packSuggestion = null; roadReload++ })
+                    }
+                    Spacer(Modifier.height(8.dp))   // the last line scrolls clear of the bottom bar
                 }
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    if (live == null) Hint(stringResource(R.string.setup_need_gps), Modifier.padding(bottom = 6.dp), Palette.Amber)
-                    Button(
-                        enabled = ready,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        onClick = {
-                            if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED ||
+                }   // the choices
+                // pinned at the bottom of the sheet whatever its height (measured as a whole: the sheet's lowest point)
+                Column(Modifier.fillMaxWidth().wrapContentHeight(Alignment.Top, unbounded = true).onSizeChanged { barH = it.height }
+                    .navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    // where the ride starts and the GPS, always in view right above Start
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        Hint(if (indoor) "" else stringResource(R.string.setup_you_are_on), Modifier.padding(end = 8.dp))
+                        GpsState(loc, live, settings.maxAccuracyM, Modifier.weight(1f, fill = false))
+                    }
+                    if (!indoor) Text(currentRoad ?: stringResource(if (live == null) R.string.setup_waiting_location else R.string.setup_road_unknown),
+                        fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Palette.Ink, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    // no usable fix for 20 s: where to stand
+                    if (gpsHint) GpsSkyHint()
+                    Spacer(Modifier.height(6.dp))
+                    val onStartClick: () -> Unit = start@{
+                            // Camera 360: the phone's camera is never opened, location is enough
+                            val cam360 = rideKind == SessionKind.CAMERA360
+                            if ((!cam360 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) ||
                                 ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                                permLauncher.launch(arrayOf(Manifest.permission.CAMERA, Manifest.permission.ACCESS_FINE_LOCATION,
-                                    Manifest.permission.ACCESS_COARSE_LOCATION))
-                                return@Button
+                                permLauncher.launch(listOfNotNull(Manifest.permission.CAMERA.takeIf { !cam360 }, Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION).toTypedArray())
+                                return@start
                             }
-                            if (CaptureService.activeSession.value != null) {
+                            // a ride is still recording: back to it (not a second one, and not a dead end)
+                            CaptureService.activeSession.value?.let { running ->
                                 Toast.makeText(ctx, ctx.getString(R.string.setup_session_running), Toast.LENGTH_LONG).show()
-                                return@Button
+                                onStart(running)
+                                return@start
+                            }
+                            // indoor: steps from the step detector need this permission (asked once; refused = accelerometer)
+                            if (indoor && !askedSteps && ContextCompat.checkSelfPermission(ctx, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+                                askedSteps = true
+                                stepsLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+                                return@start
                             }
                             val now = System.currentTimeMillis()
                             val s = Session(id = uid("s_", now), createdAt = iso(now), contributor = contributor, note = "",
-                                vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI) Mode.PHOTO_MANUAL else mode,
+                                // a sweep always shoots by itself (no hand on the phone while riding), a place is shot by hand
+                                // indoor: on foot, auto photos like a sweep
+                                vehicle = Vehicle.UNSPECIFIED, mode = if (kind == SessionKind.POI || cam360) Mode.PHOTO_MANUAL else Mode.PHOTO_AUTO,
                                 sideOfTravel = Side.RIGHT, road = Road.auto(),
-                                settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M), device = deviceJson(ctx), kind = kind, email = "",
-                                photoRoles = if (kind == SessionKind.POI && Prefs.askPhotoRole(ctx)) Prefs.photoRoles(ctx) else null,
-                                holding = if (kind == SessionKind.SWEEP) holding else io.github.tewnut.poicapture.core.Holding.MOUNT)
+                                // mountOffsetDeg: the manual mount angle is gone from Settings (the app measures it); an old value is not kept
+                                settings = settings.copy(facadeDistanceM = CapturePlan.UNKNOWN_ROAD_FACADE_M, mountOffsetDeg = 0.0,
+                                    // house numbers are small print: the largest photo the camera gives
+                                    photoLongEdge = if (kind == SessionKind.SWEEP && target == SweepTarget.ADDRESSES)
+                                        maxOf(settings.photoLongEdge, SweepTarget.ADDRESSES_LONG_EDGE) else settings.photoLongEdge), device = deviceJson(ctx), kind = rideKind, email = "",
+                                photoRoles = null,   // the photo kind is not asked: the system tells fronts, signs and insides apart
+                                holding = when (kind) { SessionKind.SWEEP -> holding; SessionKind.INDOOR -> io.github.tewnut.poicapture.core.Holding.HAND
+                                    else -> io.github.tewnut.poicapture.core.Holding.MOUNT },
+                                target = if (kind == SessionKind.SWEEP) target else SweepTarget.SHOPS,
+                                building = if (indoor && !noBuilding) building else null,
+                                indoor = if (!indoor) null else JSONObject().put("stepLengthM", io.github.tewnut.poicapture.core.Pdr.DEFAULT_STEP_M)
+                                    .put("start", anyFix?.let { f -> JSONObject().put("lat", f.lat).put("lon", f.lon)
+                                        .put("accuracyM", f.accuracyM.toDouble()).put("gps", f.gps && f.freshGps()) } ?: JSONObject.NULL),
+                                camera360 = if (!cam360) null
+                                    else if (thetaOn) io.github.tewnut.poicapture.core.ThetaRide.start(thetaEveryM)
+                                    else io.github.tewnut.poicapture.core.Camera360.empty())
+                            // the camera's Wi-Fi stays for the ride (released when it ends); not connected yet: the ride
+                            // screen connects
+                            io.github.tewnut.poicapture.capture.ThetaLink.forRide = cam360 && thetaOn
                             CaptureService.store(ctx).create(s)
+                            Prefs.setStartedRide(ctx)   // next time the choices come folded into one line
+                            // how the building was found (or not): the walk's first indoor.jsonl lines (docs/indoor.md §5)
+                            lookup.flushTo(CaptureService.store(ctx).indoorFile(s.id))
                             onStart(s.id)
-                        },
-                    ) { Text(stringResource(R.string.setup_start), fontSize = 18.sp, fontWeight = FontWeight.Bold) }
+                        }
+                    startRef[0] = onStartClick
+                    // Camera 360: a Theta takes photos only when the phone tells it, so the ride waits for it (Start360)
+                    val gate = if (rideKind != SessionKind.CAMERA360) io.github.tewnut.poicapture.core.Start360.READY
+                        else io.github.tewnut.poicapture.core.Start360.of(cam360Model, Prefs.thetaSerial(ctx),
+                            connected = thetaLink.status == io.github.tewnut.poicapture.capture.ThetaLink.Status.CONNECTED,
+                            connecting = thetaLink.status == io.github.tewnut.poicapture.capture.ThetaLink.Status.CONNECTING)
+                    val onGateClick: () -> Unit = {
+                        when (gate) {
+                            io.github.tewnut.poicapture.core.Start360.CONNECT_THETA ->
+                                io.github.tewnut.poicapture.capture.ThetaLink.connect(ctx, Prefs.thetaSerial(ctx), Prefs.thetaPassword(ctx))
+                            else -> { expanded = true; cam360Page = true }   // choose the camera / pair the Theta (the page opens from the choices)
+                        }
+                    }
+                    val gateOk = gate == io.github.tewnut.poicapture.core.Start360.READY
+                    Button(enabled = ready && gate != io.github.tewnut.poicapture.core.Start360.CONNECTING,
+                        modifier = Modifier.fillMaxWidth().height(56.dp), onClick = if (gateOk) onStartClick else onGateClick) {
+                        // waiting: said on the button itself (a line above it shrank the page and hid the street)
+                        Text(stringResource(when {
+                            !ready -> R.string.setup_need_gps
+                            gate == io.github.tewnut.poicapture.core.Start360.CHOOSE_CAMERA -> R.string.setup_360_choose
+                            gate == io.github.tewnut.poicapture.core.Start360.PAIR_THETA -> R.string.setup_360_pair
+                            gate == io.github.tewnut.poicapture.core.Start360.CONNECT_THETA -> R.string.setup_360_connect
+                            gate == io.github.tewnut.poicapture.core.Start360.CONNECTING -> R.string.setup_360_connecting
+                            else -> R.string.setup_start
+                        }), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
+                }   // the sheet's column
             }
         }
     }
 }
 
+/** The sheet's resting heights: the street and Start only, half the screen, the choices' own height (or the screen). */
+private enum class SheetAnchor { MIN, PARTIAL, MAX }
+private val SHEET_HANDLE = 22.dp
+private const val SHEET_PARTIAL = 0.5f
+/** A throw faster than this goes to the next height in its direction. */
+private val SHEET_FLING = 400.dp
+
+/** The choices folded: "Quét đường · Biển báo · Kẹp cố định" and Đổi, which opens them. */
 @Composable
-private fun KindCard(title: String, sub: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    androidx.compose.material3.OutlinedCard(
-        onClick = onClick, modifier = modifier, shape = RoundedCornerShape(16.dp),
-        border = androidx.compose.foundation.BorderStroke(if (selected) 2.dp else 1.dp, if (selected) Palette.Green else Color(0xFFD0D5DD)),
-    ) {
-        Column(Modifier.fillMaxWidth().background(if (selected) Palette.GreenLight else Color.Transparent).padding(12.dp)) {
-            Text(title, fontWeight = FontWeight.Bold, color = if (selected) Palette.Green else Palette.Ink)
-            Hint(sub)
+private fun ChoiceSummary(parts: List<SetupSummary.Part>, onChange: () -> Unit) {
+    val label = parts.map { p ->
+        stringResource(when (p) {
+            SetupSummary.Part.SWEEP -> R.string.setup_sweep_short
+            SetupSummary.Part.PLACE -> R.string.setup_place_short
+            SetupSummary.Part.INDOOR -> R.string.setup_indoor_short
+            SetupSummary.Part.SHOPS -> R.string.setup_target_shops_short
+            SetupSummary.Part.ADDRESSES -> R.string.setup_target_addresses_short
+            SetupSummary.Part.SIGNS -> R.string.setup_target_signs_short
+            SetupSummary.Part.MOUNT -> R.string.setup_holding_mount_short
+            SetupSummary.Part.HAND -> R.string.setup_holding_hand
+            SetupSummary.Part.CAM360 -> R.string.setup_camera360_choice
+            SetupSummary.Part.THETA -> R.string.theta_name
+        })
+    }.joinToString(" · ")
+    Row(Modifier.fillMaxWidth().background(Palette.GreenLight.copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+        .padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Palette.Ink, maxLines = 2,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+        TextButton(onClick = onChange) { Text(stringResource(R.string.setup_change), fontWeight = FontWeight.Bold) }
+    }
+}
+
+/** GPS on one short line with a coloured dot (was a pill on the map): above Start, next to the street. */
+@Composable
+private fun GpsState(loc: LocationState, live: LiveLocation?, maxAccuracyM: Double, modifier: Modifier = Modifier) {
+    val amber = Color(0xFFFEC84B)
+    val green = Color(0xFF47CD89)
+    val (text, dot) = when (loc.status) {
+        LocStatus.NO_PERMISSION -> stringResource(R.string.setup_loc_no_permission) to Palette.Red
+        LocStatus.APPROXIMATE_ONLY -> stringResource(R.string.setup_loc_approximate) to Palette.Red
+        LocStatus.DISABLED -> stringResource(R.string.setup_loc_disabled) to Palette.Red
+        LocStatus.SEARCHING -> when {
+            loc.satsSeen > 0 -> stringResource(R.string.setup_loc_searching_sats, loc.satsUsed, loc.satsSeen)
+            loc.approx != null -> stringResource(R.string.setup_loc_network, loc.approx!!.accuracyM.roundToInt())
+            else -> stringResource(R.string.setup_loc_searching)
+        } to amber
+        LocStatus.OK -> {
+            val acc = live?.accuracyM ?: 0f
+            if (acc <= maxAccuracyM) stringResource(R.string.setup_gps_good, acc.roundToInt()) to green
+            else stringResource(R.string.setup_gps_weak, acc.roundToInt()) to amber
+        }
+    }
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(9.dp).background(dot, androidx.compose.foundation.shape.CircleShape))
+        Text(text + (if (live?.simulated == true) " · " + stringResource(R.string.setup_simulated) else ""),
+            fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Palette.Ink, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    }
+}
+
+/** One setup choice: a short label and a row of segments, the selected one filled. */
+@Composable
+private fun <T> Choice(label: String, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Palette.Muted)
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            options.forEachIndexed { i, (value, text) ->
+                SegmentedButton(
+                    selected = value == selected, onClick = { onSelect(value) },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, options.size),
+                    icon = {},   // no check mark: the fill shows the choice and leaves room for the words
+                    colors = androidx.compose.material3.SegmentedButtonDefaults.colors(
+                        activeContainerColor = Palette.GreenLight, activeContentColor = Palette.Ink, activeBorderColor = Palette.Green),
+                ) { Text(text, maxLines = 1, fontSize = 14.sp, fontWeight = if (value == selected) FontWeight.Bold else FontWeight.Normal,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+            }
         }
     }
 }
+
+/** After the contributor touches the setup map, it stops following them for this long. */
+private const val FOLLOW_PAUSE_MS = 8_000L
 
 /** Already-recorded tracks and places shown on the setup map. */
 data class CoverLayer(val lines: List<List<LatLon>> = emptyList(), val points: List<LatLon> = emptyList())
@@ -333,9 +664,15 @@ data class CoverLayer(val lines: List<List<LatLon>> = emptyList(), val points: L
 fun Hint(t: String, modifier: Modifier = Modifier, color: Color = Palette.Muted) =
     Text(t, modifier = modifier, style = MaterialTheme.typography.bodySmall, color = color)
 
-/** Map centred on the rider: blue dot with an accuracy circle, re-centre on request. */
+/**
+ * Map centred on the rider: blue dot with an accuracy circle, re-centre on request. [insetTop] / [insetBottom]: px of the
+ * view hidden under the top bar / the sheet; the rider is kept in the middle of the part in between.
+ */
 @Composable
-private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: CoverLayer, modifier: Modifier) {
+private fun LiveMap(tileUrl: String, me: LiveLocation?, mine: CoverLayer,
+                    tasks: List<io.github.tewnut.poicapture.core.FieldTask>, onTask: (String) -> Unit, modifier: Modifier,
+                    building: Building? = null, onTap: ((LatLon) -> Unit)? = null, center: Array<LatLon?>? = null,
+                    insetTop: Int = 0, insetBottom: Int = 0) {
     val ctx = LocalContext.current
     val map = remember {
         MapView(ctx).apply {
@@ -356,7 +693,13 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: Cov
         onDispose { owner.lifecycle.removeObserver(obs); map.onDetach() }
     }
     var centered by remember { mutableStateOf(false) }
-    var lastRecenter by remember { mutableIntStateOf(0) }
+    // the map follows the rider by itself; a finger on the map (looking at a task, the coverage) pauses that a while
+    val touchedAt = remember { longArrayOf(0L) }
+    DisposableEffect(map) {
+        @Suppress("ClickableViewAccessibility")
+        map.setOnTouchListener { _, _ -> touchedAt[0] = SystemClock.elapsedRealtime(); false }
+        onDispose { map.setOnTouchListener(null) }
+    }
     val blue = Palette.Blue.toArgb()
     val density = ctx.resources.displayMetrics.density
     val meDot = remember {
@@ -367,8 +710,27 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: Cov
             setSize((20 * density).toInt(), (20 * density).toInt())
         }
     }
+    val tap = androidx.compose.runtime.rememberUpdatedState(onTap)
+    // the map's centre, for the name search when there is no position at all
+    DisposableEffect(map, center) {
+        if (center == null) return@DisposableEffect onDispose {}
+        val l = object : org.osmdroid.events.MapListener {
+            override fun onScroll(e: org.osmdroid.events.ScrollEvent?): Boolean { center[0] = map.mapCenter.let { LatLon(it.latitude, it.longitude) }; return false }
+            override fun onZoom(e: org.osmdroid.events.ZoomEvent?): Boolean = false
+        }
+        map.addMapListener(l)
+        onDispose { map.removeMapListener(l) }
+    }
     AndroidView({ map }, modifier) { m ->
+        // the map's centre drawn in the middle of the part in view, not of the whole view
+        val offY = (insetTop - insetBottom) / 2
+        if (m.mapCenterOffsetY != offY) m.setMapCenterOffset(0, offY)
         m.overlays.clear()
+        if (onTap != null) m.overlays.add(org.osmdroid.views.overlay.MapEventsOverlay(object : org.osmdroid.events.MapEventsReceiver {
+            override fun singleTapConfirmedHelper(p: GeoPoint): Boolean { tap.value?.invoke(LatLon(p.latitude, p.longitude)); return tap.value != null }
+            override fun longPressHelper(p: GeoPoint): Boolean = false
+        }))
+        building?.let { b -> drawBuilding(m, b) }
         for ((layer, color) in listOf(mine to 0xAA12B76A.toInt())) {
             for (line in layer.lines) m.overlays.add(Polyline(m).apply {
                 setPoints(line.map { GeoPoint(it.lat, it.lon) })
@@ -382,6 +744,19 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: Cov
                 outlinePaint.strokeWidth = 2f
             })
         }
+        // tasks: open ones larger, on top of the coverage; tap -> the task in the list
+        for (t in tasks.sortedBy { it.open }) m.overlays.add(Marker(m).apply {
+            position = GeoPoint(t.at.lat, t.at.lon)
+            icon = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(taskColor(t).toArgb())
+                setStroke((2 * density).toInt(), 0xFFFFFFFF.toInt())
+                val px = ((if (t.open) 18 else 11) * density).toInt(); setSize(px, px)
+            }
+            setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            setInfoWindow(null)
+            setOnMarkerClickListener { _, _ -> onTask(t.id); true }
+        })
         me?.let { l ->
             val here = GeoPoint(l.lat, l.lon)
             m.overlays.add(Polygon(m).apply {
@@ -397,11 +772,16 @@ private fun LiveMap(tileUrl: String, me: LiveLocation?, recenter: Int, mine: Cov
                 setInfoWindow(null)
                 setOnMarkerClickListener { _, _ -> true }
             })
-            if (!centered || recenter != lastRecenter) {
+            if (!centered) {
                 centered = true
-                lastRecenter = recenter
                 m.controller.setZoom(17.5)
                 m.controller.animateTo(here)
+            } else if (SystemClock.elapsedRealtime() - touchedAt[0] > FOLLOW_PAUSE_MS && m.width > 0) {
+                // glide the map once the dot leaves the middle half of the view, so it never runs off the edge
+                val px = m.projection.toPixels(here, null)
+                val dx = px.x - m.width / 2f; val dy = px.y - (m.height / 2f + offY)
+                val inView = (m.height - insetTop - insetBottom).coerceAtLeast(m.height / 4)
+                if (kotlin.math.abs(dx) > m.width / 4f || kotlin.math.abs(dy) > inView / 4f) m.controller.animateTo(here)
             }
         }
         m.invalidate()
@@ -431,12 +811,20 @@ private fun SetupInfo(photoEveryM: Double, maxSpeedKmh: Int, onClose: () -> Unit
             Item("🛵", stringResource(R.string.setup_holding_mount), stringResource(R.string.setup_mount_hint))
             Item("🙋", stringResource(R.string.setup_holding_hand), stringResource(R.string.setup_hand_info))
             Item("📸", stringResource(R.string.setup_mode_auto), stringResource(R.string.setup_mode_auto_hint, String.format(Locale.ROOT, "%.1f", photoEveryM), maxSpeedKmh))
-            Item("🔘", stringResource(R.string.setup_mode_manual), stringResource(R.string.setup_mode_manual_hint, maxSpeedKmh))
             Item("📏", stringResource(R.string.setup_facade_title), stringResource(R.string.setup_facade_hint))
+            Item("🏪", stringResource(R.string.setup_target_shops), stringResource(R.string.setup_target_shops_info))
+            Item("🔢", stringResource(R.string.setup_target_addresses), stringResource(R.string.setup_target_addresses_info))
+            Item("🚸", stringResource(R.string.setup_target_signs), stringResource(R.string.setup_target_signs_info))
             Section(stringResource(R.string.setup_place_title))
             Item("🏪", stringResource(R.string.setup_place_title), stringResource(R.string.setup_poi_hint))
             Text(stringResource(R.string.guide_intro), color = Palette.Muted, fontSize = 14.sp, lineHeight = 20.sp)
             PlaceGuideList()
+            if (INDOOR_ENABLED) {
+                Section(stringResource(R.string.setup_indoor_title))
+                Item("🏬", stringResource(R.string.setup_indoor_title), stringResource(R.string.setup_indoor_info))
+            }
+            Section(stringResource(R.string.setup_camera360_short))
+            Item("📷", stringResource(R.string.setup_camera360_short), stringResource(R.string.setup_camera360_info))
             Section(stringResource(R.string.setup_info_both))
             Item("🛣️", stringResource(R.string.setup_you_are_on), stringResource(R.string.setup_road_auto_hint))
             Item("🛰️", stringResource(R.string.setup_info_gps_title), stringResource(R.string.setup_info_gps))

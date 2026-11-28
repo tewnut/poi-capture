@@ -1,10 +1,20 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      // <site>/admin or /admin/ (Cloudflare Pages serves this page for unknown paths) -> the admin page, #/admin,
+      // before the relative ./assets/ paths would resolve under /admin/
+      // pinned to this origin, leading slashes collapsed: "//evil.example/admin" must not become a protocol-relative URL
+      if (/\/admin\/?$/.test(location.pathname)) {
+        var base = location.pathname.replace(/admin\/?$/, '').replace(/^\/+/, '/')
+        location.replace(location.origin + base + '#/admin')
+      }
+    </script>
     <meta charset="utf-8" />
+    <meta name="theme-color" content="#0a0a0a" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>POI Capture Reviewer</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='13' r='9' fill='%231f7a52'/><path d='M16 31 9 18h14z' fill='%231f7a52'/><circle cx='16' cy='13' r='4' fill='white'/></svg>" />
+    <title>Quét Phố Reviewer</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop stop-color='%237BCF00'/%3E%3Cstop offset='1' stop-color='%23BEFF00'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url%28%23g%29'/%3E%3Cg transform='translate%288.6 5.1%29 scale%281.45%29'%3E%3Cpath fill='%230A0A0A' d='M8.80469 1.63863L10.8018 5.87398L10.9023 6.08785L10.8008 6.30172L7.12598 14.0654L6.87207 14.6035L6.38574 14.2597L4.87402 13.1914L4.38867 12.8486L2.39355 11.4384L2.04883 11.1943L2.23145 10.8144C2.51433 10.2234 2.51594 9.47976 2.23828 8.89059C1.99917 8.38367 1.60549 8.09033 1.20996 8.0234L1.04102 8.00875H0.5V4.18844H0.500977V1.36617H1.04297L8.35059 1.35152L8.66895 1.35055L8.80469 1.63863ZM3.70898 5.18258C4.28475 5.6568 4.77774 6.28836 5.13867 7.05367C5.44546 7.70427 5.63106 8.39754 5.70801 9.09664L7.56445 5.17379L3.70898 5.18258Z'/%3E%3C/g%3E%3C/svg%3E" />
   </head>
   <body>
     <div id="app"></div>

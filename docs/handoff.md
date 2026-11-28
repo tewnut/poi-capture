@@ -5,6 +5,16 @@ photos and contributes them to the target map through that map's contribution to
 
 ## Recent changes
 
+### App 0.17: sweep targets, rides split per street
+- **`session.target`**: `"shops"` (default, and every older ride), `"addresses"` (shops + every house-number plate:
+  ~2x denser photos at the largest size, slower) or `"signs"` (traffic signs: the camera looks **ahead**, a photo every
+  8 m by GPS distance; each photo `cameraBearingSource: "forward"`, `cameraYawToTravelDeg` 0, `sideOfWay` null, no
+  facade point). `plan.target` and `plan.trigger` (`slide` | `distance`). What to read per target, and the result format
+  for addresses and signs: docs/sweep-targets.md. Upload metadata carries `target` too.
+- **Split per street at upload**: a sweep over several streets (or with a stop of more than 3 min) is uploaded as one
+  session per street, `"<ride id>-<k>"` with `parentId`, `part`, `parts` in session.json. Each is a ride of its own.
+- Place capture: the photo guide is in the instructions (New session ⓘ), no longer over the camera.
+
 ### App 0.9 / 0.10
 - **Place capture without typing.** The contributor shoots a few photos per place and taps **Next place**. Name,
   address / house number, phone and category are for the agent to read from the photos. `pois[].fields` are only hints
@@ -202,7 +212,7 @@ photos and contributes them to the target map through that map's contribution to
     `sharpness` = variance of the Laplacian (scene dependent: compare within the session); `blurry` = too much motion
     or far less detail than the session's recent photos. Prefer non-blurry photos when reading signs.
     `session.camera.shutterGuard`: street sweep held the shutter at 1/500 s or faster (ISO raised instead), so photos
-    may be grainy rather than smeared. `session.name` = "{street} [yymmdd]".
+    may be grainy rather than smeared. `session.name` = "{street} {yyyy-MM-dd HHhmm}", local start time (e.g. "Ngô Tất Tố 2026-11-19 14h32").
   - Per item **estimated facade point**: `facadeLat`, `facadeLon`, `facadeDistanceM`, `facadeSource: "roadType"`
     (older sessions: `"profile"`) = camera position + `facadeDistanceM` along `cameraBearing`. A rough prior to put the place on the building, not on the
     road: snap it to the street-facing edge of the nearest building footprint, refine by triangulating the sign over

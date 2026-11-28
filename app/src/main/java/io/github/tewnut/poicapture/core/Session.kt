@@ -104,8 +104,20 @@ class Session(
     val kind: SessionKind = SessionKind.SWEEP,
     val email: String = "",          // typed at onboarding, not verified; "" before app 0.8
     var photoRoles: PhotoRoles? = null,  // POI mode: the photo kinds offered (config at the start of the session)
-    var name: String? = null,        // "{street} [yymmdd]", given when the session is saved
+    var name: String? = null,        // "{street} {stamp}" ("Ngô Tất Tố 2026-11-19 14h32"), given when the session is saved
     val holding: Holding = Holding.MOUNT,   // street sweep: on a mount or in a passenger's hand ("mount" before 0.15)
+    // a part of a longer ride, cut per street when it was uploaded (SessionSplit): the ride's id, this part, of how many
+    val parentId: String? = null,
+    val part: Int? = null,
+    val parts: Int? = null,
+    // street sweep: what the ride is for, which sets how it captures (docs/sweep-targets.md); "shops" before 0.17
+    val target: SweepTarget = SweepTarget.SHOPS,
+    // indoor mode (docs/indoor.md §5): the building picked at setup (null = walked without one), and the walk's
+    // dead-reckoning summary {stepLengthM, anchors, start}
+    var building: Building? = null,
+    var indoor: JSONObject? = null,
+    // Camera 360 ride (docs/camera360.md §2): {"syncs": [{fromMs, toMs, when}, …]}, when the sync QR code was shown
+    var camera360: JSONObject? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("schema", SCHEMA).put("kind", kind.json).put("createdAt", createdAt)
@@ -113,6 +125,7 @@ class Session(
         .put("contributor", contributor).put("email", email).put("note", note).put("name", name.orNull())
         .put("vehicle", vehicle.json).put("mode", mode.json).put("holding", holding.json)
         .put("sideOfTravel", sideOfTravel.json)
+        .put("target", if (kind == SessionKind.SWEEP || kind == SessionKind.INDOOR) target.json else JSONObject.NULL)
         .put("travel", travel?.json.orNull()).put("sideOfWay", sideOfWay?.json.orNull())
         .put("road", road.toJson())
         .put("settings", JSONObject()
@@ -131,6 +144,9 @@ class Session(
         .put("plan", plan.orNull())
         .put("mount", mount.orNull())
         .put("photoRoles", photoRoles?.toJson()?.getJSONArray("photoRoles").orNull())
+        .also { o -> if (kind == SessionKind.INDOOR) o.put("building", building?.toJson().orNull()).put("indoor", indoor.orNull()) }
+        .also { o -> if (kind == SessionKind.CAMERA360) o.put("camera360", camera360 ?: Camera360.empty()) }
+        .also { o -> if (parentId != null) o.put("parentId", parentId).put("part", part.orNull()).put("parts", parts.orNull()) }
 
     companion object {
         fun fromJson(o: JSONObject): Session = Session(
@@ -159,6 +175,13 @@ class Session(
             email = o.optString("email"),
             photoRoles = PhotoRoles.fromJson(o.optJSONArray("photoRoles"), "session"),
             holding = Holding.of(o.optStr("holding")),
+            parentId = o.optStr("parentId"),
+            part = o.optInt("part", 0).takeIf { it > 0 },
+            parts = o.optInt("parts", 0).takeIf { it > 0 },
+            target = SweepTarget.of(o.optStr("target")),
+            building = Building.fromJson(o.optJSONObject("building")),
+            indoor = o.optJSONObject("indoor"),
+            camera360 = o.optJSONObject("camera360"),
         )
     }
 }

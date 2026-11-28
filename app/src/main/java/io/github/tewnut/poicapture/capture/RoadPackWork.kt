@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import io.github.tewnut.poicapture.Prefs
 import io.github.tewnut.poicapture.core.CatalogueError
@@ -81,6 +82,7 @@ object RoadPackDownloads {
                 .setRequiredNetworkType(if (anyNetwork) NetworkType.CONNECTED else NetworkType.UNMETERED)
                 .build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .addTag(TAG)
             .build()
         WorkManager.getInstance(ctx).enqueueUniqueWork(name(e.id), ExistingWorkPolicy.KEEP, req)
     }
@@ -91,6 +93,12 @@ object RoadPackDownloads {
     }
 
     fun flow(ctx: Context, id: String): Flow<List<WorkInfo>> = WorkManager.getInstance(ctx).getWorkInfosForUniqueWorkFlow(name(id))
+
+    private const val TAG = "roadpack"
+
+    /** Some pack is downloading or waiting to (enqueued from this app version on): true while any is. */
+    fun anyActive(ctx: Context): Flow<Boolean> = WorkManager.getInstance(ctx).getWorkInfosByTagFlow(TAG)
+        .map { list -> list.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED } }
 }
 
 /** Fetch the pack catalogue (index.json) and keep it for offline suggestions. */

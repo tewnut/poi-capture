@@ -1,0 +1,15 @@
+{
+  "name": "poi-capture-cloud",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Small self-hosted tus server for POI Capture: the phone uploads sessions, the agent and the reviewer pull them",
+  "type": "module",
+  "engines": { "node": ">=20.19.0" },
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@tus/file-store": "2.1.2",
+    "@tus/server": "2.4.7"
+  }
+}

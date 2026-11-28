@@ -4,8 +4,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.text.Normalizer
 
-/** One line of text read on a photo: its text and its height in pixels (bigger = more prominent on the sign). */
-data class TextLine(val text: String, val heightPx: Int, val box: IntArray? = null)
+/**
+ * One line of text read on a photo: its text and its height in pixels (bigger = more prominent on the sign), its box,
+ * and the block of text the reader put it in (-1: unknown; not exported).
+ */
+data class TextLine(val text: String, val heightPx: Int, val box: IntArray? = null, val block: Int = -1)
 
 /**
  * What the phone could read on the photos of a place: hints for the server's agent, which decides (name, category,

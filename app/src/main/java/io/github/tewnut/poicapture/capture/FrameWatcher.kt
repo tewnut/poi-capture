@@ -32,6 +32,17 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
                      val bufferW: Int = 0, val bufferH: Int = 0)
 
     private val thread = Executors.newSingleThreadExecutor()
+
+    /**
+     * Signs ride: called with an upright colour copy of a frame when [wantColor] says yes (the scan is idle and due).
+     * The receiver owns the bitmap. Costs a YUV -> RGB conversion, so only a few frames a second.
+     */
+    @Volatile var colorFrame: ((android.graphics.Bitmap, Long) -> Unit)? = null
+    @Volatile var wantColor: () -> Boolean = { false }
+    private var useCase: ImageAnalysis? = null
+
+    /** The phone turned: frames are still sensor-landscape, only their rotation (for [colorFrame]) follows. */
+    fun setRotation(r: Int) { useCase?.targetRotation = r }
     private val main = Handler(Looper.getMainLooper())
 
     /** The phone is held upright: the photo's horizontal is the sensor's short side. */
@@ -48,7 +59,18 @@ class FrameWatcher(private val onFrame: (Frame) -> Unit, private val onBrightnes
             .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
             .setResolutionStrategy(ResolutionStrategy(Size(640, 360), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER))
             .build())
-        .build().also { a -> a.setAnalyzer(thread) { img -> try { analyze(img) } finally { img.close() } } }
+        .build().also { a -> useCase = a; a.setAnalyzer(thread) { img -> try { analyze(img); color(img) } finally { img.close() } } }
+
+    private fun color(img: ImageProxy) {
+        val cb = colorFrame ?: return
+        if (!wantColor()) return
+        val t = SystemClock.elapsedRealtimeNanos()
+        val raw = runCatching { img.toBitmap() }.getOrNull() ?: return
+        val deg = img.imageInfo.rotationDegrees
+        val up = if (deg == 0) raw else android.graphics.Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height,
+            android.graphics.Matrix().apply { postRotate(deg.toFloat()) }, true).also { if (it !== raw) raw.recycle() }
+        cb(up, t)
+    }
 
     fun release() { thread.shutdown() }
 

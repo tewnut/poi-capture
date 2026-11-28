@@ -7,7 +7,12 @@ enum class SessionKind(val json: String) {
     /** "Quét đường": ride along, the app photographs the row of buildings (auto photos / video). */
     SWEEP("sweep"),
     /** "Chụp địa điểm": stop at each place, photograph it on purpose (front, sign, side, inside, info). */
-    POI("poi");
+    POI("poi"),
+    /** "Trong nhà": on foot through a mall / market, phone in hand; position from steps, not GPS (docs/indoor.md). */
+    INDOOR("indoor"),
+    /** "Camera 360": an external 360° camera films, the phone only records where it was (GPS, IMU; no photos, the
+     *  phone's camera stays off) and shows a sync QR code to the camera (docs/camera360.md §2). */
+    CAMERA360("camera360");
 
     companion object {
         fun of(s: String?) = entries.firstOrNull { it.json == s } ?: SWEEP

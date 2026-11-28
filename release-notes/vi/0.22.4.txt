@@ -1,0 +1,5 @@
+- Camera 360 (GoPro MAX, Insta360, Ricoh Theta): chọn camera trong Cài đặt, kiểm tra camera trước khi đi.
+- Ghi mới: bản đồ toàn màn hình, lựa chọn gọn một dòng, nhớ loại chuyến đi lần trước.
+- Không mất ảnh khi ứng dụng bị tắt giữa chuyến; tự quay lại chuyến đang ghi.
+- Tải lên ổn định hơn: báo hết dung lượng, mã truy cập hết hạn; chuyến bị ngắt vẫn tự gửi.
+- Bỏ trang Nâng cao; màn hình đầu có hình động mới.

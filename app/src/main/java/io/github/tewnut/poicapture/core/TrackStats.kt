@@ -37,12 +37,12 @@ data class TrackStats(val distanceM: Double, val durationMs: Long, val points: I
          * least `minShare` of all items were taken on it (one stray match does not name a session).
          */
         /**
-         * A session's name, "{street} [yymmdd]": the street most of its photos were taken on (any street when none
-         * dominates, [fallback] when none is known) and the local day it started.
+         * A session's name, "{street} {stamp}" ("Ngô Tất Tố 2026-11-19 14h32"): the street most of its photos were taken
+         * on (any street when none dominates, [fallback] when none is known) and the local time it started.
          */
         fun sessionName(items: List<JSONObject>, startedIso: String?, fallback: String,
                         zone: java.time.ZoneId = java.time.ZoneId.systemDefault(), ways: List<Way> = emptyList()): String {
-            val day = runCatching { java.time.format.DateTimeFormatter.ofPattern("yyMMdd").withZone(zone).format(java.time.Instant.parse(startedIso)) }
+            val day = runCatching { java.time.format.DateTimeFormatter.ofPattern(SessionNaming.STAMP).withZone(zone).format(java.time.Instant.parse(startedIso)) }
                 .getOrNull()
             val streets = items.map { it.optString("roadName") }
             val nearby = if (streets.none { SessionNaming.isNamed(it) }) nearestBigRoad(items, ways) else null

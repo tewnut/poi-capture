@@ -32,3 +32,6 @@ tools/roadpack/.venv/
 # browser test output, Python caches
 .playwright-mcp/
 __pycache__/
+
+# confidential brand book (not for distribution)
+docs/VMAP_Logo*.pdf

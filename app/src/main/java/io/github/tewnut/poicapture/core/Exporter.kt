@@ -67,6 +67,9 @@ object Exporter {
             .put("gnssRawFile", if (store.gnssFile(sessionId).length() > 0) "gnss_raw.csv" else JSONObject.NULL)
             .put("imuFile", if (store.imuFile(sessionId).length() > 0) "imu.csv" else JSONObject.NULL)
             .put("framesFile", if (store.framesFile(sessionId).length() > 0) "frames.csv" else JSONObject.NULL)
+            .put("indoorFile", if (store.indoorFile(sessionId).length() > 0) "indoor.jsonl" else JSONObject.NULL)
+            // indoor: the straightened floor plans and their list (docs/indoor.md §7)
+            .put("plansFile", if (File(store.plansDir(sessionId), "plans.json").length() > 0) "plans/plans.json" else JSONObject.NULL)
     }
 
     /**
@@ -100,11 +103,12 @@ object Exporter {
         }
 
     fun fileName(s: Session): String {
-        val label = (if (s.kind == SessionKind.POI) "place" else if (s.road.auto) "auto" else s.road.label).replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-').take(40).ifEmpty { "road" }
+        val label = (if (s.kind == SessionKind.POI) "place" else if (s.kind == SessionKind.INDOOR) "indoor-" + (s.building?.name ?: "")
+            else if (s.kind == SessionKind.CAMERA360) "camera360" else if (s.road.auto) "auto" else s.road.label).replace(Regex("[^\\p{L}\\p{N}]+"), "-").trim('-').take(40).ifEmpty { "road" }
         val start = (s.startedAt ?: s.createdAt).let {
             try { DateTimeFormatter.ofPattern("yyyyMMddHHmm").withZone(ZoneOffset.UTC).format(Instant.parse(it)) } catch (e: Exception) { "start" }
         }
-        val side = if (s.kind == SessionKind.POI) "" else "_${s.sideOfTravel.json}"
+        val side = if (s.kind == SessionKind.POI || s.kind == SessionKind.INDOOR || s.kind == SessionKind.CAMERA360) "" else "_${s.sideOfTravel.json}"
         return "poi-capture_${label}${side}_$start.zip"
     }
 
@@ -127,8 +131,12 @@ object Exporter {
                 w.flush()
             }
             for ((file, name) in listOf(store.gnssFile(sessionId) to "gnss_raw.csv", store.imuFile(sessionId) to "imu.csv",
-                    store.framesFile(sessionId) to "frames.csv")) {
+                    store.framesFile(sessionId) to "frames.csv", store.indoorFile(sessionId) to "indoor.jsonl")) {
                 if (file.length() > 0) entry(name, Deflater.DEFAULT_COMPRESSION) { o -> file.inputStream().use { it.copyTo(o) } }
+            }
+            for (f in (store.plansDir(sessionId).listFiles() ?: emptyArray()).filter { it.isFile && it.length() > 0 }.sortedBy { it.name }) {
+                entry("plans/${f.name}", if (f.name.endsWith(".jpg")) Deflater.NO_COMPRESSION else Deflater.DEFAULT_COMPRESSION) { o ->
+                    f.inputStream().use { it.copyTo(o) } }
             }
             val items = manifest.getJSONArray("items")
             for (i in 0 until items.length()) {
@@ -158,6 +166,8 @@ object Exporter {
                 .put("t", p.getLong("t")).put("iso", iso(p.getLong("t")))
                 .put("accuracyM", p.opt("acc")).put("speedMps", p.opt("spd")).put("headingDeg", p.opt("hdg"))
                 .put("altitudeM", p.opt("alt")).put("elapsedNanos", p.opt("en"))
+            // indoor mode: the live dead-reckoning estimate (docs/indoor.md §5)
+            for (k in listOf("source", "level", "sinceAnchorM")) if (p.has(k)) props.put(k, p.get(k))
             val geom = JSONObject().put("type", "Point").put("coordinates", JSONArray().put(p.getDouble("lon")).put(p.getDouble("lat")))
             w.write(",")
             w.write(JSONObject().put("type", "Feature").put("properties", props).put("geometry", geom).toString())

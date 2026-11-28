@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { cell, csv, geojson, osm, osmHours, record } from './publish'
+import { cell, csv, geojson, osm, osmHours, record, tasksGeojson } from './publish'
 import { _test } from './importer'
+import { keptPhotos, removedPhotos, exportNames } from './photos'
 import type { Dataset, Place, Review } from './types'
 
 const place: Place = {
@@ -120,5 +121,113 @@ describe('import', () => {
     expect(s('NTS/01_a/COVER.jpg')).toBe('01_a/COVER.jpg')
     const t = _test.stripTop(['result.json', '01_a/COVER.jpg'])
     expect(t('01_a/COVER.jpg')).toBe('01_a/COVER.jpg')
+  })
+})
+
+describe('tasks for the phone', () => {
+  const ds = { ...dataset, tasks: [
+    { type: 'visit', place: 's1-01', name: 'Visit me', lat: 10.1, lon: 106.1, why: 'sign unreadable' },
+    { type: 'removal', place: null, name: 'Gone shop', lat: 10.2, lon: 106.2, why: 'for rent' },
+    { type: 'removal', place: null, name: 'Check shop', lat: 10.3, lon: 106.3, why: 'shutter down' },
+    { type: 'verify_removal', place: null, name: 'Maybe gone', lat: 10.4, lon: 106.4, why: 'not seen' },
+  ] } as unknown as Dataset
+
+  it('sends only the work left on site, as poi-tasks/1', () => {
+    const j = JSON.parse(tasksGeojson([ds], {}, { 's1|1': { decision: 'confirmed' }, 's1|2': { decision: 'verify' } }, 'A'))
+    expect(j.schema).toBe('poi-tasks/1')
+    expect(j.features.map((f: any) => f.properties.name)).toEqual(['Visit me', 'Check shop', 'Maybe gone'])
+    expect(j.features[1].properties.type).toBe('verify_removal')
+    expect(j.features[0].geometry.coordinates).toEqual([106.1, 10.1])
+  })
+
+  it('adds places the reviewer marked "visit", once', () => {
+    const p2 = { ...place, id: 's1-02', name: 'Second' }
+    const d2 = { ...dataset, places: [place, p2], tasks: [] } as unknown as Dataset
+    const reviews = { 's1|s1-02': { decision: 'visit', fields: {}, comment: 'hours missing' } } as Record<string, Review>
+    const j = JSON.parse(tasksGeojson([d2], reviews, {}))
+    expect(j.features).toHaveLength(1)
+    expect(j.features[0].properties).toMatchObject({ type: 'visit', name: 'Second', why: 'hours missing', place: 's1-02' })
+    expect(j.features[0].geometry.coordinates).toEqual([106.75775, 10.77695])   // agent pin
+  })
+})
+
+describe('photo edits', () => {
+  const p: Place = { ...place, photos: [{ file: 'a/1.jpg', index: 1 }, { file: 'a/COVER.jpg', cover: true }, { file: 'a/WEB_1.png', source: 'website' }] }
+  it('keeps the photos, cover first, when nothing was edited', () => {
+    expect(keptPhotos(p).map((x) => x.file)).toEqual(['a/COVER.jpg', 'a/1.jpg', 'a/WEB_1.png'])
+  })
+  it('removes, adds, crops and picks the cover', () => {
+    const r: Review = { decision: 'confirmed', fields: {}, photos: {
+      removed: ['a/COVER.jpg'], added: ['added/x/1.jpg'], cover: 'added/x/1.jpg',
+      crops: { 'a/1.jpg': { rect: [0.1, 0.1, 0.5, 0.5], file: 'crop/x/c.jpg' } } } }
+    const k = keptPhotos(p, r)
+    expect(k.map((x) => x.show)).toEqual(['added/x/1.jpg', 'crop/x/c.jpg', 'a/WEB_1.png'])
+    expect(k[0].cover).toBe(true)
+    expect(removedPhotos(p, r).map((x) => x.file)).toEqual(['a/COVER.jpg'])
+    expect(exportNames(p, r)).toEqual(['s1-01/1.jpg', 's1-01/2.jpg', 's1-01/3.png'])
+    expect(record({ dataset, place: p, review: r }).photos).toBe('s1-01/1.jpg s1-01/2.jpg s1-01/3.png')
+  })
+  it('falls back to the first photo when the cover was removed', () => {
+    const k = keptPhotos(p, { decision: 'todo', fields: {}, photos: { removed: ['a/COVER.jpg'] } })
+    expect(k[0]).toMatchObject({ file: 'a/1.jpg', cover: true })
+  })
+})
+
+describe('addresses and signs (docs/sweep-targets.md)', () => {
+  const addr: Place = { id: 's1-a1', name: '106 Nguyễn Thanh Sơn', category: 'address', status: 'open', layer: 'address', placeRef: 'Bún Bò',
+    fields: { houseNumber: { value: '106', sure: 'high' }, street: { value: 'Nguyễn Thanh Sơn, Thảo Điền', sure: 'high' } },
+    photos: [], pins: { agent: { lat: 10.1, lon: 106.1 } } }
+  const sign: Place = { id: 's1-s1', name: 'Cấm đỗ xe', category: 'traffic_sign', status: 'open', layer: 'sign',
+    sign: { code: 'P.131a', group: 'prohibitory', facingDeg: 271.6, side: 'right' },
+    fields: { signCode: { value: 'P.131a', sure: 'high' }, name: { value: 'Cấm đỗ xe' }, other: { value: '6h-9h' } },
+    photos: [], pins: { agent: { lat: 10.2, lon: 106.2 } } }
+  const ok = (p: Place): Review => ({ decision: 'confirmed', fields: Object.fromEntries(Object.entries(p.fields).map(([k, f]) => [k, { state: 'ok', value: f!.value }])) })
+
+  it('an address is a node with addr:housenumber and addr:street only', () => {
+    const x = osm([{ dataset, place: addr, review: ok(addr) }])
+    expect(x).toContain('<tag k="addr:housenumber" v="106"/>')
+    expect(x).toContain('<tag k="addr:street" v="Nguyễn Thanh Sơn"/>')
+    expect(x).not.toContain('k="name"')
+  })
+
+  it('a sign is a node with traffic_sign=VN:<code> and direction, only with a confirmed code', () => {
+    const x = osm([{ dataset, place: sign, review: ok(sign) }])
+    expect(x).toContain('<tag k="traffic_sign" v="VN:P.131a"/>')
+    expect(x).toContain('<tag k="direction" v="92"/>')   // met heading 272°, it faces 92° (Key:traffic_sign)
+    expect(x).not.toContain('k="name"')
+    const noCode: Review = { decision: 'confirmed', fields: { signCode: { state: 'rejected', value: 'P.131a' } } }
+    expect(osm([{ dataset, place: sign, review: noCode }])).not.toContain('<node')
+    const edited: Review = { decision: 'confirmed', fields: { signCode: { state: 'edited', value: 'P.130' } } }
+    expect(osm([{ dataset, place: { ...sign, sign: { code: 'P.131a' } }, review: edited }])).toContain('v="VN:P.130"')
+    expect(osm([{ dataset, place: { ...sign, sign: { code: 'P.131a' } }, review: edited }])).not.toContain('direction')
+  })
+
+  it('numbers the nodes one by one when some are left out', () => {
+    const x = osm([{ dataset, place: sign, review: { decision: 'confirmed', fields: {} } }, { dataset, place: addr, review: ok(addr) }])
+    expect(x).toContain('id="-1"')
+    expect(x).not.toContain('id="-2"')
+  })
+
+  it('GeoJSON and CSV carry the layer, and the sign code for signs', () => {
+    const all = [{ dataset, place: addr, review: ok(addr) }, { dataset, place: sign, review: ok(sign) }, { dataset, place, review: { decision: 'confirmed', fields: {} } as Review }]
+    const props = JSON.parse(geojson(all, [])).features.map((f: any) => f.properties)
+    expect(props.map((p: any) => p.layer)).toEqual(['address', 'sign', 'place'])
+    expect(props[1].signCode).toBe('P.131a')
+    expect('signCode' in props[0]).toBe(false)
+    const c = csv(all, []).split('\r\n')
+    const cols = c[0].replace('﻿', '').split(',')
+    expect(c[2].split(',')[cols.indexOf('layer')]).toBe('sign')
+    expect(c[2].split(',')[cols.indexOf('signCode')]).toBe('P.131a')
+    expect(c[3].split(',')[cols.indexOf('layer')]).toBe('place')
+  })
+})
+
+import { partlyRead } from './publish'
+describe('partly read house numbers', () => {
+  it('are recognised and never become addr:housenumber', () => {
+    expect(partlyRead('1…')).toBe(true)
+    expect(partlyRead('19...')).toBe(true)
+    expect(partlyRead('170-172')).toBe(false)
+    expect(partlyRead(undefined)).toBe(false)
   })
 })

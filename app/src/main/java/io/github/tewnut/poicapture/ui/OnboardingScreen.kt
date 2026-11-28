@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
@@ -44,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -74,25 +76,29 @@ import io.github.tewnut.poicapture.net.RoadSource
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class Step { LANGUAGE, WELCOME, EMAIL, PERMISSIONS, ROADS, READY }
+private enum class Step { LANGUAGE, WELCOME, PERMISSIONS, ROADS, READY, CAM360, KEY }
 
 /**
- * First run, once per phone: language → what the app does → email (not verified) → permissions → offline road data for
- * where the contributor is → mounting and facade distance. Every step is a must; all of it can be changed later in
+ * First run, once per phone: language → what the app does → permissions → offline road data for where the contributor
+ * is → the ways to ride → a 360 camera or not (optional) → the codes from the team (access key by QR code, contributor ID) on one page.
+ * Every step is a must; all of it can be changed later in
  * Settings.
  */
 @Composable
-fun OnboardingScreen(onDone: () -> Unit) {
+fun OnboardingScreen(replay: Boolean = false, onDone: () -> Unit) {
     val ctx = LocalContext.current
     // saveable: picking a language recreates the activity, the onboarding stays on its step
     var step by rememberSaveable { mutableStateOf(Step.LANGUAGE) }
-    BackHandler(enabled = step.ordinal > 0) { step = Step.entries[step.ordinal - 1] }
+    // replayed from Settings → About: the app is set up already, so it can be left at any step (back on the first
+    // step, or ✕), and nothing is a must (no road pack gate, no download started by itself)
+    BackHandler(enabled = step.ordinal > 0 || replay) { if (step.ordinal > 0) step = Step.entries[step.ordinal - 1] else onDone() }
 
     Column(Modifier.fillMaxSize().background(Palette.Canvas).safeDrawingPadding()) {
         // top bar: back + progress
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (step.ordinal > 0) TextButton(onClick = { step = Step.entries[step.ordinal - 1] }) { Text(stringResource(R.string.onboarding_back)) }
             Spacer(Modifier.weight(1f))
+            if (replay) TextButton(onClick = onDone) { Text(stringResource(R.string.onboarding_close)) }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(end = 12.dp)) {
                 for (s in Step.entries) {
                     Box(Modifier.size(width = if (s == step) 22.dp else 8.dp, height = 8.dp)
@@ -102,11 +108,14 @@ fun OnboardingScreen(onDone: () -> Unit) {
         }
         when (step) {
             Step.LANGUAGE -> LanguageStep { step = Step.WELCOME }
-            Step.WELCOME -> WelcomeStep { step = Step.EMAIL }
-            Step.EMAIL -> EmailStep(ctx) { step = Step.PERMISSIONS }
+            Step.WELCOME -> WelcomeStep { step = Step.PERMISSIONS }
             Step.PERMISSIONS -> PermissionsStep(ctx) { step = Step.ROADS }
-            Step.ROADS -> RoadsStep(ctx) { step = Step.READY }
-            Step.READY -> ReadyStep(ctx) { Prefs.setOnboarded(ctx, true); onDone() }
+            Step.ROADS -> RoadsStep(ctx, replay) { step = Step.READY }
+            Step.READY -> ReadyStep(ctx) { step = Step.CAM360 }
+            // optional: a 360 camera, set up on Settings → Camera 360's page; Không skips it
+            Step.CAM360 -> Cam360Step { step = Step.KEY }
+            // last: the team's codes (the access key by the admin's QR code, and the optional contributor ID)
+            Step.KEY -> KeyStep { Prefs.setOnboarded(ctx, true); onDone() }
         }
     }
 }
@@ -216,29 +225,15 @@ private fun WelcomeStep(onNext: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------- 2. email
-
-/** The contributor ID the team gave (optional): no email, no name; Continue works with the field empty. */
-@Composable
-private fun EmailStep(ctx: Context, onNext: () -> Unit) {
-    var id by rememberSaveable { mutableStateOf(Prefs.contributorId(ctx)) }
-    fun next() { Prefs.saveContributorId(ctx, id); onNext() }
-    StepFrame(stringResource(R.string.onboarding_email_title), stringResource(R.string.onboarding_email_lead),
-        stringResource(if (id.isBlank()) R.string.onboarding_id_skip else R.string.onboarding_continue), onNext = ::next) {
-        WhiteCard {
-            IconRow("🪪", stringResource(R.string.onboarding_id_card_title), stringResource(R.string.onboarding_id_card_text))
-            ContributorIdField(id, { id = it }, onDone = ::next)
-        }
-    }
-}
+// ---------------------------------------------------------------- the contributor ID field (on the access key page)
 
 /** One line, no autocorrect, upper-case friendly: IDs are often like "HCM-024". */
 @Composable
-internal fun ContributorIdField(value: String, onChange: (String) -> Unit, onDone: () -> Unit = {}) {
+internal fun ContributorIdField(value: String, onChange: (String) -> Unit, onDone: () -> Unit = {}, help: Boolean = true) {
     OutlinedTextField(value, { onChange(it.take(64)) },
         label = { Text(stringResource(R.string.onboarding_email_label)) },
         placeholder = { Text(stringResource(R.string.onboarding_email_placeholder)) }, singleLine = true,
-        supportingText = { Text(stringResource(R.string.onboarding_id_help)) },
+        supportingText = if (help) { { Text(stringResource(R.string.onboarding_id_help)) } } else null,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii, autoCorrectEnabled = false, imeAction = ImeAction.Done),
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { onDone() }),
         shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth())
@@ -324,7 +319,7 @@ private fun PermissionsStep(ctx: Context, onNext: () -> Unit) {
 // ---------------------------------------------------------------- 4. road data
 
 @Composable
-private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
+private fun RoadsStep(ctx: Context, replay: Boolean, onNext: () -> Unit) {
     val url = remember { Prefs.settings(ctx).roadPackIndexUrl }
     var catalogue by remember { mutableStateOf(RoadSource.cachedCatalogue(ctx)) }
     var loading by remember { mutableStateOf(true) }
@@ -349,18 +344,20 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     var autoStarted by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(suggestion?.id, installed) {
         val s = suggestion ?: return@LaunchedEffect
-        if (!autoStarted && installed[s.id] != s.version) {
+        if (!replay && !autoStarted && installed[s.id] != s.version) {
             RoadPackDownloads.enqueue(ctx, s, anyNetwork = true)
             autoStarted = true
         }
     }
     var showAll by rememberSaveable { mutableStateOf(false) }
 
-    // a must: no way on until at least one province / city pack is on the phone
-    val haveRoads = installed.isNotEmpty()
+    // a must: no way on until at least one province / city pack is on the phone, or on its way (the download goes
+    // on in the background); cancelled with nothing installed: blocked again
+    val downloading by remember { RoadPackDownloads.anyActive(ctx) }.collectAsState(initial = false)
+    val canGo = replay || io.github.tewnut.poicapture.core.RoadsGate.canContinue(installed.isNotEmpty(), downloading)
     StepFrame(stringResource(R.string.onboarding_roads_title), stringResource(R.string.onboarding_roads_lead),
-        stringResource(if (haveRoads) R.string.onboarding_continue else R.string.onboarding_roads_need),
-        enabled = haveRoads, onNext = onNext) {
+        stringResource(if (canGo) R.string.onboarding_continue else R.string.onboarding_roads_need),
+        enabled = canGo, onNext = onNext) {
         when {
             loading && catalogue.isEmpty() -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
@@ -397,27 +394,54 @@ private fun RoadsStep(ctx: Context, onNext: () -> Unit) {
     }
 }
 
-// ---------------------------------------------------------------- 5. ready
+// ---------------------------------------------------------------- 5. the team's codes (last)
+
+/**
+ * The access key from the admin (scan its QR code, or type it); the project's server is already filled in. Skip
+ * leaves it empty: sessions are then sent by hand, as before.
+ */
+@Composable
+private fun KeyStep(onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    var tick by remember { mutableIntStateOf(0) }
+    // the card saves as typed; the button says Continue once a usable address is in
+    val set = remember(tick) { io.github.tewnut.poicapture.capture.UploadServer.configured(ctx) }
+    // the contributor ID (optional) on the same page as the access key: one step for both codes from the team
+    var id by remember { mutableStateOf(Prefs.contributorId(ctx)) }
+    fun done() { Prefs.saveContributorId(ctx, id); onDone() }
+    StepFrame(stringResource(R.string.onboarding_key_title), stringResource(R.string.onboarding_key_lead),
+        stringResource(if (set) R.string.onboarding_ready_button else R.string.onboarding_key_skip), onNext = ::done) {
+        WhiteCard {
+            UploadServerCard(onChange = { tick++ }, keyFirst = true)
+        }
+        WhiteCard {
+            IconRow("🪪", stringResource(R.string.onboarding_email_title), stringResource(R.string.onboarding_email_lead))
+            ContributorIdField(id, { id = it; Prefs.saveContributorId(ctx, it) }, help = false)
+        }
+        Hint(stringResource(R.string.onboarding_upload_later))
+    }
+}
+
+// ---------------------------------------------------------------- 4b. ready (then the codes)
 
 @Composable
 private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
     var settings by remember { mutableStateOf(Prefs.settings(ctx)) }
-    val id = remember { Prefs.contributorId(ctx) }
     val missing = perms().filter { p -> !granted(ctx, p.names.first()) && p.icon != "🔔" }
     val packs = remember { RoadSource.packs(ctx).installed().map { it.name } }
     val plan = CapturePlan.of(settings.facadeDistanceM)
 
-    StepFrame(stringResource(R.string.onboarding_ready_title), null, stringResource(R.string.onboarding_ready_button),
+    StepFrame(stringResource(R.string.onboarding_ready_title), null, stringResource(R.string.onboarding_continue),
         onNext = { Prefs.saveSettings(ctx, settings); onDone() }) {
         WhiteCard {
             Text(stringResource(R.string.onboarding_mount_title), fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Palette.Ink)
             IconRow("🛵", stringResource(R.string.setup_holding_mount), stringResource(R.string.onboarding_mount_text))
             HorizontalDivider(color = Palette.Line)
             IconRow("🙋", stringResource(R.string.setup_holding_hand), stringResource(R.string.onboarding_hand_text))
+            HorizontalDivider(color = Palette.Line)
+            IconRow("🚸", stringResource(R.string.setup_target_signs), stringResource(R.string.onboarding_signs_text))
         }
         WhiteCard {
-            Summary(true, if (id.isBlank()) stringResource(R.string.onboarding_summary_no_id) else stringResource(R.string.onboarding_summary_name, id),
-                if (id.isBlank()) stringResource(R.string.onboarding_summary_no_id_sub) else null)
             Summary(missing.isEmpty(), if (missing.isEmpty()) stringResource(R.string.onboarding_summary_perms_ok)
                 else stringResource(R.string.onboarding_summary_perms_missing, missing.joinToString(", ") { ctx.getString(it.title).lowercase(Locale.ROOT) }),
                 if (missing.isEmpty()) null else stringResource(R.string.onboarding_summary_perms_fix))
@@ -427,6 +451,38 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
         }
         Hint(stringResource(R.string.onboarding_ready_after))
     }
+}
+
+// ---------------------------------------------------------------- 4c. a 360 camera (optional)
+
+@Composable
+private fun Cam360Step(onNext: () -> Unit) {
+    val ctx = LocalContext.current
+    var page by remember { mutableStateOf(false) }
+    // Không: no 360 camera (also when one was set before, e.g. on a replay); New ride starts with the phone's camera
+    val no = {
+        Prefs.saveCamera360Model(ctx, io.github.tewnut.poicapture.core.Camera360Model.NONE)
+        Prefs.saveUse360(ctx, false)
+        onNext()
+    }
+    StepFrame(stringResource(R.string.onboarding_cam360_lead), null, stringResource(R.string.onboarding_continue), onNext = onNext) {
+        WhiteCard {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(role = Role.Button, onClick = no).padding(vertical = 6.dp, horizontal = 4.dp)) {
+                IconRow("📱", stringResource(R.string.onboarding_cam360_no), stringResource(R.string.onboarding_cam360_no_sub))
+            }
+            HorizontalDivider(color = Palette.Line)
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(role = Role.Button) { page = true }.padding(vertical = 6.dp, horizontal = 4.dp)) {
+                IconRow("📷", stringResource(R.string.onboarding_cam360_yes), stringResource(R.string.onboarding_cam360_yes_sub))
+            }
+        }
+    }
+    // the same page as Settings → Camera 360; closing it goes on once a camera was chosen, else back to the question
+    if (page) Camera360PageDialog(onClose = {
+        page = false
+        if (Prefs.camera360Model(ctx) != io.github.tewnut.poicapture.core.Camera360Model.NONE) onNext()
+    })
 }
 
 @Composable

@@ -14,10 +14,27 @@ object BlurCheck {
     /** Smear allowed at 2560 px across, scaled to the photo's width (same budget as CapturePlan.MAX_BLUR_PX). */
     fun maxMotionPx(widthPx: Int) = CapturePlan.MAX_BLUR_PX * widthPx / 2560.0
 
+    /**
+     * Smear allowed on this photo, in its pixels at the wall [distanceM] away (the distance [motionPx] used).
+     * - house numbers ([SweepTarget.maxSmearMm]): a smear on the wall, so the budget grows with the photo's focal
+     *   length in pixels and shrinks with the distance exactly as the smear does: the photo is blurry when
+     *   speed × exposure passes the budget (16 mm), whether held portrait or landscape and however far the wall is;
+     * - shops and signs: [SweepTarget.maxBlurPx] at 2560 px across, scaled to the photo's width (as before).
+     */
+    fun maxMotionPx(widthPx: Int, hFovDeg: Double, distanceM: Double, target: SweepTarget): Double {
+        val smear = target.maxSmearMm
+        if (smear == null || distanceM <= 0 || widthPx <= 0 || hFovDeg <= 0) return target.maxBlurPx * widthPx / 2560.0
+        return smear / 1000 * focalPx(widthPx, hFovDeg) / distanceM
+    }
+
+    fun focalPx(widthPx: Int, hFovDeg: Double) = (widthPx / 2.0) / tan(hFovDeg / 2 * PI / 180.0)
+
+    /** How far the wall moved while the shutter was open, in millimetres (speed × exposure): what a plate's digits suffer. */
+    fun smearMm(speedMps: Double, exposureS: Double) = speedMps * exposureS * 1000
+
     fun motionPx(speedMps: Double, exposureS: Double, hFovDeg: Double, widthPx: Int, distanceM: Double): Double {
         if (distanceM <= 0 || widthPx <= 0 || hFovDeg <= 0) return 0.0
-        val focalPx = (widthPx / 2.0) / tan(hFovDeg / 2 * PI / 180.0)
-        return speedMps * exposureS * focalPx / distanceM
+        return speedMps * exposureS * focalPx(widthPx, hFovDeg) / distanceM
     }
 
     /** Variance of the 4-neighbour Laplacian over the middle of a grayscale image (values 0–255). */
@@ -47,12 +64,35 @@ object BlurCheck {
     const val UNUSABLE_SHARE = 0.08
 
     /** Blurry: too much motion, or far less detail than the session's recent photos (median of [recent]). */
-    fun blurry(motionPx: Double?, widthPx: Int, sharpness: Double?, recent: List<Double>): Boolean {
-        if (motionPx != null && motionPx > maxMotionPx(widthPx)) return true
+    fun blurry(motionPx: Double?, widthPx: Int, sharpness: Double?, recent: List<Double>): Boolean =
+        judge(motionPx, maxMotionPx(widthPx), sharpness, recent).blurry
+
+    /** Why a photo is blurry: [motion] = the ride was too fast for the shutter; [soft] = far less detail than usual. */
+    data class Verdict(val motion: Boolean, val soft: Boolean) {
+        val blurry get() = motion || soft
+    }
+
+    fun judge(motionPx: Double?, maxMotionPx: Double, sharpness: Double?, recent: List<Double>): Verdict {
+        val motion = motionPx != null && motionPx > maxMotionPx
+        var soft = false
         if (sharpness != null && recent.size >= 5) {
             val median = recent.sorted()[recent.size / 2]
-            if (sharpness < 0.35 * median) return true
+            soft = sharpness < SOFT_SHARE * median
         }
-        return false
+        return Verdict(motion, soft)
     }
+    const val SOFT_SHARE = 0.35
+
+    /**
+     * Tell the rider "blurry: slow down" (street sweep) from the last few verdicts, oldest first: 2 of the last 3
+     * too fast for the shutter, or the last [SOFT_RUN] all soft (a vibrating mount, a dirty lens). One or two soft
+     * photos in a row are a truck or a motorbike passing close: not the rider's doing, and the next photos are fine
+     * (rides of 24 Nov 2026: the only flags on the slow rides were passing traffic).
+     */
+    fun warnRider(recent: List<Verdict>): Boolean {
+        val last3 = recent.takeLast(3)
+        if (last3.count { it.motion } >= 2) return true
+        return recent.size >= SOFT_RUN && recent.takeLast(SOFT_RUN).all { it.soft }
+    }
+    const val SOFT_RUN = 3
 }

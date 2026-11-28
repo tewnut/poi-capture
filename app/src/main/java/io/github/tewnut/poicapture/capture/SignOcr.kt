@@ -22,7 +22,16 @@ object SignOcr {
     private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
     /** Blocking (call off the main thread). Full-resolution still, not preview frames: small text needs the pixels. */
-    fun read(file: File): SignReading {
+    fun read(file: File): SignReading = SignText.read(lines(file))
+
+    /** The text lines of a photo, boxes in the photo's pixels. Blocking. */
+    fun lines(file: File): List<TextLine> = page(file).lines
+
+    /** Lines read on a photo, and the photo's size as their boxes see it (upright). */
+    class Page(val lines: List<TextLine>, val width: Int, val height: Int)
+
+    /** The text lines of a photo with their block (TextLine.block), and the upright size. Blocking. */
+    fun page(file: File): Page {
         val rotation = when (runCatching { ExifInterface(file).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1) }.getOrDefault(1)) {
             ExifInterface.ORIENTATION_ROTATE_90 -> 90
             ExifInterface.ORIENTATION_ROTATE_180 -> 180
@@ -32,16 +41,31 @@ object SignOcr {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }.also { BitmapFactory.decodeFile(file.path, it) }
         val sample = if (maxOf(bounds.outWidth, bounds.outHeight) > 3200) 2 else 1
         val bmp = BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: return SignText.read(emptyList())
+            ?: return Page(emptyList(), 0, 0)
         try {
             val text = Tasks.await(recognizer.process(InputImage.fromBitmap(bmp, rotation)), 30, TimeUnit.SECONDS)
-            val lines = text.textBlocks.flatMap { it.lines }.map { l ->
+            val lines = text.textBlocks.flatMapIndexed { k, block -> block.lines.map { l ->
                 val b = l.boundingBox
-                TextLine(l.text, (b?.height() ?: 0) * sample, b?.let { intArrayOf(it.left * sample, it.top * sample, it.right * sample, it.bottom * sample) })
-            }
-            return SignText.read(lines)
+                TextLine(l.text, (b?.height() ?: 0) * sample, b?.let { intArrayOf(it.left * sample, it.top * sample, it.right * sample, it.bottom * sample) }, k)
+            } }
+            val sideways = rotation == 90 || rotation == 270
+            return Page(lines, (if (sideways) bmp.height else bmp.width) * sample, (if (sideways) bmp.width else bmp.height) * sample)
         } finally {
             bmp.recycle()
         }
+    }
+
+    /**
+     * The words of a straightened floor plan (no EXIF rotation: the app wrote it upright), line by line, each with its
+     * box in the file's pixels: the unit numbers' positions ([io.github.tewnut.poicapture.core.PlanUnits]). Blocking.
+     */
+    fun planWords(file: File): List<List<io.github.tewnut.poicapture.core.PlanUnits.Word>> {
+        val bmp = BitmapFactory.decodeFile(file.path) ?: return emptyList()
+        try {
+            val text = Tasks.await(recognizer.process(InputImage.fromBitmap(bmp, 0)), 30, TimeUnit.SECONDS)
+            return text.textBlocks.flatMap { b -> b.lines.map { l -> l.elements.map { e ->
+                io.github.tewnut.poicapture.core.PlanUnits.Word(e.text, e.boundingBox?.let { intArrayOf(it.left, it.top, it.right, it.bottom) })
+            } } }
+        } finally { bmp.recycle() }
     }
 }

@@ -53,7 +53,6 @@ import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import io.github.tewnut.poicapture.capture.CaptureService
 import io.github.tewnut.poicapture.core.Settings
-import io.github.tewnut.poicapture.core.PhotoRoles
 import io.github.tewnut.poicapture.ui.CaptureScreen
 import io.github.tewnut.poicapture.ui.Palette
 import io.github.tewnut.poicapture.ui.SettingsScreen
@@ -78,6 +77,8 @@ class MainActivity : ComponentActivity() {
             load(this@MainActivity, getSharedPreferences("osmdroid", MODE_PRIVATE))
             userAgentValue = packageName   // OSM tile usage policy: identify the app
         }
+        // rides cut short (the app was killed while recording) go up like any ended ride, when auto upload is on
+        if (savedInstanceState == null) io.github.tewnut.poicapture.capture.Uploads.resumeInterrupted(this)
         setContent {
             io.github.tewnut.poicapture.ui.PoiTheme { App() }
         }
@@ -121,26 +122,65 @@ object Prefs {
     fun onboarded(ctx: Context): Boolean = sp(ctx).getBoolean("onboarded", false)
     fun setOnboarded(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("onboarded", v).apply()
 
-    /** Photo kinds of POI mode: the contributor's own list (Settings), else the built-in default. */
-    fun photoRoles(ctx: Context): PhotoRoles = sp(ctx).getString("photoRoles", null)?.let { s ->
-        runCatching { JSONObject(s).let { PhotoRoles.fromJson(it, it.optString("source", "local")) } }.getOrNull()
-    } ?: PhotoRoles.DEFAULT
-    /**
-     * Ask the kind of each photo while shooting a place? Off by default (the agent tells a front from a sign or a menu
-     * by itself); on when the contributor wants it.
-     */
     /** Street sweep: on a mount or in a passenger's hand, as last chosen. */
     fun holding(ctx: Context): io.github.tewnut.poicapture.core.Holding =
         io.github.tewnut.poicapture.core.Holding.of(sp(ctx).getString("holding", null))
     fun saveHolding(ctx: Context, h: io.github.tewnut.poicapture.core.Holding) = sp(ctx).edit().putString("holding", h.json).apply()
+    /** New ride: the kind last chosen (sweep, place, indoor); 360 is an option of sweep ([use360]), never a kind here. */
+    fun rideKind(ctx: Context): io.github.tewnut.poicapture.core.SessionKind =
+        io.github.tewnut.poicapture.core.SessionKind.entries.firstOrNull { it.json == sp(ctx).getString("rideKind", null) }
+            ?.takeIf { it != io.github.tewnut.poicapture.core.SessionKind.CAMERA360 } ?: io.github.tewnut.poicapture.core.SessionKind.SWEEP
+    fun saveRideKind(ctx: Context, k: io.github.tewnut.poicapture.core.SessionKind) = sp(ctx).edit().putString("rideKind", k.json).apply()
+    /** Street sweep: what the last ride was for (the next one starts with it). */
+    fun target(ctx: Context): io.github.tewnut.poicapture.core.SweepTarget =
+        io.github.tewnut.poicapture.core.SweepTarget.of(sp(ctx).getString("target", null))
+    fun saveTarget(ctx: Context, t: io.github.tewnut.poicapture.core.SweepTarget) = sp(ctx).edit().putString("target", t.json).apply()
     /** Maps: satellite imagery instead of the street map (remembered). */
     fun satellite(ctx: Context): Boolean = sp(ctx).getBoolean("satellite", false)
     fun saveSatellite(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("satellite", v).apply()
-    fun askPhotoRole(ctx: Context): Boolean = sp(ctx).getBoolean("askPhotoRole", false)
-    fun setAskPhotoRole(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("askPhotoRole", v).apply()
-    fun savePhotoRoles(ctx: Context, r: PhotoRoles?) = sp(ctx).edit().apply {
-        if (r == null || r.source == "default") remove("photoRoles") else putString("photoRoles", r.toJson().toString())
-    }.apply()
+    /** Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4), its serial / Wi-Fi name, password, spacing. */
+    fun thetaOn(ctx: Context): Boolean = camera360Model(ctx) == io.github.tewnut.poicapture.core.Camera360Model.THETA
+    /**
+     * The 360 camera chosen in Settings → Camera 360 (none / gopro / insta360 / theta / other). Before it existed the
+     * New ride sheet had a "control a Ricoh Theta" switch (`thetaOn`): on = theta.
+     */
+    fun camera360Model(ctx: Context): io.github.tewnut.poicapture.core.Camera360Model =
+        io.github.tewnut.poicapture.core.Camera360Model.of(sp(ctx).getString("camera360Model", null), sp(ctx).getBoolean("thetaOn", false))
+    fun saveCamera360Model(ctx: Context, m: io.github.tewnut.poicapture.core.Camera360Model) =
+        sp(ctx).edit().putString("camera360Model", m.json).remove("thetaOn").apply()
+    /** The Theta's model name from its last connect ("RICOH THETA X"), for Settings' row; "" = never connected. */
+    fun thetaModelName(ctx: Context): String = sp(ctx).getString("thetaModelName", "") ?: ""
+    fun saveThetaModelName(ctx: Context, v: String) = sp(ctx).edit().putString("thetaModelName", v).apply()
+    /** Quét đường with a 360 camera (Camera: 360°) instead of the phone's camera. */
+    fun use360(ctx: Context): Boolean = sp(ctx).getBoolean("use360", false)
+    fun saveUse360(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("use360", v).apply()
+    fun thetaSerial(ctx: Context): String = sp(ctx).getString("thetaSerial", "") ?: ""
+    /** Only a changed password is kept, encrypted like the upload token; empty = the serial's digits (Theta default). */
+    fun thetaPassword(ctx: Context): String = sp(ctx).getString("thetaPassword", null)
+        ?.let { runCatching { io.github.tewnut.poicapture.capture.UploadServer.Secret.decrypt(it) }.getOrNull() } ?: ""
+    /** A different camera (serial) is not "paired" until it connects: its model name is forgotten. */
+    fun saveThetaWifi(ctx: Context, serial: String, password: String) =
+        sp(ctx).edit().putString("thetaSerial", serial).apply {
+            if (serial != thetaSerial(ctx)) remove("thetaModelName")
+            if (password.isEmpty()) remove("thetaPassword")
+            else putString("thetaPassword", io.github.tewnut.poicapture.capture.UploadServer.Secret.encrypt(password))
+        }.apply()
+    fun thetaEveryM(ctx: Context): Double =
+        sp(ctx).getFloat("thetaEveryM", io.github.tewnut.poicapture.core.ThetaOsc.DEFAULT_EVERY_M.toFloat()).toDouble()
+    fun saveThetaEveryM(ctx: Context, v: Double) = sp(ctx).edit().putFloat("thetaEveryM", v.toFloat()).apply()
+    /** Camera 360 → Kiểm tra camera: the date ("2026-11-28") of the last fully passed check of [m]; "" = never. */
+    fun camera360CheckedOn(ctx: Context, m: io.github.tewnut.poicapture.core.Camera360Model): String =
+        sp(ctx).getString("c360Checked_${m.json}", "") ?: ""
+    fun saveCamera360CheckedOn(ctx: Context, m: io.github.tewnut.poicapture.core.Camera360Model, date: String?) =
+        sp(ctx).edit().apply { if (date == null) remove("c360Checked_${m.json}") else putString("c360Checked_${m.json}", date) }.apply()
+    /** Camera 360 → Kiểm tra trước khi đi: (the day they were ticked, the ticked item ids) for [m]. */
+    fun camera360Ticks(ctx: Context, m: io.github.tewnut.poicapture.core.Camera360Model): Pair<String, Set<String>> =
+        (sp(ctx).getString("c360TicksDate_${m.json}", "") ?: "") to (sp(ctx).getStringSet("c360Ticks_${m.json}", null)?.toSet() ?: emptySet())
+    fun saveCamera360Ticks(ctx: Context, m: io.github.tewnut.poicapture.core.Camera360Model, date: String, ticks: Set<String>) =
+        sp(ctx).edit().putString("c360TicksDate_${m.json}", date).putStringSet("c360Ticks_${m.json}", ticks.toSet()).apply()
+    /** A ride was started on this phone once: New ride then folds its choices into one line (Đổi opens them). */
+    fun startedRide(ctx: Context): Boolean = sp(ctx).getBoolean("startedRide", false)
+    fun setStartedRide(ctx: Context) = sp(ctx).edit().putBoolean("startedRide", true).apply()
 }
 
 /**
@@ -156,16 +196,26 @@ private fun App() {
     val ctx = LocalContext.current
     // first run: the onboarding (contributor ID, permissions, road data) comes first
     var onboarded by rememberSaveable { mutableStateOf(Prefs.onboarded(ctx)) }
+    // the onboarding again from Settings → About: the app stays set up (onboarded), it can be left at any step
+    var replaying by rememberSaveable { mutableStateOf(false) }
     // home (the sessions list) is the root; New session and Settings open on top of it and go back to it
     var screen by rememberSaveable { mutableStateOf("home") }   // home | new | settings
     var capturing by rememberSaveable { mutableStateOf<String?>(null) }
     var mapOf by rememberSaveable { mutableStateOf<String?>(null) }
     var mapTitle by rememberSaveable { mutableStateOf("") }   // the session's name, as in the list
+    // a ride just ended with Save: its summary (RideEnd.encode) before the list
+    var summary by rememberSaveable { mutableStateOf<String?>(null) }
 
     val perms = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
-    LaunchedEffect(Unit) {
-        // the app was reopened while a session is still recording in the background: go back to it
-        CaptureService.activeSession.value?.let { capturing = it }
+    // the app comes to the front (launcher, recents, the ride's notification: singleTask, so no new screen) while a
+    // ride is still recording in the background: go back to it, wherever the app was (the list, New ride, Settings)
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME && capturing == null) CaptureService.activeSession.value?.let { capturing = it }
+        }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs) }
     }
     val access = rememberRequiredAccess()
     LaunchedEffect(onboarded, access.permissionsOk) {
@@ -181,8 +231,17 @@ private fun App() {
         io.github.tewnut.poicapture.ui.UnsupportedDevice(unsupported)
         return
     }
-    if (!onboarded && capturing == null) {
-        OnboardingScreen(onDone = { onboarded = true; screen = "home" })
+    if ((!onboarded || replaying) && capturing == null) {
+        OnboardingScreen(replay = replaying && onboarded, onDone = {
+            screen = if (replaying && onboarded) "settings" else "home"
+            onboarded = true; replaying = false
+        })
+        return
+    }
+    // the ride just saved: its numbers and upload, then the list
+    val ended = io.github.tewnut.poicapture.core.RideEnd.decode(summary)
+    if (ended != null && capturing == null) {
+        io.github.tewnut.poicapture.ui.RideSummaryScreen(ended, onDone = { summary = null; screen = "home" }, onOpenSettings = { summary = null; screen = "settings" })
         return
     }
     // GPS is a must: no way into the app without precise location, the camera and the phone's location on.
@@ -194,7 +253,8 @@ private fun App() {
 
     val sid = capturing
     if (sid != null) {
-        CaptureScreen(sid, onDone = { capturing = null; screen = "home" }, onCancel = { capturing = null; screen = "new" })
+        CaptureScreen(sid, onDone = { e -> capturing = null; screen = "home"; summary = e?.encode() },
+            onCancel = { capturing = null; screen = "new" })
         return
     }
     val ms = mapOf
@@ -210,7 +270,7 @@ private fun App() {
     when (screen) {
         "new" -> SetupScreen(onStart = { capturing = it }, onOpenSettings = { screen = "settings" }, onBack = { screen = "home" })
         "settings" -> SettingsScreen(onBack = { screen = "home" },
-            onReplayOnboarding = { Prefs.setOnboarded(ctx, false); onboarded = false })
+            onReplayOnboarding = { replaying = true })
         else -> SessionsScreen(onNew = { screen = "new" }, onOpenMap = { id, title -> mapTitle = title; mapOf = id }, onOpenSettings = { screen = "settings" })
     }
 }

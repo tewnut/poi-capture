@@ -1,17 +1,21 @@
-# POI Capture Reviewer (web app)
+# Quét Phố Reviewer (web app)
+
+Formerly POI Capture Reviewer.
 
 Stage 3 of the pipeline (docs/pipeline.md): confirm what the agentic processing found, then publish.
 
-- **Sessions** (left panel): every imported session with its stage as three dots, Captured → Agent processed → Human
-  reviewed (the name on hover), and review progress; filter by stage, kind, mounted / in hand. Import a processed session folder
-  (with `result.json`, from the `process-sweep` skill), a zip of it, or a zip exported from the phone, with the
-  buttons under the list or by dropping it on the page. Everything stays in this browser (IndexedDB); nothing is
-  uploaded, and there is no sign-in.
-- **A session**: its **Places** and **Tasks**. Review a place: photos (full screen, or open in a new tab), every
+- **Sessions** (left panel, the only list): stage chips with counts (All · Captured · Processing · To review · In
+  review · Reviewed / exported; one tap filters, the counts follow the other filters), a search over name, street, rider
+  and building that ignores accents ("dong van cong" finds "Đồng Văn Cống"), and under **Filter** the target (places,
+  addresses, signs, indoor, Place capture), the date (today, 7 or 30 days), the rider and the sort (newest, oldest,
+  stage, name). Sorted by date the rows are grouped by day. The search, filters and sort are in the address
+  (`#/?q=…&stage=…`), so a filtered list can be shared. The map shows the rides listed; hovering a row draws its route
+  bold, a click on a route picks its row (a second click opens it). Each row keeps its stage as three dots, Captured →
+  Agent processed → Human reviewed, and its review progress. Everything stays in this browser (IndexedDB).
+- **A session**: its **Places**, and under them a folding **To do (N)** section with its tasks (visits for Place
+  capture, removals to confirm; export as GeoJSON). Review a place: photos (full screen, or open in a new tab), every
   field read from them (with the photo it came from), the positions as chips (Algo or contributor, Agent, your
   Pin, Google for checking only), then Confirm, Needs a visit or Reject.
-- **All tasks**: visits for Place capture and removals across the sessions shown, grouped by session, to plan
-  field visits; export as GeoJSON.
 - **Settings** (⚙ at the top): your reviewer name and the language (English / Tiếng Việt).
 - **Google** (decided 2026-11-15, docs/pipeline.md): fields the photos lack are filled from Google and marked; a field
   that matches or differs from Google is labelled on the review screen only. Labels never reach the published data;
@@ -19,8 +23,9 @@ Stage 3 of the pipeline (docs/pipeline.md): confirm what the agentic processing 
 - **Clear all data** (⚙): removes every session, photo and review from this browser, to import fresh sessions.
 - **Publish** (in a session): that session's confirmed places and removals as GeoJSON and CSV, new places as an
   OpenStreetMap `.osm` file for JOSM. Google's details and pins are never written.
-- **Links**: `#/` sessions, `#/tasks` all tasks, `#/s/<session>` its places, `#/s/<session>/tasks`,
-  `#/s/<session>/p/<place>`, `#/s/<session>/t/<task>`. A link opens only where that session was imported (there
+- **Links**: `#/` sessions (with `?q=&stage=&kind=&period=&rider=&sort=`), `#/s/<session>` its places and tasks,
+  `#/s/<session>/p/<place>`, `#/s/<session>/t/<task>`; older links still work: `#/tasks` lands on the session list,
+  `#/s/<session>/tasks` opens the session with its to-do section open. A link opens only where that session was imported (there
   is no server); otherwise the app says which session to import.
 
 ```
