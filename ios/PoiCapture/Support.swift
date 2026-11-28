@@ -64,9 +64,7 @@ final class LineFile {
             var out = ""
             var changed = false
             for l in lines {
-                if let c = change(l) { out += c + "
-"; changed = true } else { out += l + "
-" }
+                if let c = change(l) { out += c + "\n"; changed = true } else { out += l + "\n" }
             }
             if changed { try? out.write(to: self.url, atomically: true, encoding: .utf8) }
             self.handle = try? FileHandle(forWritingTo: self.url)
