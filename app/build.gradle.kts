@@ -13,9 +13,9 @@ android {
     defaultConfig {
         applicationId = "vn.vmaps.quetpho"          // the store id; the code keeps its package (namespace)
         minSdk = 30            // Android 11+: raw GNSS, camera/location foreground-service types
-        targetSdk = 35
-        versionCode = 26
-        versionName = "0.22.1"
+        targetSdk = 36         // Play: new apps and updates must target the latest API level
+        versionCode = 27
+        versionName = "0.22.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -38,7 +38,10 @@ android {
         }
         release {
             isMinifyEnabled = false
-            ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+            ndk {
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+                debugSymbolLevel = "SYMBOL_TABLE"   // native symbols in the .aab: readable native crashes in Play
+            }
             signingConfig = signingConfigs.findByName("release")
         }
     }
