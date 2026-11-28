@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyLists-1.0.dtd">
+<plist version="1.0">
+<!-- Only what the generated Info.plist (GENERATE_INFOPLIST_FILE, INFOPLIST_KEY_* in project.yml) cannot hold: the
+     location background mode, so a street ride's GPS track goes on while the app is in the background (photos pause:
+     the camera only runs on screen). Xcode merges the generated keys into this file. -->
+<dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
+</dict>
+</plist>

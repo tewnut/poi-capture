@@ -55,6 +55,17 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         ticker?.invalidate()
     }
 
+    /** A street ride runs its own motion updates (one CMMotionManager at a time): this one pauses meanwhile. */
+    func suspendMotion() { motion.stopDeviceMotionUpdates() }
+
+    func resumeMotion() {
+        guard motion.isDeviceMotionAvailable, !motion.isDeviceMotionActive else { return }
+        motion.startDeviceMotionUpdates(using: .xMagneticNorthZVertical, to: .main) { [weak self] m, _ in
+            guard let m else { return }
+            self?.cameraBearing = Self.cameraAzimuth(gravity: m.gravity, field: m.magneticField)
+        }
+    }
+
     /** The fix to put on a photo: GPS-grade and at most 5 s old, else nil (the capture holds). */
     var freshFix: CLLocation? {
         guard let f = fix, precise, f.horizontalAccuracy > 0, f.horizontalAccuracy <= Self.GPS_GRADE_M else { return nil }

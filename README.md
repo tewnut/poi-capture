@@ -21,16 +21,28 @@ The UI is in English, with a Vietnamese translation used when the phone (or the 
 **[Latest APK](https://github.com/tewnut/poi-capture/releases/latest)** (`poi-capture-vX.Y.Z.apk`, Android 11+). Open it
 on the phone and allow installing from that source. New versions install over the old one and keep the sessions.
 
-## iPhone app (Place capture)
+## iPhone app (street rides and Place capture)
 
-`ios/` holds the iPhone app: Place capture (stop at each shop, photograph it), with the same rules and export as the
-Android app (GPS-grade fix at most 5 s old for every photo, "GPS lost" hold, sessions named "{street} [yymmdd]",
-sent as a `poi-capture/3` zip). On iPhones with LiDAR (Pro models) each photo also records the measured distance to
-the shop front (up to about 5 m, `facadeSource: "lidar"`). Street sweep stays Android only (see below).
+`ios/` holds the iPhone app, with the same rules and export as the Android app:
+- **Street ride** ("Quét đường", stage 1): Đối tượng Địa điểm / Địa chỉ / Biển báo (shops, house numbers, traffic
+  signs), the phone on a mount or in a passenger's hand; photos taken by themselves when the scene has slid 30-45 % of
+  a frame (18-25 % for house numbers; every 8 m of GPS distance for signs), the shutter held at 1/500 s or faster,
+  blur checked on every photo, road names from OpenStreetMap (Overpass, online), and the ride sent as the same
+  `poi-capture/3` zip as an Android ride (manifest.json, track.geojson, imu.csv, frames.csv, photos/), so
+  process-sweep reads it the same way.
+- **Place capture**: stop at each shop, photograph it. On iPhones with LiDAR (Pro models) each photo also records the
+  measured distance to the shop front (up to about 5 m, `facadeSource: "lidar"`).
+- **Upload** to the team's server (Settings → Upload server: scan the setup QR, the token kept in the Keychain):
+  automatic when a ride ends (on Wi-Fi by default), as on Android (direct R2 parts; tus for a plain tus server), with
+  the same metadata.
 
-The logic both apps share (capture rules, geometry, photo spacing, blur checks, session naming, the Place capture
-manifest) lives in the Kotlin Multiplatform module `shared/`; the Android app uses it as a library, the iPhone app as
-`Shared.framework`. Platform code (camera, GPS, sensors, storage, screens) is native on each side.
+The logic both apps share lives in the Kotlin Multiplatform module `shared/`: capture rules, geometry, photo spacing,
+blur checks, session naming, the Place capture manifest, and for the iPhone's street ride `SweepRide` (fixes, road
+matching, camera direction, each photo's fields), `SweepShotTimer` / `FrameSlide` (when to shoot), `SweepExport`
+(session.json, manifest, track, upload metadata) and `Cloud` / `Direct` (setup link, upload bookkeeping). The Android
+app keeps its own versions of the last four for now; `IosParityTest` (app/src/test) holds both to the same answers.
+The Android app uses `shared/` as a library, the iPhone app as `Shared.framework`. Platform code (camera, GPS,
+sensors, storage, screens) is native on each side.
 
 Build the iPhone app on a Mac with Xcode 16+ and a JDK 17+:
 
@@ -43,24 +55,24 @@ A build step runs `./gradlew :shared:embedAndSignAppleFrameworkForXcode`. Set yo
 phone. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) builds both apps on every push: the shared tests on
 the JVM and on the iOS simulator, the Android tests and APK, and the iPhone app for the simulator.
 
-## Why street sweep is Android only
+## Street rides on the iPhone: what differs from Android
 
-Placing a shop needs the phone's own measurements, unfiltered, and a capture that keeps going with the screen off.
-Android gives an app both; iOS does not:
+iOS gives an app less than Android does, so an iPhone ride is good but not the same:
 
-- **Raw GNSS.** Android hands apps the raw satellite measurements (pseudoranges, Doppler and, on many phones, carrier
-  phase), which the agent can reprocess into a much better track. iOS only gives the position it has already
-  computed.
-- **GPS only, on demand.** Android can ask for the satellite fix alone, so a Wi-Fi or cell position is never taken
-  for a photo position (see the 5-second rule). iOS mixes the sources and does not say which one it used.
-- **Recording with the screen off.** A mounted phone records in a foreground service (camera + location) with the
-  screen off or another app on top. iOS does not let an app use the camera in the background.
-- **Hands-free controls.** The volume keys and Bluetooth handlebar remotes take photos; iOS reserves the volume keys.
-- **Distribution and cost.** The APK installs directly, with no app store review; contributors' phones are mostly
-  Android, at every price.
-
-iOS would bring one real advantage: the LiDAR on Pro iPhones measures depth, but only up to about 5 m and not reliably
-from a moving bike, so it would not replace the triangulation the agent does from several photos.
+- **Screen on.** iOS does not let an app use the camera in the background or with the screen locked. A ride keeps the
+  app on screen (the screen does not lock; plug in a charger). If the app goes to the background, photos pause and
+  the ride says so on return; the GPS track goes on (location background mode).
+- **No raw GNSS, no GPS-only fix.** iOS gives only the position it has computed, from whatever source; a fix counts as
+  GPS when its accuracy is GPS-grade. No `gnss_raw.csv`.
+- **Camera direction.** A mounted phone gets the median of the compass over its photos (`compassMount`, as Android
+  before the acceleration estimate settles); the acceleration method is Android only. Held by hand each photo has its
+  compass bearing (`compass`; Android fuses it with the gyroscope, `gyroCompass`).
+- **imu.csv** has gyroscope (`g`) and accelerometer (`a`) rows, no rotation-vector rows.
+- **Not yet on the iPhone**: offline road packs, house-number reading and the sign detector on the phone (hints only;
+  the agent reads the photos), denser photos near a sign, cutting a ride per street before upload, hardware shutter
+  keys, Camera 360 and indoor walks. Uploads run while the app is open.
+- **Photo size**: a 16:9 format at the asked long edge or the next size the camera offers (e.g. 3840 x 2160 for 2560;
+  house numbers: the largest 16:9 size). No GPS in the photos' EXIF (as on Android; the manifest holds it).
 
 ## Suggested hardware
 

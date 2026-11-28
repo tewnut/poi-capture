@@ -1,4 +1,4 @@
-# iPhone app (Place capture). Generate the Xcode project with XcodeGen, on a Mac:
+# iPhone app (street rides and Place capture). Generate the Xcode project with XcodeGen, on a Mac:
 #   brew install xcodegen && cd ios && xcodegen generate && open PoiCapture.xcodeproj
 # The shared Kotlin logic (../shared) is built into Shared.framework by Gradle before each build (JDK 17+ needed).
 name: PoiCapture
@@ -30,6 +30,8 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Quét Phố
         INFOPLIST_KEY_NSCameraUsageDescription: "Take photos of shopfronts and signs."
         INFOPLIST_KEY_NSLocationWhenInUseUsageDescription: "Know where each photo was taken and which street you are on."
+        INFOPLIST_KEY_NSLocationAlwaysAndWhenInUseUsageDescription: "Keep recording a street ride's GPS track while the app is in the background."
+        INFOPLIST_FILE: Info.plist                         # UIBackgroundModes: location (street rides), merged with the generated keys
         INFOPLIST_KEY_NSMotionUsageDescription: "Know which way the camera looks when a photo is taken."
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
