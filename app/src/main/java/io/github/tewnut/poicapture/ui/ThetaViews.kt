@@ -42,6 +42,7 @@ fun ThetaSetupCard(everyM: Double, onEveryM: (Double) -> Unit) {
     var serial by remember { mutableStateOf(Prefs.thetaSerial(ctx)) }
     var password by remember { mutableStateOf(Prefs.thetaPassword(ctx)) }
     val link by ThetaLink.state.collectAsState()
+    RememberThetaModel(link)
     Column(Modifier.fillMaxWidth().background(Palette.Canvas, RoundedCornerShape(12.dp)).padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Hint(stringResource(R.string.theta_hint))
@@ -55,6 +56,10 @@ fun ThetaSetupCard(everyM: Double, onEveryM: (Double) -> Unit) {
                 placeholder = { Text(ThetaOsc.passwordFrom(serial).ifEmpty { "…" }, fontSize = 12.sp) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii))
         }
+        // the serial off the sticker under the camera, read by the phone's camera
+        var scan by remember { mutableStateOf(false) }
+        OutlinedButton(onClick = { scan = true }) { Text("📷 " + stringResource(R.string.serial_scan_open)) }
+        if (scan) SerialScanner(onFound = { serial = it; scan = false }, onClose = { scan = false })
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(enabled = serial.isNotBlank() && link.status != ThetaLink.Status.CONNECTING, onClick = {
                 Prefs.saveThetaWifi(ctx, serial, password)
@@ -116,3 +121,17 @@ private fun ThetaCount(value: String, label: String) = Column(horizontalAlignmen
     Text(value, color = Palette.Lime, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
     Text(label, color = Color.White.copy(alpha = 0.75f), fontSize = 12.sp)
 }
+
+/** The connected Theta's model name, kept for Settings' row ("Ricoh Theta X · đã ghép"). */
+@Composable
+fun RememberThetaModel(link: ThetaLink.Ui) {
+    val ctx = LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(link.status, link.model) {
+        val m = link.model
+        if (link.status == ThetaLink.Status.CONNECTED && !m.isNullOrBlank()) Prefs.saveThetaModelName(ctx, m)
+    }
+}
+
+/** "RICOH THETA X" as the camera reports it → "Ricoh Theta X"; none → "Ricoh Theta". */
+fun thetaDisplayName(model: String?): String =
+    model?.takeIf { it.isNotBlank() }?.replace(Regex("^RICOH\\s+THETA", RegexOption.IGNORE_CASE), "Ricoh Theta") ?: "Ricoh Theta"

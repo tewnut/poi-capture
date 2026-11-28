@@ -766,8 +766,6 @@
     <string name="c360_screen_off">You can turn the screen off.</string>
     <string name="c360_discard_body">The ride is deleted from the phone and not sent.</string>
     <!-- Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4) -->
-    <string name="theta_control_label">Camera control</string>
-    <string name="theta_none">None</string>
     <string name="theta_name">Ricoh Theta</string>
     <string name="theta_hint">Camera on, Wi-Fi on. Serial: under the camera.</string>
     <string name="theta_serial">Serial or Wi-Fi name</string>
@@ -847,4 +845,44 @@
     <string name="summary_done">Done</string>
     <string name="summary_theta_shots">360 photos</string>
     <string name="summary_theta_skipped">skipped</string>
+    <!-- Camera 360 settings page, New ride line, serial reader, onboarding step -->
+    <string name="c360_title">Camera 360</string>
+    <string name="c360_your_camera">Your camera</string>
+    <string name="c360_model_none">None</string>
+    <string name="c360_model_gopro">GoPro MAX</string>
+    <string name="c360_model_insta">Insta360</string>
+    <string name="c360_model_theta">Ricoh Theta</string>
+    <string name="c360_model_other">Other</string>
+    <string name="c360_model_other_name">Other camera</string>
+    <string name="c360_none_hint">Pick one to record streets in 360°.</string>
+    <string name="c360_sync_note">Rides use the sync QR: after Start, show it to the camera.</string>
+    <string name="c360_theta_title">Pair the Theta</string>
+    <string name="c360_gopro_qr_title">Clock and GPS by QR</string>
+    <string name="c360_gopro_qr_sub">Needs GoPro Labs. Sets the clock, GPS on, 360 5.6K 30.</string>
+    <string name="c360_gopro_qr_show">Show the QR</string>
+    <string name="c360_gopro_qr_hint">Install GoPro Labs, then hold the code up to the GoPro</string>
+    <string name="c360_gopro_labs_link">Install GoPro Labs: gopro.github.io/labs</string>
+    <string name="c360_line_none">No camera chosen</string>
+    <string name="c360_choose">Choose camera</string>
+    <string name="c360_line_sync">%1$s · sync by QR</string>
+    <string name="c360_state_connected">connected</string>
+    <string name="c360_state_off">not connected</string>
+    <string name="c360_state_connecting">connecting…</string>
+    <string name="c360_state_lost">Wi-Fi lost</string>
+    <string name="c360_state_failed">can\'t connect</string>
+    <string name="c360_every">every %1$d m</string>
+    <string name="c360_paired">paired</string>
+    <string name="c360_not_paired">not paired</string>
+    <string name="serial_scan_open">Read serial</string>
+    <string name="serial_scan_hint">Point at the sticker under the camera</string>
+    <string name="serial_scan_searching">Looking for the serial…</string>
+    <string name="serial_scan_found">Serial: %1$s</string>
+    <string name="serial_scan_use">Use it</string>
+    <string name="serial_scan_cancel">Cancel</string>
+    <string name="serial_scan_need_camera">Camera permission needed</string>
+    <string name="onboarding_cam360_lead">Do you use a 360 camera?</string>
+    <string name="onboarding_cam360_no">No</string>
+    <string name="onboarding_cam360_no_sub">Phone camera only</string>
+    <string name="onboarding_cam360_yes">Yes</string>
+    <string name="onboarding_cam360_yes_sub">GoPro MAX, Insta360, Ricoh Theta…</string>
 </resources>

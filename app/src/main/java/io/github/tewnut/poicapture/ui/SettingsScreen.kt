@@ -49,6 +49,7 @@ private object Page {
     const val MAPS = "maps"
     const val TASKS = "tasks"
     const val UPLOAD = "upload"
+    const val CAMERA360 = "camera360"
     const val ADVANCED = "advanced"
     const val ABOUT = "about"
 }
@@ -129,6 +130,7 @@ fun SettingsScreen(onBack: () -> Unit, onReplayOnboarding: () -> Unit) {
                 }
             }
         }
+        Page.CAMERA360 -> Camera360Page(onBack = ::home)
         Page.ABOUT -> SettingsPage(stringResource(R.string.settings_about), ::home) { aboutPage(onReplayOnboarding) }
         else -> SettingsHome(id, onOpen = { page = it }, onBack = ::leave)
     }
@@ -164,6 +166,7 @@ private fun SettingsHome(contributorId: String, onOpen: (String) -> Unit, onBack
         NavItem("☁️", stringResource(R.string.upload_title),
             stringResource(if (uploadOk) R.string.settings_upload_connected else R.string.settings_upload_not_set),
             valueColor = if (uploadOk) Palette.Green else Palette.Blue) { onOpen(Page.UPLOAD) },   // not set: an invitation, not an error
+        NavItem("📷", stringResource(R.string.c360_title), camera360Value(ctx)) { onOpen(Page.CAMERA360) },
     )
     val items3 = listOf(
         NavItem("⚙️", stringResource(R.string.settings_advanced), stringResource(R.string.settings_advanced_sub)) { onOpen(Page.ADVANCED) },
@@ -174,6 +177,22 @@ private fun SettingsHome(contributorId: String, onOpen: (String) -> Unit, onBack
         item { NavGroup(items1) }
         item { NavGroup(items2) }
         item { NavGroup(items3) }
+    }
+}
+
+/** Settings' Camera 360 row: "Không dùng", "GoPro MAX", "Ricoh Theta X · đã ghép" (connected once) / "· chưa ghép". */
+@Composable
+private fun camera360Value(ctx: Context): String {
+    val model = remember { Prefs.camera360Model(ctx) }
+    return when (model) {
+        io.github.tewnut.poicapture.core.Camera360Model.NONE -> stringResource(R.string.c360_model_none)
+        io.github.tewnut.poicapture.core.Camera360Model.GOPRO -> stringResource(R.string.c360_model_gopro)
+        io.github.tewnut.poicapture.core.Camera360Model.INSTA360 -> stringResource(R.string.c360_model_insta)
+        io.github.tewnut.poicapture.core.Camera360Model.OTHER -> stringResource(R.string.c360_model_other_name)
+        io.github.tewnut.poicapture.core.Camera360Model.THETA -> {
+            val name = remember { Prefs.thetaModelName(ctx) }
+            thetaDisplayName(name) + " · " + stringResource(if (name.isNotBlank()) R.string.c360_paired else R.string.c360_not_paired)
+        }
     }
 }
 

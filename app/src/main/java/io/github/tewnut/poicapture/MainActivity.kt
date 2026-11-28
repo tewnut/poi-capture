@@ -141,11 +141,21 @@ object Prefs {
     fun satellite(ctx: Context): Boolean = sp(ctx).getBoolean("satellite", false)
     fun saveSatellite(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("satellite", v).apply()
     /** Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4), its serial / Wi-Fi name, password, spacing. */
-    fun thetaOn(ctx: Context): Boolean = sp(ctx).getBoolean("thetaOn", false)
+    fun thetaOn(ctx: Context): Boolean = camera360Model(ctx) == io.github.tewnut.poicapture.core.Camera360Model.THETA
+    /**
+     * The 360 camera chosen in Settings → Camera 360 (none / gopro / insta360 / theta / other). Before it existed the
+     * New ride sheet had a "control a Ricoh Theta" switch (`thetaOn`): on = theta.
+     */
+    fun camera360Model(ctx: Context): io.github.tewnut.poicapture.core.Camera360Model =
+        io.github.tewnut.poicapture.core.Camera360Model.of(sp(ctx).getString("camera360Model", null), sp(ctx).getBoolean("thetaOn", false))
+    fun saveCamera360Model(ctx: Context, m: io.github.tewnut.poicapture.core.Camera360Model) =
+        sp(ctx).edit().putString("camera360Model", m.json).remove("thetaOn").apply()
+    /** The Theta's model name from its last connect ("RICOH THETA X"), for Settings' row; "" = never connected. */
+    fun thetaModelName(ctx: Context): String = sp(ctx).getString("thetaModelName", "") ?: ""
+    fun saveThetaModelName(ctx: Context, v: String) = sp(ctx).edit().putString("thetaModelName", v).apply()
     /** Quét đường with a 360 camera (Camera: 360°) instead of the phone's camera. */
     fun use360(ctx: Context): Boolean = sp(ctx).getBoolean("use360", false)
     fun saveUse360(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("use360", v).apply()
-    fun saveThetaOn(ctx: Context, v: Boolean) = sp(ctx).edit().putBoolean("thetaOn", v).apply()
     fun thetaSerial(ctx: Context): String = sp(ctx).getString("thetaSerial", "") ?: ""
     /** Only a changed password is kept, encrypted like the upload token; empty = the serial's digits (Theta default). */
     fun thetaPassword(ctx: Context): String = sp(ctx).getString("thetaPassword", null)

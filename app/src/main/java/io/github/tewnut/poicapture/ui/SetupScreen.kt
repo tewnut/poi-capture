@@ -188,9 +188,11 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
     val rideKind = if (kind == SessionKind.SWEEP && use360) SessionKind.CAMERA360 else kind
     var holding by remember { mutableStateOf(Prefs.holding(ctx)) }
     var target by remember { mutableStateOf(Prefs.target(ctx)) }
-    // Camera 360: the phone controls a Ricoh Theta (docs/camera360.md §4)
-    var thetaOn by remember { mutableStateOf(Prefs.thetaOn(ctx)) }
+    // Camera 360: the camera chosen in Settings → Camera 360; with a Ricoh Theta the phone controls it (docs/camera360.md §4)
+    var cam360Model by remember { mutableStateOf(Prefs.camera360Model(ctx)) }
+    val thetaOn = cam360Model == io.github.tewnut.poicapture.core.Camera360Model.THETA
     var thetaEveryM by remember { mutableStateOf(Prefs.thetaEveryM(ctx)) }
+    var cam360Page by remember { mutableStateOf(false) }
     // leaving the setup without starting a Theta ride lets the camera's Wi-Fi go
     DisposableEffect(Unit) { onDispose { if (!io.github.tewnut.poicapture.capture.ThetaLink.forRide) io.github.tewnut.poicapture.capture.ThetaLink.release() } }
     var nearWays by remember { mutableStateOf<List<Way>?>(null) }
@@ -447,18 +449,19 @@ fun SetupScreen(onStart: (String) -> Unit, onOpenSettings: () -> Unit, onBack: (
                     // Camera 360: the phone only records where it went (docs/camera360.md §1)
                     if (expanded && rideKind == SessionKind.CAMERA360) {
                         Hint(stringResource(R.string.setup_camera360_hint))
+                        // the camera and its state in one line; Đổi / Chọn camera opens Settings → Camera 360 over the sheet
+                        Camera360SetupLine(cam360Model, thetaEveryM) { cam360Page = true }
+                        if (cam360Page) Camera360PageDialog(releaseOnLeave = false, onClose = {
+                            cam360Page = false
+                            cam360Model = Prefs.camera360Model(ctx)
+                            thetaEveryM = Prefs.thetaEveryM(ctx)
+                        })
                         // how to record, per camera (GoPro MAX / Ricoh Theta): the tab of the chosen control first
                         var guide by remember { mutableStateOf(false) }
                         androidx.compose.material3.TextButton(onClick = { guide = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
                             Text("📖 " + stringResource(R.string.guide360_open), fontWeight = FontWeight.Bold)
                         }
                         if (guide) Camera360Guide(initial = if (thetaOn) 1 else 0) { guide = false }
-                        Choice(stringResource(R.string.theta_control_label), listOf(false to stringResource(R.string.theta_none),
-                            true to stringResource(R.string.theta_name)), thetaOn) {
-                            thetaOn = it; Prefs.saveThetaOn(ctx, it)
-                            if (!it) io.github.tewnut.poicapture.capture.ThetaLink.release()
-                        }
-                        if (thetaOn) ThetaSetupCard(thetaEveryM) { thetaEveryM = it; Prefs.saveThetaEveryM(ctx, it) }
                     }
                     // outside every installed pack, but the catalogue has one here: suggest it (computed off the UI thread)
                     val suggest = packSuggestion

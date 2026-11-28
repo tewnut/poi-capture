@@ -743,8 +743,6 @@
     <string name="c360_screen_off">Có thể tắt màn hình.</string>
     <string name="c360_discard_body">Chuyến đi bị xoá khỏi điện thoại, không gửi đi.</string>
     <!-- Camera 360: điện thoại điều khiển Ricoh Theta (docs/camera360.md §4) -->
-    <string name="theta_control_label">Điều khiển camera</string>
-    <string name="theta_none">Không</string>
     <string name="theta_name">Ricoh Theta</string>
     <string name="theta_hint">Bật camera và Wi-Fi. Số serial ở đáy camera.</string>
     <string name="theta_serial">Số serial hoặc tên Wi-Fi</string>
@@ -824,4 +822,44 @@
     <string name="summary_done">Xong</string>
     <string name="summary_theta_shots">ảnh 360</string>
     <string name="summary_theta_skipped">bỏ lỡ</string>
+    <!-- Camera 360 settings page, New ride line, serial reader, onboarding step -->
+    <string name="c360_title">Camera 360</string>
+    <string name="c360_your_camera">Camera của bạn</string>
+    <string name="c360_model_none">Không dùng</string>
+    <string name="c360_model_gopro">GoPro MAX</string>
+    <string name="c360_model_insta">Insta360</string>
+    <string name="c360_model_theta">Ricoh Theta</string>
+    <string name="c360_model_other">Khác</string>
+    <string name="c360_model_other_name">Camera khác</string>
+    <string name="c360_none_hint">Chọn camera để quay đường 360°.</string>
+    <string name="c360_sync_note">Chuyến đi dùng mã QR đồng bộ: sau Bắt đầu, đưa mã trước camera.</string>
+    <string name="c360_theta_title">Ghép Ricoh Theta</string>
+    <string name="c360_gopro_qr_title">Cài giờ và GPS bằng mã QR</string>
+    <string name="c360_gopro_qr_sub">Cần GoPro Labs. Cài giờ, bật GPS, quay 360 5.6K 30.</string>
+    <string name="c360_gopro_qr_show">Hiện mã QR</string>
+    <string name="c360_gopro_qr_hint">Cài GoPro Labs, rồi đưa mã trước camera GoPro</string>
+    <string name="c360_gopro_labs_link">Cài GoPro Labs: gopro.github.io/labs</string>
+    <string name="c360_line_none">Chưa chọn camera</string>
+    <string name="c360_choose">Chọn camera</string>
+    <string name="c360_line_sync">%1$s · đồng bộ bằng mã QR</string>
+    <string name="c360_state_connected">đã kết nối</string>
+    <string name="c360_state_off">chưa kết nối</string>
+    <string name="c360_state_connecting">đang kết nối…</string>
+    <string name="c360_state_lost">mất Wi-Fi</string>
+    <string name="c360_state_failed">không kết nối được</string>
+    <string name="c360_every">mỗi %1$d m</string>
+    <string name="c360_paired">đã ghép</string>
+    <string name="c360_not_paired">chưa ghép</string>
+    <string name="serial_scan_open">Đọc số serial</string>
+    <string name="serial_scan_hint">Hướng vào nhãn dưới đáy camera</string>
+    <string name="serial_scan_searching">Đang tìm số serial…</string>
+    <string name="serial_scan_found">Số serial: %1$s</string>
+    <string name="serial_scan_use">Dùng số này</string>
+    <string name="serial_scan_cancel">Hủy</string>
+    <string name="serial_scan_need_camera">Cần quyền camera</string>
+    <string name="onboarding_cam360_lead">Bạn có dùng camera 360 không?</string>
+    <string name="onboarding_cam360_no">Không</string>
+    <string name="onboarding_cam360_no_sub">Chỉ dùng camera điện thoại</string>
+    <string name="onboarding_cam360_yes">Có</string>
+    <string name="onboarding_cam360_yes_sub">GoPro MAX, Insta360, Ricoh Theta…</string>
 </resources>

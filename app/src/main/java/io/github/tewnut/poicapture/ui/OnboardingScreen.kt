@@ -12,6 +12,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.StringRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
@@ -75,11 +76,11 @@ import io.github.tewnut.poicapture.net.RoadSource
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private enum class Step { LANGUAGE, WELCOME, PERMISSIONS, ROADS, READY, KEY }
+private enum class Step { LANGUAGE, WELCOME, PERMISSIONS, ROADS, READY, CAM360, KEY }
 
 /**
  * First run, once per phone: language → what the app does → permissions → offline road data for where the contributor
- * is → the ways to ride → the codes from the team (access key by QR code, contributor ID) on one page.
+ * is → the ways to ride → a 360 camera or not (optional) → the codes from the team (access key by QR code, contributor ID) on one page.
  * Every step is a must; all of it can be changed later in
  * Settings.
  */
@@ -107,7 +108,9 @@ fun OnboardingScreen(onDone: () -> Unit) {
             Step.WELCOME -> WelcomeStep { step = Step.PERMISSIONS }
             Step.PERMISSIONS -> PermissionsStep(ctx) { step = Step.ROADS }
             Step.ROADS -> RoadsStep(ctx) { step = Step.READY }
-            Step.READY -> ReadyStep(ctx) { step = Step.KEY }
+            Step.READY -> ReadyStep(ctx) { step = Step.CAM360 }
+            // optional: a 360 camera, set up on Settings → Camera 360's page; Không skips it
+            Step.CAM360 -> Cam360Step { step = Step.KEY }
             // last: the team's codes (the access key by the admin's QR code, and the optional contributor ID)
             Step.KEY -> KeyStep { Prefs.setOnboarded(ctx, true); onDone() }
         }
@@ -445,6 +448,28 @@ private fun ReadyStep(ctx: Context, onDone: () -> Unit) {
         }
         Hint(stringResource(R.string.onboarding_ready_after))
     }
+}
+
+// ---------------------------------------------------------------- 4c. a 360 camera (optional)
+
+@Composable
+private fun Cam360Step(onNext: () -> Unit) {
+    var page by remember { mutableStateOf(false) }
+    StepFrame(stringResource(R.string.onboarding_cam360_lead), null, stringResource(R.string.onboarding_continue), onNext = onNext) {
+        WhiteCard {
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(role = Role.Button, onClick = onNext).padding(vertical = 6.dp, horizontal = 4.dp)) {
+                IconRow("📱", stringResource(R.string.onboarding_cam360_no), stringResource(R.string.onboarding_cam360_no_sub))
+            }
+            HorizontalDivider(color = Palette.Line)
+            Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .clickable(role = Role.Button) { page = true }.padding(vertical = 6.dp, horizontal = 4.dp)) {
+                IconRow("📷", stringResource(R.string.onboarding_cam360_yes), stringResource(R.string.onboarding_cam360_yes_sub))
+            }
+        }
+    }
+    // the same page as Settings → Camera 360; closing it goes on
+    if (page) Camera360PageDialog(onClose = { page = false; onNext() })
 }
 
 @Composable
